@@ -22,7 +22,7 @@ func main() {
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},
-		BackgroundColour: &options.RGBA{R: 16, G: 20, B: 26, A: 1},
+		BackgroundColour: &options.RGBA{R: 23, G: 29, B: 30, A: 1},
 		// Only one copy may run: two would fight over UDP 1343.
 		SingleInstanceLock: &options.SingleInstanceLock{UniqueId: "openlink-browser-4f1c2a"},
 		OnStartup:          app.startup,

@@ -16,6 +16,7 @@
   import type { main } from '../wailsjs/go/models';
   import SessionBar from './SessionBar.svelte';
   import SettingsPanel from './SettingsPanel.svelte';
+  import logo from './assets/logo-full.png';
 
   let servers = $state<main.ServerView[]>([]);
   let settings = $state<main.Settings | null>(null);
@@ -151,7 +152,7 @@
 
 <div class="app">
   <header>
-    <div class="brand">OpenLink</div>
+    <img class="brand" src={logo} alt="OpenLink" draggable="false" />
     <div class="meta">
       <span title="OpenLink version">{appVersion}</span>
       <span title="Your game version">{localBuild ? `Game ${localBuild.split('.hi_')[0]}` : 'Game not found'}</span>
@@ -274,7 +275,7 @@
     border-bottom: 1px solid var(--line);
     background: var(--panel);
   }
-  .brand { font-weight: 700; font-size: 18px; letter-spacing: 0.04em; color: var(--accent); }
+  .brand { display: block; height: 32px; width: auto; user-select: none; }
   .meta { display: flex; gap: 10px; font-size: 12px; color: var(--muted); }
   .spacer { flex: 1; }
   .ghost { background: transparent; border: 1px solid var(--line); color: var(--text); }
@@ -283,7 +284,7 @@
     align-items: center;
     gap: 10px;
     padding: 8px 18px;
-    background: color-mix(in srgb, var(--accent) 14%, var(--panel));
+    background: var(--button-bg-hover);
     border-bottom: 1px solid var(--line);
   }
   .link { background: none; border: none; padding: 0; color: var(--accent); font-weight: 600; }
@@ -320,7 +321,7 @@
   .name { font-weight: 600; }
   .state { color: var(--muted); font-size: 13px; }
   .act { text-align: right; width: 1%; white-space: nowrap; }
-  tr.dim .name { color: var(--muted); }
-  tr.current { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+  tr.dim .name { color: var(--faint); }
+  tr.current { background: color-mix(in srgb, var(--button-bg) 45%, transparent); }
   .badge { font-size: 12px; color: var(--accent); }
 </style>

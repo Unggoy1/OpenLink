@@ -10,7 +10,7 @@ Requires Go 1.27+, Node/npm, and the Wails CLI (`go install github.com/wailsapp/
 
 ```
 wails dev       # live reload; the UI is also served at http://localhost:34115
-wails build     # writes build/bin/browser.exe
+wails build     # writes build/bin/OpenLink.exe
 ```
 
 Testing against a local directory and simulated host, without touching the game's ports:

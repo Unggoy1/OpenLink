@@ -7,14 +7,37 @@ import (
 	"errors"
 	"flag"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
 	"halocommunity/internal/directory"
+	"halocommunity/internal/sim"
 )
+
+// probeHost sends up to three probes to a listed game endpoint.
+func probeHost(ctx context.Context, host string, port int) bool {
+	addr, err := net.ResolveUDPAddr("udp", net.JoinHostPort(host, strconv.Itoa(port)))
+	if err != nil {
+		return false
+	}
+	res, err := sim.Probe(ctx, addr, 3, 1500*time.Millisecond)
+	return err == nil && res.Received > 0
+}
+
+func envInt(k string, def int) int {
+	if v, err := strconv.Atoi(os.Getenv(k)); err == nil {
+		return v
+	}
+	return def
+}
+
+// version is set at build time (-ldflags "-X main.version=v0.1.0").
+var version = "dev"
 
 func main() {
 	defListen := ":8080"
@@ -25,14 +48,16 @@ func main() {
 	key := flag.String("register-key", os.Getenv("HICOMM_REGISTER_KEY"), "if set, hosts must send this key to register (env HICOMM_REGISTER_KEY)")
 	ipHeader := flag.String("client-ip-header", os.Getenv("HICOMM_CLIENT_IP_HEADER"), "header carrying the client IP from a trusted reverse proxy, e.g. X-Forwarded-For (rightmost entry is used) or X-Real-IP (env HICOMM_CLIENT_IP_HEADER)")
 	trustProxy := flag.Bool("trust-proxy", false, "shorthand for -client-ip-header X-Forwarded-For")
+	hops := flag.Int("client-ip-hops", envInt("HICOMM_CLIENT_IP_HOPS", 1), "with X-Forwarded-For: number of trusted proxies that append to it; the client is that many entries from the right (env HICOMM_CLIENT_IP_HOPS; likely 2 on Railway: check /v1/whoami?debug=1)")
 	ttl := flag.Duration("ttl", 45*time.Second, "drop a listing after this long without a heartbeat")
+	probeEvery := flag.Duration("probe-interval", time.Minute, "how often to check that proxy-mode servers answer on their game port (0 = never)")
 	flag.Parse()
 	if *trustProxy && *ipHeader == "" {
 		*ipHeader = "X-Forwarded-For"
 	}
 
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
-	dir := directory.New(directory.Config{RegisterKey: *key, ClientIPHeader: *ipHeader, TTL: *ttl})
+	dir := directory.New(directory.Config{RegisterKey: *key, ClientIPHeader: *ipHeader, ClientIPHops: *hops, TTL: *ttl})
 	srv := &http.Server{Addr: *listen, Handler: logRequests(log, dir),
 		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second}
 
@@ -50,6 +75,20 @@ func main() {
 			}
 		}
 	}()
+	if *probeEvery > 0 {
+		go func() {
+			t := time.NewTicker(15 * time.Second)
+			defer t.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-t.C:
+					dir.CheckReachability(ctx, *probeEvery, probeHost)
+				}
+			}
+		}()
+	}
 	go func() {
 		<-ctx.Done()
 		shut, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -57,7 +96,7 @@ func main() {
 		srv.Shutdown(shut)
 	}()
 
-	log.Info("directory listening", "addr", *listen, "register_key", *key != "", "client_ip_header", *ipHeader, "ttl", *ttl)
+	log.Info("directory listening", "version", version, "addr", *listen, "register_key", *key != "", "client_ip_header", *ipHeader, "client_ip_hops", *hops, "ttl", *ttl)
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Error("listen failed", "err", err)
 		os.Exit(1)

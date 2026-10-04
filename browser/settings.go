@@ -9,14 +9,15 @@ import (
 )
 
 // DefaultDirectory is the community directory used until the player changes it.
-// Empty until the public directory is deployed; HICOMM_DIRECTORY overrides it.
-const DefaultDirectory = ""
+// HICOMM_DIRECTORY overrides it.
+const DefaultDirectory = "https://openlink.unggoy.xyz"
 
 // Settings are stored per user.
 type Settings struct {
-	Directory  string `json:"directory"`
-	Mode       string `json:"mode"`       // loopback or broadcast
-	InstallDir string `json:"installDir"` // empty = search the usual Steam libraries
+	Directory  string   `json:"directory"`
+	Mode       string   `json:"mode"`       // loopback or broadcast
+	InstallDir string   `json:"installDir"` // empty = search the usual Steam libraries
+	Favorites  []string `json:"favorites"`  // server keys (host:port), stable across re-registration
 }
 
 func settingsPath() (string, error) {

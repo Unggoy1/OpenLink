@@ -43,22 +43,38 @@ type Heartbeat struct {
 	Players     int    `json:"players"`          // -1 when unknown
 	Beacon      []byte `json:"beacon,omitempty"` // base64 in JSON
 	BeaconAgeMS int64  `json:"beacon_age_ms"`    // age when the heartbeat was sent
+	Proxy       bool   `json:"proxy"`            // the agent fronts the server and answers probes
 }
+
+// Reachability values in ServerInfo.
+const (
+	ReachUnknown     = "unknown"     // not checked (only proxy-mode hosts can be probed)
+	ReachOK          = "ok"          // the directory's probe was answered
+	ReachUnreachable = "unreachable" // probes went unanswered: port forward or firewall
+)
 
 // ServerInfo is the public view of a listing.
 type ServerInfo struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	Host        string    `json:"host"`
-	Port        int       `json:"port"`
-	Build       string    `json:"build"`
-	Region      string    `json:"region,omitempty"`
-	Status      string    `json:"status"`
-	Players     int       `json:"players"`
-	Joinable    bool      `json:"joinable"`
-	LastSeen    time.Time `json:"last_seen"`
-	BeaconAgeMS int64     `json:"beacon_age_ms"`
+	ID           string    `json:"id"`
+	Name         string    `json:"name"`
+	Host         string    `json:"host"`
+	Port         int       `json:"port"`
+	Build        string    `json:"build"`
+	Region       string    `json:"region,omitempty"`
+	Status       string    `json:"status"`
+	Players      int       `json:"players"`
+	Joinable     bool      `json:"joinable"`
+	LastSeen     time.Time `json:"last_seen"`
+	BeaconAgeMS  int64     `json:"beacon_age_ms"`
+	Proxy        bool      `json:"proxy"`
+	Reachability string    `json:"reachability"` // ReachUnknown, ReachOK or ReachUnreachable
+	CheckedAt    time.Time `json:"checked_at,omitempty"`
 }
+
+// ProbePrefix marks probe datagrams. A host agent in proxy mode (and the
+// simulator) answers them by echoing; game datagrams never start with it
+// (they begin with a random 12-byte nonce).
+const ProbePrefix = "HICOMM-PROBE "
 
 // BeaconResponse returns the latest beacon for a server.
 type BeaconResponse struct {

@@ -105,3 +105,22 @@ func TestSessionEndToEnd(t *testing.T) {
 	}
 	c.Close()
 }
+
+func TestPing(t *testing.T) {
+	srv, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go sim.Echo(ctx, srv)
+	rtt, ok := Ping(ctx, Server{Host: "127.0.0.1", Port: srv.LocalAddr().(*net.UDPAddr).Port})
+	if !ok || rtt < 0 || rtt > time.Second { // loopback can be below the Windows clock resolution (0)
+		t.Fatalf("ping %v %v", rtt, ok)
+	}
+	dead, _ := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)}) // never answers
+	defer dead.Close()
+	if _, ok := Ping(ctx, Server{Host: "127.0.0.1", Port: dead.LocalAddr().(*net.UDPAddr).Port}); ok {
+		t.Fatal("silent endpoint reported as answering")
+	}
+}

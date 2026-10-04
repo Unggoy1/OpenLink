@@ -3,7 +3,10 @@ package main
 import (
 	"context"
 	"errors"
+	"net"
+	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -32,14 +35,18 @@ func (a *App) shutdown(context.Context) { a.Leave() }
 
 // ServerView is a listing as shown in the browser.
 type ServerView struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	Region     string `json:"region"`
-	Status     string `json:"status"`
-	Joinable   bool   `json:"joinable"`
-	Build      string `json:"build"`
-	BuildMatch bool   `json:"buildMatch"` // false also when the local build is unknown
-	Players    int    `json:"players"`    // -1 = unknown
+	ID           string `json:"id"`
+	Key          string `json:"key"` // host:port; stable identity for favourites
+	Name         string `json:"name"`
+	Region       string `json:"region"`
+	Status       string `json:"status"`
+	Joinable     bool   `json:"joinable"`
+	Build        string `json:"build"`
+	BuildMatch   bool   `json:"buildMatch"`   // false also when the local build is unknown
+	Players      int    `json:"players"`      // -1 = unknown
+	Reachability string `json:"reachability"` // unknown, ok, unreachable (directory's check)
+	PingMS       int    `json:"pingMs"`       // -1 = no answer (host not in proxy mode)
+	Favorite     bool   `json:"favorite"`
 }
 
 // StatusView describes the active session.
@@ -58,10 +65,13 @@ type StatusView struct {
 func (a *App) GetSettings() Settings {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return a.settings
+	s := a.settings
+	s.Favorites = slices.Clone(s.Favorites)
+	return s
 }
 
-// SaveSettings validates, stores and applies settings.
+// SaveSettings validates, stores and applies settings. Favourites are kept as
+// they are; change them with SetFavorite.
 func (a *App) SaveSettings(s Settings) error {
 	s.Directory = strings.TrimRight(strings.TrimSpace(s.Directory), "/")
 	s.InstallDir = strings.TrimSpace(s.InstallDir)
@@ -71,12 +81,29 @@ func (a *App) SaveSettings(s Settings) error {
 	if s.Directory != "" && !strings.HasPrefix(s.Directory, "https://") && !strings.HasPrefix(s.Directory, "http://") {
 		return errors.New("the directory address must start with https://")
 	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	s.Favorites = a.settings.Favorites
 	if err := saveSettings(s); err != nil {
 		return err
 	}
-	a.mu.Lock()
 	a.settings = s
-	a.mu.Unlock()
+	return nil
+}
+
+// SetFavorite marks or unmarks a server (by key) as a favourite.
+func (a *App) SetFavorite(key string, on bool) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	s := a.settings
+	s.Favorites = slices.DeleteFunc(slices.Clone(s.Favorites), func(k string) bool { return k == key })
+	if on {
+		s.Favorites = append(s.Favorites, key)
+	}
+	if err := saveSettings(s); err != nil {
+		return err
+	}
+	a.settings = s
 	return nil
 }
 
@@ -85,7 +112,8 @@ func (a *App) LocalBuild() string {
 	return connect.LocalBuild(a.GetSettings().InstallDir)
 }
 
-// ListServers fetches all listings, joinable and matching-build first.
+// ListServers fetches all listings and pings the ones that answer probes.
+// Favourites come first, then joinable servers on the player's build.
 func (a *App) ListServers() ([]ServerView, error) {
 	s := a.GetSettings()
 	if s.Directory == "" {
@@ -98,11 +126,30 @@ func (a *App) ListServers() ([]ServerView, error) {
 		return nil, err
 	}
 	local := connect.LocalBuild(s.InstallDir)
-	out := make([]ServerView, 0, len(servers))
-	for _, sv := range servers {
-		out = append(out, ServerView{ID: sv.ID, Name: sv.Name, Region: sv.Region, Status: sv.Status,
-			Joinable: sv.Joinable, Build: sv.Build, BuildMatch: local != "" && sv.Build == local, Players: sv.Players})
+	out := make([]ServerView, len(servers))
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 8)
+	for i, sv := range servers {
+		key := net.JoinHostPort(sv.Host, strconv.Itoa(sv.Port))
+		out[i] = ServerView{ID: sv.ID, Key: key, Name: sv.Name, Region: sv.Region, Status: sv.Status,
+			Joinable: sv.Joinable, Build: sv.Build, BuildMatch: local != "" && sv.Build == local, Players: sv.Players,
+			Reachability: sv.Reachability, PingMS: -1, Favorite: slices.Contains(s.Favorites, key)}
+		if !sv.Proxy {
+			continue // only proxy-mode hosts answer probes
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			pctx, pcancel := context.WithTimeout(ctx, 3*time.Second)
+			defer pcancel()
+			if rtt, ok := connect.Ping(pctx, sv); ok {
+				out[i].PingMS = int(rtt.Milliseconds())
+			}
+		}()
 	}
+	wg.Wait()
 	sort.SliceStable(out, func(i, j int) bool {
 		ri, rj := rank(out[i]), rank(out[j])
 		if ri != rj {
@@ -114,14 +161,18 @@ func (a *App) ListServers() ([]ServerView, error) {
 }
 
 func rank(s ServerView) int {
+	r := 0
+	if !s.Favorite {
+		r += 4
+	}
 	switch {
 	case s.Joinable && s.BuildMatch:
-		return 0
 	case s.Joinable:
-		return 1
+		r++
 	default:
-		return 2
+		r += 2
 	}
+	return r
 }
 
 // Join stops any current session and starts one for the server with this ID.

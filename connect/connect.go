@@ -18,6 +18,7 @@ import (
 	"halocommunity/internal/directory"
 	"halocommunity/internal/game"
 	"halocommunity/internal/relay"
+	"halocommunity/internal/sim"
 	"halocommunity/internal/udpx"
 )
 
@@ -202,4 +203,23 @@ func (ss *Session) setErr(s string) {
 	ss.mu.Lock()
 	ss.lastErr = s
 	ss.mu.Unlock()
+}
+
+// Ping measures the round trip to a server's game endpoint with probe
+// datagrams. Only proxy-mode hosts (and the simulator) answer probes; for
+// others ok is false. rtt is the best of the probes that came back.
+func Ping(ctx context.Context, s Server) (rtt time.Duration, ok bool) {
+	addr, err := net.ResolveUDPAddr("udp", net.JoinHostPort(s.Host, strconv.Itoa(s.Port)))
+	if err != nil {
+		return 0, false
+	}
+	res, err := sim.Probe(ctx, addr, 3, 800*time.Millisecond)
+	if err != nil || res.Received == 0 {
+		return 0, false
+	}
+	best := res.RTTs[0]
+	for _, r := range res.RTTs[1:] {
+		best = min(best, r)
+	}
+	return best, true
 }

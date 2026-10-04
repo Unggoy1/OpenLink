@@ -23,12 +23,16 @@ import (
 	"halocommunity/internal/sim"
 )
 
+// version is set at build time (-ldflags "-X main.version=v0.1.0").
+var version = "dev"
+
 const usage = `hi-connector — join community Halo Infinite servers
 
 usage:
   hi-connector [flags] list               list servers
   hi-connector [flags] join <id|name>     bring a server onto your LAN browser
-  hi-connector [flags] probe <id|name>    check that a host running -simulate is reachable
+  hi-connector [flags] probe <id|name>    check that a host answers probes (proxy mode or -simulate)
+  hi-connector version
 
 flags:
 `
@@ -58,6 +62,9 @@ func main() {
 
 	var err error
 	switch args[0] {
+	case "version":
+		fmt.Println(version)
+		return
 	case "list":
 		err = list(ctx, dc, localBuild, *all)
 	case "join", "probe":
@@ -167,7 +174,7 @@ func probe(ctx context.Context, s api.ServerInfo) error {
 	}
 	fmt.Println()
 	if res.Received == 0 {
-		fmt.Println("no echo: the host is not running -simulate, or UDP", s.Port, "is not reachable (port forward / firewall)")
+		fmt.Println("no echo: the host is not in proxy mode (or -simulate), or UDP", s.Port, "is not reachable (port forward / firewall)")
 	}
 	return nil
 }

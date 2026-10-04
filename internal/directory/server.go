@@ -4,6 +4,7 @@
 package directory
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/hex"
@@ -32,10 +33,17 @@ type Config struct {
 	// from the client and can be forged. Any other header (e.g. X-Real-IP) is
 	// used as-is, so only name one your proxy always overwrites.
 	ClientIPHeader string
-	TTL            time.Duration // listing expiry without heartbeat
-	MaxServers     int
-	MaxPerIP       int
-	Now            func() time.Time
+	// ClientIPHops is how many trusted proxies append to X-Forwarded-For
+	// (default 1). The client address is the hops-th entry from the right.
+	// Some platforms (apparently Railway) have an outer edge layer in front of
+	// their proxy and need 2; /v1/whoami?debug=1 shows the chain. Set it to the
+	// number of proxies that always append; a larger value would let clients
+	// choose their own address.
+	ClientIPHops int
+	TTL          time.Duration // listing expiry without heartbeat
+	MaxServers   int
+	MaxPerIP     int
+	Now          func() time.Time
 }
 
 type entry struct {
@@ -72,8 +80,19 @@ func New(cfg Config) *Server {
 	s.mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("ok\n")) })
 	// whoami shows the address the directory attributes to the caller, so an
 	// operator can check the proxy setup and a host can learn its public IP.
+	// With ?debug=1 it also echoes the caller's own forwarding headers, to work
+	// out which header and hop count a hosting platform needs.
 	s.mux.HandleFunc("GET /v1/whoami", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]string{"ip": s.clientIP(r)})
+		out := map[string]string{"ip": s.clientIP(r)}
+		if r.URL.Query().Get("debug") == "1" {
+			out["peer"] = r.RemoteAddr
+			for _, h := range []string{"X-Forwarded-For", "X-Real-Ip", "Forwarded", "True-Client-Ip", "Cf-Connecting-Ip", "X-Envoy-External-Address"} {
+				if v := strings.Join(r.Header.Values(h), ", "); v != "" {
+					out[h] = v
+				}
+			}
+		}
+		writeJSON(w, http.StatusOK, out)
 	})
 	s.mux.HandleFunc("POST /v1/servers", s.register)
 	s.mux.HandleFunc("PUT /v1/servers/{id}", s.heartbeat)
@@ -149,7 +168,7 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 	}
 	s.servers[id] = &entry{
 		info: api.ServerInfo{ID: id, Name: req.Name, Host: req.Host, Port: req.Port, Build: req.Build,
-			Region: req.Region, Status: "starting", Players: -1, LastSeen: now},
+			Region: req.Region, Status: "starting", Players: -1, LastSeen: now, Reachability: api.ReachUnknown},
 		token: tok, ownerIP: ip,
 	}
 	writeJSON(w, http.StatusCreated, api.RegisterResponse{ID: id, Token: tok, Host: req.Host})
@@ -214,6 +233,10 @@ func (s *Server) heartbeat(w http.ResponseWriter, r *http.Request) {
 	e.info.LastSeen = now
 	e.info.Status = hb.Status
 	e.info.Players = hb.Players
+	if e.info.Proxy != hb.Proxy {
+		e.info.Proxy = hb.Proxy
+		e.info.Reachability, e.info.CheckedAt = api.ReachUnknown, time.Time{}
+	}
 	if len(hb.Beacon) > 0 {
 		e.beacon = append(e.beacon[:0], hb.Beacon...)
 		e.beaconAt = now.Add(-time.Duration(max(hb.BeaconAgeMS, 0)) * time.Millisecond)
@@ -284,7 +307,12 @@ func (s *Server) clientIP(r *http.Request) string {
 		v := strings.Join(r.Header.Values(h), ",")
 		if strings.EqualFold(h, "X-Forwarded-For") {
 			parts := strings.Split(v, ",")
-			v = parts[len(parts)-1]
+			hops := max(s.cfg.ClientIPHops, 1)
+			if len(parts) < hops {
+				v = "" // fewer entries than trusted proxies: not via the proxy chain
+			} else {
+				v = parts[len(parts)-hops]
+			}
 		}
 		if ip := normIP(strings.TrimSpace(v)); ip != "" {
 			return ip
@@ -329,4 +357,49 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 
 func httpError(w http.ResponseWriter, code int, msg string) {
 	writeJSON(w, code, map[string]string{"error": msg})
+}
+
+// ProbeFunc reports whether host:port answers a probe.
+type ProbeFunc func(ctx context.Context, host string, port int) bool
+
+// CheckReachability probes every proxy-mode listing not checked within
+// interval and records the result. Only listed endpoints are probed, never an
+// address a caller supplies directly, so the directory cannot be used to send
+// traffic at arbitrary targets. Call it periodically.
+func (s *Server) CheckReachability(ctx context.Context, interval time.Duration, probe ProbeFunc) {
+	type target struct {
+		id, host string
+		port     int
+	}
+	now := s.cfg.Now()
+	var due []target
+	s.mu.Lock()
+	for id, e := range s.servers {
+		if e.info.Proxy && now.Sub(e.info.CheckedAt) >= interval {
+			due = append(due, target{id, e.info.Host, e.info.Port})
+		}
+	}
+	s.mu.Unlock()
+
+	sem := make(chan struct{}, 8) // at most 8 probes in flight
+	var wg sync.WaitGroup
+	for _, t := range due {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			ok := probe(ctx, t.host, t.port)
+			s.mu.Lock()
+			if e, found := s.servers[t.id]; found && e.info.Host == t.host && e.info.Port == t.port {
+				e.info.Reachability = api.ReachUnreachable
+				if ok {
+					e.info.Reachability = api.ReachOK
+				}
+				e.info.CheckedAt = s.cfg.Now()
+			}
+			s.mu.Unlock()
+		}()
+	}
+	wg.Wait()
 }

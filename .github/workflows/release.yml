@@ -13,6 +13,8 @@ permissions:
 
 env:
   WAILS_VERSION: v2.16.0 # keep in step with browser/go.mod
+  # Stamped into every program (main.version): the tag for releases, else dev-<commit>.
+  VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('dev-{0}', github.sha) }}
 
 jobs:
   test:
@@ -46,7 +48,7 @@ jobs:
           mkdir -p dist
           build() { # goos goarch program
             local ext=""; [ "$1" = windows ] && ext=".exe"
-            GOOS=$1 GOARCH=$2 go build -trimpath -ldflags "-s -w" \
+            GOOS=$1 GOARCH=$2 go build -trimpath -ldflags "-s -w -X main.version=$VERSION" \
               -o "dist/$3-$1-$2$ext" "./cmd/$3"
           }
           build windows amd64 hi-connector
@@ -82,7 +84,7 @@ jobs:
         run: |
           npm ci
           npm run check
-      - run: wails build -clean -platform windows/amd64 -o OpenLink-windows-amd64.exe
+      - run: wails build -clean -platform windows/amd64 -o OpenLink-windows-amd64.exe -ldflags "-X main.version=$env:VERSION"
       - uses: actions/upload-artifact@v4
         with:
           name: browser-windows
@@ -107,7 +109,7 @@ jobs:
           node-version: 22
       - run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
       - run: go install github.com/wailsapp/wails/v2/cmd/wails@${{ env.WAILS_VERSION }}
-      - run: wails build -clean -platform linux/amd64 -tags webkit2_41 -o OpenLink-linux-amd64
+      - run: wails build -clean -platform linux/amd64 -tags webkit2_41 -o OpenLink-linux-amd64 -ldflags "-X main.version=$VERSION"
       - uses: actions/upload-artifact@v4
         with:
           name: browser-linux

@@ -4,7 +4,10 @@ FROM golang:1.27-alpine AS build
 WORKDIR /src
 COPY go.mod ./
 COPY . .
-RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/hi-directory ./cmd/hi-directory
+# Railway passes the commit as RAILWAY_GIT_COMMIT_SHA; other builders can set VERSION.
+ARG RAILWAY_GIT_COMMIT_SHA=dev
+ARG VERSION=${RAILWAY_GIT_COMMIT_SHA}
+RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /out/hi-directory ./cmd/hi-directory
 
 FROM scratch
 COPY --from=build /out/hi-directory /hi-directory

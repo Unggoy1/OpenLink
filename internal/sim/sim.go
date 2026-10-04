@@ -12,11 +12,13 @@ import (
 	"fmt"
 	"net"
 	"time"
+
+	"halocommunity/internal/api"
 )
 
 const (
 	// ProbePrefix marks probe datagrams that the simulated server echoes.
-	ProbePrefix = "HICOMM-PROBE "
+	ProbePrefix = api.ProbePrefix
 	// BeaconPrefix marks simulated beacons.
 	BeaconPrefix = "HICOMM-SIMBEACON "
 )
@@ -33,10 +35,19 @@ func Echo(ctx context.Context, conn *net.UDPConn) {
 			}
 			continue
 		}
-		if n <= 256 && bytes.HasPrefix(buf[:n], []byte(ProbePrefix)) {
-			conn.WriteToUDP(buf[:n], from)
+		if reply, ok := Answer(buf[:n]); ok {
+			conn.WriteToUDP(reply, from)
 		}
 	}
+}
+
+// Answer returns the echo for a probe datagram. It suits relay.Forwarder's
+// Intercept hook, so a proxy-mode host agent answers probes on the game port.
+func Answer(b []byte) ([]byte, bool) {
+	if len(b) <= 256 && bytes.HasPrefix(b, []byte(ProbePrefix)) {
+		return b, true
+	}
+	return nil, false
 }
 
 // Beacon returns a simulated beacon: the prefix plus random bytes, sized like

@@ -195,3 +195,66 @@ func TestForgedForwardedForCannotListThirdParty(t *testing.T) {
 		t.Fatalf("forged XFF registration: got %d %s", w.Code, w.Body.String())
 	}
 }
+
+func TestClientIPHops(t *testing.T) {
+	s := New(Config{ClientIPHeader: "X-Forwarded-For", ClientIPHops: 2})
+	r := httptest.NewRequest("GET", "/", nil)
+	r.RemoteAddr = "100.64.0.14:1"
+	// client forged "203.0.113.1"; edge appended the client, then the outer layer appended itself
+	r.Header.Set("X-Forwarded-For", "203.0.113.1, 198.51.100.7, 79.127.217.66")
+	if got := s.clientIP(r); got != "198.51.100.7" {
+		t.Fatalf("hops=2 got %s", got)
+	}
+	r.Header.Set("X-Forwarded-For", "79.127.217.66") // fewer entries than hops: ignore header
+	if got := s.clientIP(r); got != "100.64.0.14" {
+		t.Fatalf("short chain got %s", got)
+	}
+}
+
+func TestReachability(t *testing.T) {
+	s, c, clk := setup(t, Config{RegisterKey: "k"})
+	ctx := context.Background()
+	up, _ := c.Register(ctx, api.RegisterRequest{Name: "Up", Host: "192.0.2.1", Port: 1343, Build: "b"})
+	down, _ := c.Register(ctx, api.RegisterRequest{Name: "Down", Host: "192.0.2.2", Port: 1343, Build: "b"})
+	plain, _ := c.Register(ctx, api.RegisterRequest{Name: "Plain", Host: "192.0.2.3", Port: 1343, Build: "b"})
+	for _, r := range []api.RegisterResponse{up, down} {
+		c.Heartbeat(ctx, r.ID, r.Token, api.Heartbeat{Status: "ready", Proxy: true})
+	}
+	c.Heartbeat(ctx, plain.ID, plain.Token, api.Heartbeat{Status: "ready"})
+
+	var pmu sync.Mutex
+	var probed []string
+	probe := func(_ context.Context, host string, _ int) bool {
+		pmu.Lock()
+		probed = append(probed, host)
+		pmu.Unlock()
+		return host == "192.0.2.1"
+	}
+	s.CheckReachability(ctx, time.Minute, func(ctx context.Context, h string, p int) bool { return probe(ctx, h, p) })
+	got := map[string]string{}
+	list, _ := c.List(ctx, "")
+	for _, sv := range list {
+		got[sv.Name] = sv.Reachability
+	}
+	if got["Up"] != api.ReachOK || got["Down"] != api.ReachUnreachable || got["Plain"] != api.ReachUnknown {
+		t.Fatalf("reachability %v", got)
+	}
+	if len(probed) != 2 {
+		t.Fatalf("probed %v (non-proxy hosts must not be probed)", probed)
+	}
+	probed = nil
+	s.CheckReachability(ctx, time.Minute, probe) // within interval: nothing due
+	clk.Add(2 * time.Minute)
+	s.CheckReachability(ctx, time.Minute, probe)
+	if len(probed) != 2 {
+		t.Fatalf("recheck probed %v", probed)
+	}
+	// Leaving proxy mode resets the result.
+	c.Heartbeat(ctx, up.ID, up.Token, api.Heartbeat{Status: "ready", Proxy: false})
+	list, _ = c.List(ctx, "")
+	for _, sv := range list {
+		if sv.Name == "Up" && sv.Reachability != api.ReachUnknown {
+			t.Fatalf("after leaving proxy mode: %s", sv.Reachability)
+		}
+	}
+}

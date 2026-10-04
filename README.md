@@ -38,31 +38,13 @@ The connector forwards game packets unchanged. They are encrypted by the game, a
 
 ## Hosting a server
 
-1. **Forward UDP 1343** on your router to the server machine, and allow it in the Windows firewall.
-2. **Check reachability before involving the game.** Run the agent in simulation mode, then ask someone outside your network to probe it:
-   ```
-   hi-hostagent -simulate -directory https://DIRECTORY -name "My Server"
-   hi-connector -directory https://DIRECTORY probe "My Server"      (run by the other person)
-   ```
-   `5/5 echoes` means your port forward works. `0/5` means UDP 1343 is not reaching you.
-3. **Run the real server.** Stop the simulation, then:
-   ```
-   hi-hostagent -directory https://DIRECTORY -name "My Server" -region us-west
-   ```
-   The agent finds the game install, then starts `HaloInfinite.exe -server -console -lan -lan_sandbox RETAIL` in its own console window. Within a few seconds it logs `server owns UDP 1343` and `listening for server beacons`, and the server shows as joinable in the directory.
+Full guide: **[docs/HOSTING.md](docs/HOSTING.md)**. In short:
 
-Useful agent options:
+1. Forward **UDP 1343** to the server PC and allow `hi-hostagent.exe` in the Windows firewall.
+2. Check reachability with `hi-hostagent -simulate -directory https://DIRECTORY -name "My Server"`. The agent logs whether the directory could reach your port.
+3. Save your settings once with `hi-hostagent -directory https://DIRECTORY -name "My Server" -region us-west init-config`. After that, `hi-hostagent` with no flags runs the server. `hi-hostagent autostart enable` starts it at logon.
 
-| Option | Use |
-|---|---|
-| `-install <folder>` | game folder, if it is not in a standard Steam library |
-| `-public-host`, `-public-port` | the address players should use, if it differs from the address the directory sees (for example a DNS name, or a different external port). A host other than your own IP requires the directory's `-register-key` |
-| `-bind-ip <ip>` | bind the server to one local IP. The game always uses port 1343, so one machine can run one server per IP address |
-| `-manage=false` | do not start the server; watch one you started yourself |
-| `-stop-server` | stop the server when the agent exits. By default it is left running |
-| `-register-key` | key for directories that restrict registration |
-
-If a server is already running on UDP 1343, the agent watches it instead of starting a second one. If a server it started never binds UDP 1343, the agent stops it rather than listing an unjoinable server.
+By default the agent runs in **proxy mode**: the game server listens only on 127.0.0.1 and the agent fronts the public port. That gives player counts, ping and reachability checks, and `status` / `kick` / `ban` commands, with per-player rate limits.
 
 ## Playing
 
@@ -92,16 +74,17 @@ The directory is a single small HTTP service. It carries no game traffic: player
 | Variable | Value |
 |---|---|
 | `HICOMM_CLIENT_IP_HEADER` | the header your platform's proxy uses for the client address, e.g. `X-Forwarded-For` (the rightmost entry is used, because entries to its left can be forged by clients) |
+| `HICOMM_CLIENT_IP_HOPS` | with `X-Forwarded-For`: how many trusted proxies append to it (default 1). On Railway it is likely `2` (its edge has an outer layer whose address is appended last). Confirm with `/v1/whoami?debug=1` |
 | `HICOMM_REGISTER_KEY` | optional. When set, hosts need it to register, and only key holders may list an address other than their own IP |
 
-After deploying, open `https://YOUR-DIRECTORY/v1/whoami` from home. It must show **your public IP**. If it shows a private or proxy address, the client-IP header is wrong, and hosts would be listed under the wrong address.
+After deploying, open `https://YOUR-DIRECTORY/v1/whoami` from home. It must show **your public IP**. `/v1/whoami?debug=1` also shows the forwarding headers that arrived, to work out the right header and hop count. If it shows a private or proxy address, the client-IP header is wrong, and hosts would be listed under the wrong address.
 
 **Own server.** Run it behind an HTTPS reverse proxy (Caddy, nginx and so on):
 ```
 hi-directory -listen 127.0.0.1:8080 -client-ip-header X-Forwarded-For
 ```
 
-Listings expire 45 s after the last heartbeat. Without the register key, a host can only list its own public IP; this stops the directory being used to point players' traffic at third parties.
+Listings expire 45 s after the last heartbeat. The directory also probes proxy-mode hosts about once a minute and lists them as reachable or unreachable. It only probes listed endpoints, never addresses a caller supplies. Without the register key, a host can only list its own public IP; this stops the directory being used to point players' traffic at third parties.
 
 | Endpoint | |
 |---|---|
@@ -128,7 +111,8 @@ This runs the tests and writes `bin\*.exe`, plus `bin\linux-amd64\hi-connector` 
 - **Tested:** remote players on Windows and on Linux/Proton listed a hosted server through the connector and played several full matches in a row. In that test the host's UDP 1343 was exposed through a tunnel rather than a router port forward. A direct port-forwarded host should behave the same, but it has not been tested yet.
 - **Lobby control:** the first player to join owns the lobby and picks the map and mode. There is no server-side map rotation yet.
 - **Updates:** every game update requires hosts and players to update together. The directory filters servers by build.
-- The player count is not reported yet. The browser app is Windows-only for now; Linux players use `hi-connector`.
+- Player counts, ping and reachability need proxy mode on the host (the default). The browser app is Windows-only for now; Linux players use `hi-connector`.
+- Proxy mode, bans and several servers on one PC are new and have not been tested with the real game yet.
 - Untested: many simultaneous players, long-running uptime, and host CPU and memory use.
 
 ## Development

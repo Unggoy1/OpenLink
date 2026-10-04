@@ -3,7 +3,9 @@ package directory
 import (
 	"context"
 	"errors"
+	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -141,5 +143,55 @@ func TestPerIPLimit(t *testing.T) {
 	}
 	if _, err := c.Register(ctx, api.RegisterRequest{Name: "A", Port: 1343, Build: "b"}); code(err) != 429 {
 		t.Fatalf("limit: %v", err)
+	}
+}
+
+func TestClientIPHeader(t *testing.T) {
+	req := func(remote string, hdr map[string][]string) *http.Request {
+		r := httptest.NewRequest("GET", "/", nil)
+		r.RemoteAddr = remote
+		for k, vs := range hdr {
+			for _, v := range vs {
+				r.Header.Add(k, v)
+			}
+		}
+		return r
+	}
+	cases := []struct {
+		name, header, remote string
+		hdr                  map[string][]string
+		want                 string
+	}{
+		{"no proxy ignores headers", "", "198.51.100.7:5000",
+			map[string][]string{"X-Forwarded-For": {"203.0.113.1"}}, "198.51.100.7"},
+		{"xff uses proxy-appended entry, not forged first entry", "X-Forwarded-For", "10.0.0.2:1",
+			map[string][]string{"X-Forwarded-For": {"203.0.113.1, 198.51.100.7"}}, "198.51.100.7"},
+		{"xff across repeated header lines", "X-Forwarded-For", "10.0.0.2:1",
+			map[string][]string{"X-Forwarded-For": {"203.0.113.1", "198.51.100.7"}}, "198.51.100.7"},
+		{"single-value header", "X-Real-IP", "10.0.0.2:1",
+			map[string][]string{"X-Real-Ip": {"198.51.100.7"}}, "198.51.100.7"},
+		{"garbage header falls back to peer", "X-Real-IP", "10.0.0.2:1",
+			map[string][]string{"X-Real-Ip": {"not-an-ip"}}, "10.0.0.2"},
+		{"ipv4-mapped peer normalised", "", "[::ffff:198.51.100.7]:1", nil, "198.51.100.7"},
+	}
+	for _, c := range cases {
+		s := New(Config{ClientIPHeader: c.header})
+		if got := s.clientIP(req(c.remote, c.hdr)); got != c.want {
+			t.Errorf("%s: got %s want %s", c.name, got, c.want)
+		}
+	}
+}
+
+func TestForgedForwardedForCannotListThirdParty(t *testing.T) {
+	s := New(Config{ClientIPHeader: "X-Forwarded-For"})
+	body := `{"name":"x","port":1343,"build":"b","host":"203.0.113.1"}`
+	r := httptest.NewRequest("POST", "/v1/servers", strings.NewReader(body))
+	r.RemoteAddr = "10.0.0.2:1"
+	// The client forges the first entry; the proxy appends the real address.
+	r.Header.Set("X-Forwarded-For", "203.0.113.1, 198.51.100.7")
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, r)
+	if w.Code != 403 {
+		t.Fatalf("forged XFF registration: got %d %s", w.Code, w.Body.String())
 	}
 }

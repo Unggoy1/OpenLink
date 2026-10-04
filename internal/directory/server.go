@@ -26,13 +26,16 @@ type Config struct {
 	// RegisterKey, when set, must be sent as X-Register-Key to register. It also
 	// allows a host to list an address other than its own source IP.
 	RegisterKey string
-	// TrustProxy uses the first X-Forwarded-For address as the client IP
-	// (only behind a reverse proxy that sets it).
-	TrustProxy bool
-	TTL        time.Duration // listing expiry without heartbeat
-	MaxServers int
-	MaxPerIP   int
-	Now        func() time.Time
+	// ClientIPHeader names the header a trusted reverse proxy uses to pass the
+	// client address. Empty: use the TCP peer address. "X-Forwarded-For": use the
+	// rightmost entry, the one the proxy appended; entries to its left come
+	// from the client and can be forged. Any other header (e.g. X-Real-IP) is
+	// used as-is, so only name one your proxy always overwrites.
+	ClientIPHeader string
+	TTL            time.Duration // listing expiry without heartbeat
+	MaxServers     int
+	MaxPerIP       int
+	Now            func() time.Time
 }
 
 type entry struct {
@@ -67,6 +70,11 @@ func New(cfg Config) *Server {
 	}
 	s := &Server{cfg: cfg, servers: map[string]*entry{}, mux: http.NewServeMux()}
 	s.mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("ok\n")) })
+	// whoami shows the address the directory attributes to the caller, so an
+	// operator can check the proxy setup and a host can learn its public IP.
+	s.mux.HandleFunc("GET /v1/whoami", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]string{"ip": s.clientIP(r)})
+	})
 	s.mux.HandleFunc("POST /v1/servers", s.register)
 	s.mux.HandleFunc("PUT /v1/servers/{id}", s.heartbeat)
 	s.mux.HandleFunc("DELETE /v1/servers/{id}", s.remove)
@@ -271,24 +279,38 @@ func (s *Server) beacon(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) clientIP(r *http.Request) string {
-	if s.cfg.TrustProxy {
-		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-			if ip := net.ParseIP(strings.TrimSpace(strings.Split(xff, ",")[0])); ip != nil {
-				return ip.String()
-			}
+	if h := s.cfg.ClientIPHeader; h != "" {
+		// Join repeated header lines; a proxy may add its own line.
+		v := strings.Join(r.Header.Values(h), ",")
+		if strings.EqualFold(h, "X-Forwarded-For") {
+			parts := strings.Split(v, ",")
+			v = parts[len(parts)-1]
+		}
+		if ip := normIP(strings.TrimSpace(v)); ip != "" {
+			return ip
 		}
 	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
-		return r.RemoteAddr
+		host = r.RemoteAddr
 	}
-	if ip := net.ParseIP(host); ip != nil {
-		if v4 := ip.To4(); v4 != nil {
-			return v4.String()
-		}
-		return ip.String()
+	if ip := normIP(host); ip != "" {
+		return ip
 	}
 	return host
+}
+
+// normIP returns the canonical form of an IP (IPv4-mapped IPv6 becomes
+// IPv4), or "" if s is not an IP.
+func normIP(s string) string {
+	ip := net.ParseIP(s)
+	if ip == nil {
+		return ""
+	}
+	if v4 := ip.To4(); v4 != nil {
+		return v4.String()
+	}
+	return ip.String()
 }
 
 func randHex(n int) string {

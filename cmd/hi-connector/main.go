@@ -251,7 +251,7 @@ func join(ctx context.Context, dc *directory.Client, s api.ServerInfo, localBuil
 	}
 }
 
-// pollBeacons fetches the server's latest beacon every second. The stored time
+// pollBeacons fetches the server's latest beacon every 2 s. The stored time
 // is when the host captured it, so a stalled host goes stale here too.
 func pollBeacons(ctx context.Context, dc *directory.Client, id string, st *beacon.Store) {
 	var last []byte
@@ -263,7 +263,7 @@ func pollBeacons(ctx context.Context, dc *directory.Client, id string, st *beaco
 		}
 		select {
 		case <-ctx.Done():
-		case <-time.After(time.Second):
+		case <-time.After(2 * time.Second): // hosts send a new beacon every 2 s
 		}
 	}
 }

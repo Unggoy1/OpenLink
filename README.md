@@ -79,11 +79,23 @@ Keep the connector running, then start Halo Infinite and go to **Custom Games â†
 
 ## Running a directory
 
+The directory is a single small HTTP service. It carries no game traffic: players reach servers directly over UDP. It keeps everything in memory. A restart or redeploy clears the list, and host agents register again within seconds. **Run exactly one instance.**
+
+**Container (e.g. Railway).** The repo's `Dockerfile` builds a minimal image. The service listens on `$PORT` when that is set. Configure it with environment variables:
+
+| Variable | Value |
+|---|---|
+| `HICOMM_CLIENT_IP_HEADER` | the header your platform's proxy uses for the client address, e.g. `X-Forwarded-For` (the rightmost entry is used, because entries to its left can be forged by clients) |
+| `HICOMM_REGISTER_KEY` | optional. When set, hosts need it to register, and only key holders may list an address other than their own IP |
+
+After deploying, open `https://YOUR-DIRECTORY/v1/whoami` from home. It must show **your public IP**. If it shows a private or proxy address, the client-IP header is wrong, and hosts would be listed under the wrong address.
+
+**Own server.** Run it behind an HTTPS reverse proxy (Caddy, nginx and so on):
 ```
-hi-directory -listen 127.0.0.1:8080 -register-key SECRET
+hi-directory -listen 127.0.0.1:8080 -client-ip-header X-Forwarded-For
 ```
 
-Put it behind an HTTPS reverse proxy (Caddy, nginx and so on) and pass `-trust-proxy`, so it sees players' real addresses from `X-Forwarded-For`. Listings expire 45 s after the last heartbeat. Without the register key, a host can only list its own public IP; this stops the directory being used to point players' traffic at third parties. The directory keeps everything in memory, and a restart simply waits for hosts to register again.
+Listings expire 45 s after the last heartbeat. Without the register key, a host can only list its own public IP; this stops the directory being used to point players' traffic at third parties.
 
 | Endpoint | |
 |---|---|
@@ -92,6 +104,8 @@ Put it behind an HTTPS reverse proxy (Caddy, nginx and so on) and pass `-trust-p
 | `DELETE /v1/servers/{id}` | unregister (token required) |
 | `GET /v1/servers[?build=â€¦]` | list |
 | `GET /v1/servers/{id}/beacon` | latest beacon |
+| `GET /v1/whoami` | the address the directory sees for the caller |
+| `GET /healthz` | health check |
 
 ## Building
 

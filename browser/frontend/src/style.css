@@ -1,0 +1,50 @@
+:root {
+  --bg: #10141a;
+  --panel: #161c24;
+  --line: #263040;
+  --text: #e6edf3;
+  --muted: #8b98a8;
+  --accent: #4cc2ff;
+  --ok: #3ddc84;
+  --warn: #ffb547;
+  color-scheme: dark;
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.4 "Segoe UI", system-ui, -apple-system, "Ubuntu", "Cantarell", sans-serif;
+}
+
+button {
+  font: inherit;
+  padding: 7px 16px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: var(--accent);
+  color: #06121c;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+input {
+  font: inherit;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--text);
+}
+
+input:focus,
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}

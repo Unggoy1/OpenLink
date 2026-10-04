@@ -1,6 +1,6 @@
 # hi-directory container. Build: docker build -t hi-directory .
 # Railway and similar hosts set $PORT and terminate HTTPS in front of it.
-FROM golang:1.22-alpine AS build
+FROM golang:1.27-alpine AS build
 WORKDIR /src
 COPY go.mod ./
 COPY . .

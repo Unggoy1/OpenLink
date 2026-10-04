@@ -1,4 +1,4 @@
-# Builds the three programs into .\bin (Windows amd64). Requires Go 1.22+.
+# Builds the three programs into .\bin (Windows amd64). Requires Go 1.27+.
 $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
 go vet ./...

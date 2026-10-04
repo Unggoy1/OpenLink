@@ -1,0 +1,136 @@
+# Builds every program and, for a version tag (v*), publishes a GitHub Release.
+# Manual runs (Actions tab -> Release -> Run workflow) build and upload
+# artifacts without publishing a release.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  WAILS_VERSION: v2.16.0 # keep in step with browser/go.mod
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go vet ./...
+      - run: go test ./...
+
+  tools:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Cross-compile command-line tools
+        shell: bash
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          build() { # goos goarch program
+            local ext=""; [ "$1" = windows ] && ext=".exe"
+            GOOS=$1 GOARCH=$2 go build -trimpath -ldflags "-s -w" \
+              -o "dist/$3-$1-$2$ext" "./cmd/$3"
+          }
+          build windows amd64 hi-connector
+          build windows amd64 hi-hostagent
+          build windows amd64 hi-directory
+          build linux   amd64 hi-connector
+          build linux   amd64 hi-directory
+          build linux   arm64 hi-connector
+          build linux   arm64 hi-directory
+          ls -l dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tools
+          path: dist/*
+
+  browser-windows:
+    needs: test
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: browser
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: browser/go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: go install github.com/wailsapp/wails/v2/cmd/wails@${{ env.WAILS_VERSION }}
+      - name: Type-check frontend
+        working-directory: browser/frontend
+        run: |
+          npm ci
+          npm run check
+      - run: wails build -clean -platform windows/amd64 -o OpenLink-windows-amd64.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: browser-windows
+          path: browser/build/bin/OpenLink-windows-amd64.exe
+
+  # Experimental: the Linux app has not been tested yet. A failure here does
+  # not block the release; Linux players can use hi-connector meanwhile.
+  browser-linux:
+    needs: test
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: browser
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: browser/go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
+      - run: go install github.com/wailsapp/wails/v2/cmd/wails@${{ env.WAILS_VERSION }}
+      - run: wails build -clean -platform linux/amd64 -tags webkit2_41 -o OpenLink-linux-amd64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: browser-linux
+          path: browser/build/bin/OpenLink-linux-amd64
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [tools, browser-windows, browser-linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        working-directory: dist
+        run: |
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}

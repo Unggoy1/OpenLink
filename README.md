@@ -22,7 +22,9 @@ Halo Infinite ships with a LAN server mode. A LAN server announces itself with a
 
 - **`hi-hostagent`** runs on the server machine. It starts the LAN server, restarts it if it exits, picks up the server's beacon and keeps the directory listing fresh.
 - **`hi-directory`** is the public server list. Hosts register and send heartbeats; players list servers and fetch beacons.
-- **`hi-connector`** runs on each player's PC. For the chosen server it replays that server's own beacon to the local game and forwards the game's traffic to the server. To the game, it looks like an ordinary LAN game.
+- **The player side runs on each player's PC.** For the chosen server it replays that server's own beacon to the local game and forwards the game's traffic to the server. To the game, it looks like an ordinary LAN game. It comes in two forms:
+  - the **browser app** (`browser/`): a desktop server list with a Join button;
+  - **`hi-connector`**: the same thing on the command line, also for Linux.
 
 The connector forwards game packets unchanged. They are encrypted by the game, and this project never reads, decrypts or alters them.
 
@@ -63,6 +65,10 @@ Useful agent options:
 If a server is already running on UDP 1343, the agent watches it instead of starting a second one. If a server it started never binds UDP 1343, the agent stops it rather than listing an unjoinable server.
 
 ## Playing
+
+**With the browser app (Windows):** open it, enter the directory address once in Settings, click **Join** on a server, then in Halo Infinite go to **Custom Games → Server** and pick the host's PC name. The bar at the bottom shows when you are connected. Keep the app open while you play. See [browser/README.md](browser/README.md).
+
+**With the command line (Windows or Linux):**
 
 ```
 hi-connector -directory https://DIRECTORY list
@@ -109,7 +115,7 @@ Listings expire 45 s after the last heartbeat. Without the register key, a host 
 
 ## Building
 
-Requires Go 1.22+. On Windows:
+Requires Go 1.27+. On Windows:
 
 ```
 .\build.ps1
@@ -122,7 +128,7 @@ This runs the tests and writes `bin\*.exe`, plus `bin\linux-amd64\hi-connector` 
 - **Tested:** remote players on Windows and on Linux/Proton listed a hosted server through the connector and played several full matches in a row. In that test the host's UDP 1343 was exposed through a tunnel rather than a router port forward. A direct port-forwarded host should behave the same, but it has not been tested yet.
 - **Lobby control:** the first player to join owns the lobby and picks the map and mode. There is no server-side map rotation yet.
 - **Updates:** every game update requires hosts and players to update together. The directory filters servers by build.
-- The player count is not reported yet. There is no graphical browser yet; it is command line only.
+- The player count is not reported yet. The browser app is Windows-only for now; Linux players use `hi-connector`.
 - Untested: many simultaneous players, long-running uptime, and host CPU and memory use.
 
 ## Development

@@ -13,17 +13,14 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"text/tabwriter"
 	"time"
 
+	"halocommunity/connect"
 	"halocommunity/internal/api"
-	"halocommunity/internal/beacon"
 	"halocommunity/internal/directory"
 	"halocommunity/internal/game"
-	"halocommunity/internal/relay"
 	"halocommunity/internal/sim"
-	"halocommunity/internal/udpx"
 )
 
 const usage = `hi-connector — join community Halo Infinite servers
@@ -73,7 +70,7 @@ func main() {
 			if args[0] == "probe" {
 				err = probe(ctx, s)
 			} else {
-				err = join(ctx, dc, s, localBuild, *mode, *lanIP)
+				err = join(ctx, *dirURL, s, localBuild, *mode, *lanIP)
 			}
 		}
 	default:
@@ -175,7 +172,7 @@ func probe(ctx context.Context, s api.ServerInfo) error {
 	return nil
 }
 
-func join(ctx context.Context, dc *directory.Client, s api.ServerInfo, localBuild, mode, lanIP string) error {
+func join(ctx context.Context, dirURL string, s api.ServerInfo, localBuild, mode, lanIP string) error {
 	switch {
 	case localBuild == "":
 		fmt.Printf("note: game install not found, build not checked (pass -install <folder with version.txt>)\n  server build: %s\n", s.Build)
@@ -184,52 +181,15 @@ func join(ctx context.Context, dc *directory.Client, s api.ServerInfo, localBuil
 	default:
 		fmt.Printf("build matches: %s\n", localBuild)
 	}
-	upstream, err := resolve(s)
+	sess, err := connect.Start(s, connect.Options{Directory: dirURL, Mode: mode, LANIP: lanIP})
 	if err != nil {
 		return err
 	}
-
-	gamePort, discPort := api.Ports()
-	var local net.IP
-	target := &net.UDPAddr{Port: discPort}
-	switch mode {
-	case "broadcast":
-		if lanIP != "" {
-			local = net.ParseIP(lanIP).To4()
-		} else if local, err = udpx.PrimaryIPv4(); err != nil {
-			return fmt.Errorf("find LAN address (use -lan-ip): %w", err)
-		}
-		if local == nil {
-			return fmt.Errorf("bad -lan-ip %q", lanIP)
-		}
-		target.IP = net.IPv4bcast
-	case "loopback":
-		local = net.IPv4(127, 0, 0, 1)
-		target.IP = local
-	default:
-		return fmt.Errorf("-advertise must be broadcast or loopback")
-	}
-
-	listen, err := net.ListenUDP("udp4", &net.UDPAddr{IP: local, Port: gamePort})
-	if err != nil {
-		return fmt.Errorf("listen on %s:%d: %w (is a LAN server running on this PC?)", local, gamePort, err)
-	}
-	adv, err := udpx.ListenBroadcast("udp4", net.JoinHostPort(local.String(), "0"))
-	if err != nil {
-		listen.Close()
-		return err
-	}
-	defer adv.Close()
-
-	fmt.Printf("joining %s (%s)\n  server   %s\n  local    %s:%d (%s)\n", s.Name, s.ID, upstream, local, gamePort, mode)
-	fmt.Println("open Halo Infinite > Custom Games > LAN; the server should appear within a few seconds. Ctrl+C to stop.")
-
-	var beacons beacon.Store
-	fwd := &relay.Forwarder{Listen: listen, Upstream: upstream}
-	var adverts atomic.Int64
-	go fwd.Run(ctx)
-	go pollBeacons(ctx, dc, s.ID, &beacons)
-	go beacon.Advertise(ctx, adv, target, &beacons, api.BeaconInterval, api.BeaconFreshFor, func() { adverts.Add(1) })
+	defer sess.Stop()
+	st := sess.Status()
+	fmt.Printf("joining %s (%s)\n  server   %s\n  local    %s (%s)\n", s.Name, s.ID,
+		net.JoinHostPort(s.Host, strconv.Itoa(s.Port)), st.Local, st.Mode)
+	fmt.Println("open Halo Infinite > Custom Games > Server; the host appears under its PC name within a few seconds. Ctrl+C to stop.")
 
 	t := time.NewTicker(5 * time.Second)
 	defer t.Stop()
@@ -240,31 +200,17 @@ func join(ctx context.Context, dc *directory.Client, s api.ServerInfo, localBuil
 			return nil
 		case <-t.C:
 		}
-		_, at, n := beacons.Latest()
+		st := sess.Status()
 		age := "none yet"
-		if n > 0 {
-			age = time.Since(at).Round(time.Second).String()
+		if st.BeaconAge >= 0 {
+			age = st.BeaconAge.Round(time.Second).String()
 		}
-		st := fwd.Stats.Snapshot()
-		fmt.Printf("beacon age %-8s adverts %-5d  to server %d pkts %s  from server %d pkts %s\n",
-			age, adverts.Load(), st.UpPackets, kb(st.UpBytes), st.DownPackets, kb(st.DownBytes))
-	}
-}
-
-// pollBeacons fetches the server's latest beacon every 2 s. The stored time
-// is when the host captured it, so a stalled host goes stale here too.
-func pollBeacons(ctx context.Context, dc *directory.Client, id string, st *beacon.Store) {
-	var last []byte
-	for ctx.Err() == nil {
-		b, err := dc.Beacon(ctx, id)
-		if err == nil && beacon.Valid(b.Beacon) && string(b.Beacon) != string(last) {
-			st.Put(b.Beacon, time.Now().Add(-time.Duration(b.AgeMS)*time.Millisecond))
-			last = b.Beacon
+		line := fmt.Sprintf("beacon age %-8s adverts %-5d  to server %d pkts %s  from server %d pkts %s",
+			age, st.Adverts, st.UpPackets, kb(st.UpBytes), st.DownPackets, kb(st.DownBytes))
+		if st.Err != "" {
+			line += "  [" + st.Err + "]"
 		}
-		select {
-		case <-ctx.Done():
-		case <-time.After(2 * time.Second): // hosts send a new beacon every 2 s
-		}
+		fmt.Println(line)
 	}
 }
 

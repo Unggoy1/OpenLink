@@ -100,6 +100,10 @@ export namespace main {
 	    installDir: string;
 	    favorites: string[];
 	    muteVoteSound: boolean;
+	    overlayMode: string;
+	    overlayCorner: string;
+	    overlayOpenKey: string;
+	    overlayVoteKeys: string[];
 	
 	    static createFrom(source: any = {}) {
 	        return new Settings(source);
@@ -112,6 +116,10 @@ export namespace main {
 	        this.installDir = source["installDir"];
 	        this.favorites = source["favorites"];
 	        this.muteVoteSound = source["muteVoteSound"];
+	        this.overlayMode = source["overlayMode"];
+	        this.overlayCorner = source["overlayCorner"];
+	        this.overlayOpenKey = source["overlayOpenKey"];
+	        this.overlayVoteKeys = source["overlayVoteKeys"];
 	    }
 	}
 	export class StatusView {

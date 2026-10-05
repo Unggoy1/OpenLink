@@ -16,6 +16,10 @@ export function ListServers():Promise<Array<main.ServerView>>;
 
 export function LocalBuild():Promise<string>;
 
+export function OverlayKeyConflicts(arg1:Array<string>):Promise<Array<string>>;
+
+export function OverlaySupported():Promise<boolean>;
+
 export function SaveSettings(arg1:main.Settings):Promise<void>;
 
 export function SetFavorite(arg1:string,arg2:boolean):Promise<void>;

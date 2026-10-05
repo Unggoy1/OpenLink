@@ -30,6 +30,17 @@ The type check is `npm run check` in `frontend/`.
 - The session bar shows: contacting → ready ("open Custom Games → Server") → playing (traffic flowing). It warns when the server stops advertising or the directory is unreachable.
 - Servers built for another game version are shown but cannot be joined.
 
+## In-game vote overlay (Windows only)
+
+Off by default; voting normally happens in the app's vote panel. Settings → In-game vote overlay offers:
+
+- **Passive**: when a vote opens, a panel appears over the game by itself. It never takes focus or the mouse. Vote with one hotkey per choice (default Ctrl+Alt+1–4).
+- **Interactive**: a one-line hint appears; the open hotkey (default Ctrl+Alt+V) brings up the panel with focus. Vote with 1–4, the arrows and Enter, or the mouse. Voting or Esc returns focus to the game.
+
+How it works (`overlay_windows.go`): a small always-on-top window drawn with GDI on its own thread, the same approach as Discord's current overlay. Nothing is injected into Halo, so OpenLink can start before or after the game. It needs Halo borderless or windowed, which are Halo Infinite's only modes. It shows only while `HaloInfinite.exe` is the foreground app and a vote is open (the demo build shows it over any app but OpenLink). Hotkeys are registered only while a vote is open, and Settings warns when another app already holds one. The thread and window are created the first time a vote opens with the overlay on; map thumbnails are fetched from the same Halo Waypoint URLs the app uses.
+
+Preview without the game: `wails build -tags demo`, run it, then switch to another app; the demo vote repeats every 45 s.
+
 ## Linux
 
 Linux builds need WebKitGTK and must be built on Linux (or in CI). Until then, Linux players can use the command-line `hi-connector`.

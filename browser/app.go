@@ -22,12 +22,15 @@ type App struct {
 	settings Settings
 	sess     *connect.Session
 
-	notified uint64 // last vote round the player was alerted to
+	notified uint64       // last vote round the player was alerted to
+	overlay  *voteOverlay // in-game vote overlay; nil off Windows
 }
 
 // NewApp creates the app with saved settings.
 func NewApp() *App {
-	return &App{settings: loadSettings()}
+	a := &App{settings: loadSettings()}
+	a.overlay = newVoteOverlay(a.Vote)
+	return a
 }
 
 func (a *App) startup(ctx context.Context) {
@@ -36,7 +39,10 @@ func (a *App) startup(ctx context.Context) {
 }
 
 // shutdown releases the game ports when the window closes.
-func (a *App) shutdown(context.Context) { a.Leave() }
+func (a *App) shutdown(context.Context) {
+	a.overlay.close()
+	a.Leave()
+}
 
 // ServerView is a listing as shown in the browser.
 type ServerView struct {
@@ -85,6 +91,9 @@ func (a *App) SaveSettings(s Settings) error {
 	}
 	if s.Directory != "" && !strings.HasPrefix(s.Directory, "https://") && !strings.HasPrefix(s.Directory, "http://") {
 		return errors.New("the directory address must start with https://")
+	}
+	if err := normalizeOverlay(&s); err != nil {
+		return err
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()

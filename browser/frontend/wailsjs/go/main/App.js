@@ -30,6 +30,14 @@ export function LocalBuild() {
   return window['go']['main']['App']['LocalBuild']();
 }
 
+export function OverlayKeyConflicts(arg1) {
+  return window['go']['main']['App']['OverlayKeyConflicts'](arg1);
+}
+
+export function OverlaySupported() {
+  return window['go']['main']['App']['OverlaySupported']();
+}
+
 export function SaveSettings(arg1) {
   return window['go']['main']['App']['SaveSettings'](arg1);
 }

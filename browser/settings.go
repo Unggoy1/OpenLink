@@ -20,6 +20,11 @@ type Settings struct {
 	Favorites  []string `json:"favorites"`  // server keys (host:port), stable across re-registration
 	// MuteVoteSound turns off the chime played when a playlist vote opens.
 	MuteVoteSound bool `json:"muteVoteSound"`
+	// The in-game vote overlay (Windows only): off, passive or interactive.
+	OverlayMode     string   `json:"overlayMode"`
+	OverlayCorner   string   `json:"overlayCorner"`
+	OverlayOpenKey  string   `json:"overlayOpenKey"`  // interactive: opens the overlay
+	OverlayVoteKeys []string `json:"overlayVoteKeys"` // passive: one per choice
 }
 
 func settingsPath() (string, error) {
@@ -42,6 +47,11 @@ func loadSettings() Settings {
 	}
 	if s.Mode == "" {
 		s.Mode = connect.ModeLoopback
+	}
+	if normalizeOverlay(&s) != nil {
+		// Hand-edited and invalid: start with the overlay off and default keys.
+		s.OverlayMode, s.OverlayOpenKey, s.OverlayVoteKeys = overlayOff, "", nil
+		normalizeOverlay(&s)
 	}
 	return s
 }

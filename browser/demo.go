@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"halocommunity/internal/api"
 	"halocommunity/vote"
 )
 
@@ -18,6 +19,29 @@ type demoState struct {
 	start time.Time
 	mine  int
 	round uint64
+}
+
+// servers is a server list showing each kind of match report. The joined
+// demo server follows the demo vote.
+func (d *demoState) servers() []ServerView {
+	interference := vote.MapThumbRef("70f884d7-6869-469d-b4d2-4219627e2d83", "cc791b4b-054a-4653-9034-5dc13c809c54")
+	kusini := vote.MapThumbRef("4eb7a3ac-81f7-4faa-acd8-ce6bbba667af", "98a5391c-4a3a-4f04-bdc7-6db58cc27433")
+	joined := &api.Match{Phase: api.PhaseVoting}
+	if b := d.ballot(); b.Closed {
+		joined = &api.Match{Phase: api.PhaseStarting, Name: b.Options[b.Winner].Name, Thumb: interference}
+	}
+	row := func(id, name, region string, players, ping int, joinable bool, m *api.Match) ServerView {
+		return ServerView{ID: id, Key: id + ":1343", Name: name, Region: region, Status: "ready", Joinable: joinable,
+			Build: "demo", BuildMatch: joinable, Players: players, Reachability: api.ReachOK, PingMS: ping, Match: matchView(m)}
+	}
+	return []ServerView{
+		row("demo", "Vote Test (demo)", "us-west", 3, 18, true, joined),
+		row("arena", "Unggoy Arena", "us-east", 8, 64, true, &api.Match{Phase: api.PhaseInGame, Name: "Fiesta Slayer on Interference", Thumb: interference}),
+		row("kusini", "Kusini Nights", "eu-west", 1, 142, true, &api.Match{Phase: api.PhaseLobby, Name: "CTF: Arena on Kusini Bay", Thumb: kusini}),
+		row("bazaar", "Bazaar Brawl", "us-west", 6, 25, true, &api.Match{Phase: api.PhasePostGame, Name: "A map without a thumbnail",
+			Thumb: vote.MapThumbRef("00000000-0000-0000-0000-000000000001", "00000000-0000-0000-0000-000000000001")}),
+		row("old", "Older host agent", "us-east", -1, -1, false, nil),
+	}
 }
 
 func (*demoState) status() *StatusView {

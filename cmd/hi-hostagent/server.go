@@ -231,7 +231,7 @@ func (a *agent) directoryLoop(ctx context.Context) {
 			a.mu.Unlock()
 			a.log.Info("listed in directory", "id", reg.ID, "endpoint", net.JoinHostPort(reg.Host, strconv.Itoa(a.cfg.PublicPort)))
 		}
-		hb := api.Heartbeat{Status: a.getStatus(), Players: a.players(), Proxy: a.fwd != nil || a.cfg.Simulate}
+		hb := api.Heartbeat{Status: a.getStatus(), Players: a.players(), Proxy: a.fwd != nil || a.cfg.Simulate, Match: a.match()}
 		if b, at, _ := a.beacons.Latest(); b != nil {
 			hb.Beacon, hb.BeaconAgeMS = b, time.Since(at).Milliseconds()
 		}

@@ -66,6 +66,7 @@ type voteInfo struct {
 	Options []string `json:"options,omitempty"`
 	Counts  []int    `json:"counts,omitempty"`
 	Winner  string   `json:"winner,omitempty"`
+	Current string   `json:"current,omitempty"` // entry of the last match the vote started
 	Error   string   `json:"error,omitempty"`
 }
 
@@ -109,10 +110,11 @@ type voter struct {
 	rng     *rand.Rand
 	publish func(voteInfo) // admin status; may be nil
 
-	mu     sync.Mutex
-	round  *voteRound
-	phase  votePhase
-	rounds uint64
+	mu      sync.Mutex
+	round   *voteRound
+	phase   votePhase
+	rounds  uint64
+	current string // entry of the last match started; published for the directory listing
 }
 
 const (
@@ -202,7 +204,7 @@ func (v *voter) publishLocked(errText string) {
 	if v.publish == nil {
 		return
 	}
-	info := voteInfo{Phase: v.phase.String(), Error: errText}
+	info := voteInfo{Phase: v.phase.String(), Current: v.current, Error: errText}
 	if r := v.round; r != nil {
 		info.Round = r.id
 		info.Counts = make([]int, len(r.options))
@@ -408,6 +410,7 @@ func (v *voter) run(ctx context.Context) {
 				if err == nil && reply.Code == hostctl.CodeOK {
 					v.mu.Lock()
 					last = r.options[r.winner].ID
+					v.current = last
 					v.mu.Unlock()
 					baseline, startTries, startedAt = st.Matches, 0, now
 					v.log.Info("vote: match start requested", "entry", last)

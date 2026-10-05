@@ -26,12 +26,13 @@ Status as of 2026-10-05. Tick items as they are done and note the date and how i
 - [ ] **Bans** through proxy mode with the real game.
 - [ ] **Several servers on one PC**: test it, or list it as unsupported for the alpha (the beacon issue in HOSTING.md).
 - [ ] **Thumbnails in a live vote** (so far only seen in the demo build).
+- [ ] **What a server is playing, in the server list** (built 2026-10-05; unit-tested and seen in the demo build only). With a real server and the new directory deployed, check each phase: lobby, voting, starting, in game with the map name and thumbnail, match over. Check both a voting server and a rotation-only one.
 - [ ] **A playlist made by the unggoy generator**: it loads, and long names and thumbnails show correctly (limits below).
 
 ### Player app
 
-- [ ] **Old app against a voting server**: a player on an app version from before voting joins a server with voting on. Does anything break for them? This decides whether the update is required (section 2).
-- [ ] **Taskbar flash** when a vote opens.
+- [x] **Old app against a voting server**: not needed (user, 2026-10-05). Only 4 testers have the app and the first public release is still ahead, so everyone starts on a voting-capable version.
+- [x] **Taskbar flash** when a vote opens: user judged it good (2026-10-05).
 - [ ] **Linux app** (the CI build) on a real Linux or Proton machine: join, vote in the app panel, overlay settings hidden.
 
 ### Vote overlay (Windows, opt-in)
@@ -50,7 +51,7 @@ Status as of 2026-10-05. Tick items as they are done and note the date and how i
 
 - [ ] **Merge** the `host-lobby-control` and `vote-overlay` work into `master`.
 - [ ] **CI release run**: tag a pre-release (for example `v0.1.0-alpha.1`). Smoke-test every artifact on a clean PC: the host zip (agent and DLL), the Windows app and the Linux app.
-- [ ] **App update path**: publish the new app before any server turns voting on, tell players to update, and decide whether the update is required (depends on the old-app test).
+- [ ] **App update path**: make sure the 4 current testers update before testing on voting servers. The first public release ships with voting, so no compatibility work is needed.
 - [ ] **Docs pass**:
   - [ ] HOSTING.md: port forwarding, proxy mode, playlist, voting, `server_owned` / `first_player`, same-PC testing needs Broadcast mode, ToS-risk note.
   - [ ] README "Status and known limitations" is out of date: lobby control and voting now exist, and there is a Linux app build.

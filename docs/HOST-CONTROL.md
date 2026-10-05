@@ -67,6 +67,7 @@ Every server needs a playlist in hostagent.json (requires `hostctl_native`); the
 - The playlist is read once when the agent starts; restart the agent after editing it.
 - The agent selects the first entry as soon as the server's lobby is ready, and the next entry each time the server is back in its lobby after a match. A selection that fails three times is skipped.
 - `GET /status` shows `host_control.rotation` with `current`, `pending`, `matches`, `selections` and `error`.
+- The server list shows what each server is playing. Every heartbeat (every 2 s) carries a `match`: a phase (`lobby`, `voting`, `starting`, `in_game`, `post_game`) from the DLL's lifecycle state and the vote, plus the entry's ID, display name and map thumbnail reference when one applies. In the lobby, a rotation server reports the next entry; a voting server reports none until the vote picks one. The directory lists the report only if it passes the playlist limits (an invalid one is dropped, the heartbeat still counts). The app shows it under the server name, with the map thumbnail, refreshed with the list every 15 s.
 - With a tunnel (for example playit) pointed at 127.0.0.1:1343 in proxy mode, set `"server_ip": "127.0.0.2"`. Otherwise the game server receives the tunnel traffic, the directory marks the host unreachable, and the OpenLink app blocks Join. With this setup, five players (four remote) played three matches that cycled a three-entry playlist (2026-10-04).
 
 ## Server-owned lobby and automatic start

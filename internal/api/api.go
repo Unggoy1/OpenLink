@@ -1,11 +1,15 @@
 // Package api holds the JSON types and constants shared by the directory,
-// host agent and connector.
+// host agent and player app.
 package api
 
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
+	"unicode/utf8"
+
+	"halocommunity/vote"
 )
 
 const (
@@ -48,6 +52,42 @@ type Heartbeat struct {
 	Beacon      []byte `json:"beacon,omitempty"` // base64 in JSON
 	BeaconAgeMS int64  `json:"beacon_age_ms"`    // age when the heartbeat was sent
 	Proxy       bool   `json:"proxy"`            // the agent fronts the server and answers probes
+	Match       *Match `json:"match,omitempty"`  // what the server is playing; nil when unknown
+}
+
+// Match phases, as reported by a host agent with host control.
+const (
+	PhaseLobby    = "lobby"     // in the lobby; Entry, if set, is the next match
+	PhaseVoting   = "voting"    // players are voting for the next match
+	PhaseStarting = "starting"  // Entry is about to start
+	PhaseInGame   = "in_game"   // Entry is being played
+	PhasePostGame = "post_game" // Entry just ended
+)
+
+// Match is what a server is playing, from its host agent's playlist. The
+// directory passes it on only if Valid.
+type Match struct {
+	Phase string `json:"phase"`
+	Entry string `json:"entry,omitempty"` // playlist entry ID
+	Name  string `json:"name,omitempty"`  // display name (the entry's name, or its ID)
+	Thumb string `json:"thumb,omitempty"` // map thumbnail reference (vote.ThumbURLs builds the URLs)
+}
+
+// Valid reports whether m is safe to list: a known phase, and an entry, name
+// and thumbnail reference within the ballot limits.
+func (m *Match) Valid() bool {
+	switch m.Phase {
+	case PhaseLobby, PhaseVoting, PhaseStarting, PhaseInGame, PhasePostGame:
+	default:
+		return false
+	}
+	for _, s := range []string{m.Entry, m.Name} {
+		if len(s) > vote.MaxNameBytes || !utf8.ValidString(s) ||
+			strings.IndexFunc(s, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0 {
+			return false
+		}
+	}
+	return vote.ValidThumbRef(m.Thumb)
 }
 
 // Reachability values in ServerInfo.
@@ -73,6 +113,7 @@ type ServerInfo struct {
 	Proxy        bool      `json:"proxy"`
 	Reachability string    `json:"reachability"` // ReachUnknown, ReachOK or ReachUnreachable
 	CheckedAt    time.Time `json:"checked_at,omitempty"`
+	Match        *Match    `json:"match,omitempty"` // from the latest heartbeat; nil when unknown
 }
 
 // ProbePrefix marks probe datagrams. A host agent in proxy mode (and the

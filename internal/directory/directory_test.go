@@ -258,3 +258,45 @@ func TestReachability(t *testing.T) {
 		}
 	}
 }
+
+func TestHeartbeatMatch(t *testing.T) {
+	_, c, _ := setup(t, Config{TTL: 30 * time.Second})
+	ctx := context.Background()
+	reg, err := c.Register(ctx, api.RegisterRequest{Name: "Test Server", Port: 1343, Build: "b1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	thumb := "4eb7a3ac-81f7-4faa-acd8-ce6bbba667af/98a5391c-4a3a-4f04-bdc7-6db58cc27433"
+	listed := func(m *api.Match) *api.Match {
+		t.Helper()
+		if err := c.Heartbeat(ctx, reg.ID, reg.Token, api.Heartbeat{Status: "ready", Players: 2, Match: m}); err != nil {
+			t.Fatalf("heartbeat with %+v: %v", m, err)
+		}
+		list, err := c.List(ctx, "")
+		if err != nil || len(list) != 1 {
+			t.Fatalf("list: %v %+v", err, list)
+		}
+		return list[0].Match
+	}
+
+	want := api.Match{Phase: api.PhaseInGame, Entry: "kusini-ctf", Name: "CTF: Arena on Kusini Bay", Thumb: thumb}
+	if got := listed(&want); got == nil || *got != want {
+		t.Fatalf("valid match: got %+v", got)
+	}
+	// An invalid report is dropped, but the heartbeat still counts.
+	for _, bad := range []api.Match{
+		{Phase: "dancing"},
+		{Phase: api.PhaseLobby, Name: strings.Repeat("n", 81)},
+		{Phase: api.PhaseLobby, Name: "two\nlines"},
+		{Phase: api.PhaseLobby, Thumb: "https://evil.example/x.jpg"},
+	} {
+		if got := listed(&bad); got != nil {
+			t.Errorf("invalid match %+v listed as %+v", bad, got)
+		}
+	}
+	// A heartbeat without a match (an older agent, or no host control) clears it.
+	listed(&want)
+	if got := listed(nil); got != nil {
+		t.Fatalf("match kept after a heartbeat without one: %+v", got)
+	}
+}

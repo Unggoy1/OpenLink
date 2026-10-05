@@ -60,6 +60,22 @@ export namespace main {
 		    return a;
 		}
 	}
+	export class MatchView {
+	    phase: string;
+	    name: string;
+	    thumbs: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new MatchView(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.phase = source["phase"];
+	        this.name = source["name"];
+	        this.thumbs = source["thumbs"];
+	    }
+	}
 	export class ServerView {
 	    id: string;
 	    key: string;
@@ -73,6 +89,7 @@ export namespace main {
 	    reachability: string;
 	    pingMs: number;
 	    favorite: boolean;
+	    match?: MatchView;
 	
 	    static createFrom(source: any = {}) {
 	        return new ServerView(source);
@@ -92,7 +109,26 @@ export namespace main {
 	        this.reachability = source["reachability"];
 	        this.pingMs = source["pingMs"];
 	        this.favorite = source["favorite"];
+	        this.match = this.convertValues(source["match"], MatchView);
 	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class Settings {
 	    directory: string;

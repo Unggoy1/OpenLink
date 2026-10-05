@@ -44,6 +44,7 @@ type lobbyInfo struct {
 	AutoStart   bool          `json:"auto_start"`
 	Starts      int           `json:"starts"`
 	Lobby       hostctl.Lobby `json:"lobby"`
+	State       int32         `json:"state"` // server lifecycle state from the DLL (match.go); 0 = not read yet
 	Error       string        `json:"error,omitempty"`
 }
 
@@ -96,7 +97,7 @@ func (a *agent) runLobby(ctx context.Context, controller lobbyController, poll t
 			return
 		}
 		l := st.Lobby
-		a.setLobby(func(info *lobbyInfo) { info.Lobby = l })
+		a.setLobby(func(info *lobbyInfo) { info.Lobby, info.State = l, st.State })
 		if l != last || st.State != lastState {
 			a.log.Info("lobby", "state", st.State, "connected", l.Connected, "peers", l.Peers, "mask", l.PeerMask,
 				"owner", l.Owner, "host_peer", l.HostPeer, "players", l.Players, "start_mode", l.StartMode,

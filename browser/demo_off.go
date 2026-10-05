@@ -8,6 +8,7 @@ var demo *demoState
 
 type demoState struct{}
 
-func (*demoState) status() *StatusView { return nil }
-func (*demoState) ballot() *BallotView { return nil }
-func (*demoState) vote(int) error      { return nil }
+func (*demoState) status() *StatusView   { return nil }
+func (*demoState) ballot() *BallotView   { return nil }
+func (*demoState) vote(int) error        { return nil }
+func (*demoState) servers() []ServerView { return nil }

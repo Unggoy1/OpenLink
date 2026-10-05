@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"halocommunity/connect"
+	"halocommunity/internal/api"
+	"halocommunity/vote"
 )
 
 // App is bound to the frontend; its exported methods are callable from JS.
@@ -46,18 +48,35 @@ func (a *App) shutdown(context.Context) {
 
 // ServerView is a listing as shown in the browser.
 type ServerView struct {
-	ID           string `json:"id"`
-	Key          string `json:"key"` // host:port; stable identity for favourites
-	Name         string `json:"name"`
-	Region       string `json:"region"`
-	Status       string `json:"status"`
-	Joinable     bool   `json:"joinable"`
-	Build        string `json:"build"`
-	BuildMatch   bool   `json:"buildMatch"`   // false also when the local build is unknown
-	Players      int    `json:"players"`      // -1 = unknown
-	Reachability string `json:"reachability"` // unknown, ok, unreachable (directory's check)
-	PingMS       int    `json:"pingMs"`       // -1 = no answer (host not in proxy mode)
-	Favorite     bool   `json:"favorite"`
+	ID           string     `json:"id"`
+	Key          string     `json:"key"` // host:port; stable identity for favourites
+	Name         string     `json:"name"`
+	Region       string     `json:"region"`
+	Status       string     `json:"status"`
+	Joinable     bool       `json:"joinable"`
+	Build        string     `json:"build"`
+	BuildMatch   bool       `json:"buildMatch"`   // false also when the local build is unknown
+	Players      int        `json:"players"`      // -1 = unknown
+	Reachability string     `json:"reachability"` // unknown, ok, unreachable (directory's check)
+	PingMS       int        `json:"pingMs"`       // -1 = no answer (host not in proxy mode)
+	Favorite     bool       `json:"favorite"`
+	Match        *MatchView `json:"match"` // what the server is playing; nil when the host does not say
+}
+
+// MatchView is what a server is playing, as its host agent reports it.
+type MatchView struct {
+	Phase string `json:"phase"` // lobby, voting, starting, in_game, post_game
+	Name  string `json:"name"`  // "" when no entry applies (for example while voting)
+	// Thumbs are the map thumbnail URLs to try in order (built here from the
+	// reported map IDs, never taken from the directory). Empty = none.
+	Thumbs []string `json:"thumbs"`
+}
+
+func matchView(m *api.Match) *MatchView {
+	if m == nil || !m.Valid() {
+		return nil
+	}
+	return &MatchView{Phase: m.Phase, Name: m.Name, Thumbs: vote.ThumbURLs(m.Thumb)}
 }
 
 // StatusView describes the active session.
@@ -129,6 +148,9 @@ func (a *App) LocalBuild() string {
 // ListServers fetches all listings and pings the ones that answer probes.
 // Favourites come first, then joinable servers on the player's build.
 func (a *App) ListServers() ([]ServerView, error) {
+	if demo != nil {
+		return demo.servers(), nil
+	}
 	s := a.GetSettings()
 	if s.Directory == "" {
 		return nil, errors.New("no directory address set")
@@ -147,7 +169,7 @@ func (a *App) ListServers() ([]ServerView, error) {
 		key := net.JoinHostPort(sv.Host, strconv.Itoa(sv.Port))
 		out[i] = ServerView{ID: sv.ID, Key: key, Name: sv.Name, Region: sv.Region, Status: sv.Status,
 			Joinable: sv.Joinable, Build: sv.Build, BuildMatch: local != "" && sv.Build == local, Players: sv.Players,
-			Reachability: sv.Reachability, PingMS: -1, Favorite: slices.Contains(s.Favorites, key)}
+			Reachability: sv.Reachability, PingMS: -1, Favorite: slices.Contains(s.Favorites, key), Match: matchView(sv.Match)}
 		if !sv.Proxy {
 			continue // only proxy-mode hosts answer probes
 		}

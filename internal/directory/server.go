@@ -233,6 +233,13 @@ func (s *Server) heartbeat(w http.ResponseWriter, r *http.Request) {
 	e.info.LastSeen = now
 	e.info.Status = hb.Status
 	e.info.Players = hb.Players
+	// What the server is playing is optional and display-only: an invalid
+	// report is dropped rather than failing the heartbeat (and the listing).
+	e.info.Match = nil
+	if hb.Match != nil && hb.Match.Valid() {
+		m := *hb.Match
+		e.info.Match = &m
+	}
 	if e.info.Proxy != hb.Proxy {
 		e.info.Proxy = hb.Proxy
 		e.info.Reachability, e.info.CheckedAt = api.ReachUnknown, time.Time{}

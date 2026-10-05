@@ -138,6 +138,33 @@
     return s.pingMs < 1 ? '<1 ms' : `${s.pingMs} ms`;
   }
 
+  // What a server is playing, as its host reports it.
+  function matchText(m: main.MatchView): string {
+    switch (m.phase) {
+      case 'lobby':
+        return m.name ? `In lobby · next: ${m.name}` : 'In lobby';
+      case 'voting':
+        return 'Voting for the next match';
+      case 'starting':
+        return m.name ? `Starting: ${m.name}` : 'Starting a match';
+      case 'in_game':
+        return m.name ? `${m.name} · in game` : 'In game';
+      case 'post_game':
+        return m.name ? `${m.name} · match over` : 'Match over';
+    }
+    return '';
+  }
+
+  // Map thumbnails: which URL is being tried (.jpg, then .png), keyed by the
+  // first URL so a new map starts fresh; past the end = no image.
+  let thumbTry = $state<Record<string, number>>({});
+  const matchThumb = (m: main.MatchView | undefined) =>
+    m?.thumbs?.length ? m.thumbs[thumbTry[m.thumbs[0]] ?? 0] : undefined;
+  function matchThumbFailed(m: main.MatchView) {
+    const key = m.thumbs[0];
+    thumbTry[key] = (thumbTry[key] ?? 0) + 1;
+  }
+
   onMount(() => {
     (async () => {
       settings = await GetSettings();
@@ -254,7 +281,23 @@
                     aria-pressed={s.favorite}>{s.favorite ? '★' : '☆'}</button
                   >
                 </td>
-                <td class="name">{s.name}</td>
+                <td class="name">
+                  <div class="server">
+                    {#if s.match}
+                      {@const m = s.match}
+                      {@const thumb = matchThumb(m)}
+                      <div class="mthumb">
+                        {#if thumb}
+                          <img src={thumb} alt="" loading="lazy" decoding="async" onerror={() => matchThumbFailed(m)} />
+                        {/if}
+                      </div>
+                    {/if}
+                    <div class="server-text">
+                      <div>{s.name}</div>
+                      {#if s.match}<div class="match" class:live={s.match.phase === 'in_game'}>{matchText(s.match)}</div>{/if}
+                    </div>
+                  </div>
+                </td>
                 <td>{s.region || '—'}</td>
                 <td>{s.players >= 0 ? s.players : '—'}</td>
                 <td>{ping(s)}</td>
@@ -338,6 +381,20 @@
   .star { background: none; border: none; padding: 0 2px; font-size: 18px; line-height: 1; color: var(--muted); }
   .star.on { color: #ffd166; }
   .name { font-weight: 600; }
+  .server { display: flex; align-items: center; gap: 12px; }
+  .server-text { min-width: 0; }
+  .mthumb {
+    flex: 0 0 auto;
+    width: 64px;
+    aspect-ratio: 16 / 9;
+    border-radius: 4px;
+    overflow: hidden;
+    background: var(--bg);
+  }
+  .mthumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .match { font-weight: 400; font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .match.live { color: var(--accent); }
+  tr.dim .mthumb { opacity: 0.5; }
   .state { color: var(--muted); font-size: 13px; }
   .act { text-align: right; width: 1%; white-space: nowrap; }
   tr.dim .name { color: var(--faint); }

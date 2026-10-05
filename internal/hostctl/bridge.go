@@ -126,6 +126,18 @@ func (b *Bridge) ServerOwned(ctx context.Context, mode uint32) (Reply, error) {
 	return b.send(ctx, Request{Op: OpServerOwned, Mode: mode})
 }
 
+// SetName sets the server's name in the in-game server list (Custom Game →
+// Create Match → Server), which otherwise shows the PC name. Later beacons
+// carry it. name must pass ValidName (use api.GameName). CodeOK once the
+// engine tick wrote it; CodePending if no tick ran; CodeUnsupported if the
+// game's beacon object did not match the expected layout.
+func (b *Bridge) SetName(ctx context.Context, name string) (Reply, error) {
+	if !ValidName(name) {
+		return Reply{}, errors.New("server name must be 1-47 printable ASCII characters")
+	}
+	return b.send(ctx, Request{Op: OpSetName, Name: name})
+}
+
 func (b *Bridge) exchange(ctx context.Context, op uint16, pair AssetPair) (Reply, error) {
 	return b.send(ctx, Request{Op: op, Pair: pair})
 }

@@ -27,7 +27,45 @@ const (
 	BeaconFreshFor = 15 * time.Second
 	// MaxBeaconBytes bounds stored beacons; the retail beacon is 79 bytes.
 	MaxBeaconBytes = 512
+	// MaxNameRunes bounds server names in the directory.
+	MaxNameRunes = 48
+	// MaxGameNameLength is the longest name in Halo's in-game server list: the
+	// LAN beacon holds 48 UTF-16 units including the terminator (O080).
+	MaxGameNameLength = 47
 )
+
+// GameName is the name OpenLink Server puts in Halo's in-game server list for
+// a server listed as name: printable ASCII only, surrounding spaces trimmed,
+// cut to 47 characters. "" means nothing usable was left, and the game shows
+// the host's PC name. The game displays it in capitals.
+func GameName(name string) string {
+	b := make([]byte, 0, len(name))
+	for _, r := range name {
+		if r >= 0x20 && r <= 0x7e {
+			b = append(b, byte(r))
+		}
+	}
+	out := strings.TrimSpace(string(b))
+	if len(out) > MaxGameNameLength {
+		out = strings.TrimRight(out[:MaxGameNameLength], " ")
+	}
+	return out
+}
+
+// ValidServerName reports whether the directory accepts name: 1-48
+// characters after trimming spaces, no control characters.
+func ValidServerName(name string) bool {
+	name = strings.TrimSpace(name)
+	if name == "" || utf8.RuneCountInString(name) > MaxNameRunes {
+		return false
+	}
+	for _, r := range name {
+		if r < 0x20 || r == 0x7f {
+			return false
+		}
+	}
+	return true
+}
 
 // RegisterRequest is sent by a host agent to list a server.
 type RegisterRequest struct {

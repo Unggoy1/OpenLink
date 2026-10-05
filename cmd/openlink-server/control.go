@@ -19,7 +19,6 @@ type hostController interface {
 	Closed() bool
 	Status(context.Context) (hostctl.Reply, error)
 	Prepare(context.Context, hostctl.AssetPair) (hostctl.Reply, error)
-	PrepareEngine(context.Context, hostctl.AssetPair) (hostctl.Reply, error)
 	Initialize(context.Context, hostctl.AssetPair) (hostctl.Reply, error)
 }
 
@@ -35,21 +34,16 @@ type contentID struct {
 	AssetID   string `json:"asset_id"`
 	VersionID string `json:"version_id"`
 }
+
+// controlSelection is a map plus a published game variant (as in a custom game).
 type controlSelection struct {
 	Map        contentID `json:"map"`
 	Mode       contentID `json:"mode"`
-	ModeKind   string    `json:"mode_kind"`
 	Initialize bool      `json:"initialize,omitempty"`
 }
 
 func parseSelection(s controlSelection) (hostctl.AssetPair, error) {
 	var pair hostctl.AssetPair
-	if s.Initialize && s.ModeKind != "custom" {
-		return pair, errors.New("initial selection requires mode_kind custom")
-	}
-	if s.ModeKind != "custom" && s.ModeKind != "engine" {
-		return pair, errors.New("mode_kind must be custom or engine")
-	}
 	for i, id := range []string{s.Map.AssetID, s.Map.VersionID, s.Mode.AssetID, s.Mode.VersionID} {
 		if len(id) != 36 || id[8] != '-' || id[13] != '-' || id[18] != '-' || id[23] != '-' {
 			return pair, errors.New("asset/version IDs must be canonical nonzero UUIDs")
@@ -84,16 +78,13 @@ func controlReply(r hostctl.Reply) map[string]any {
 	return m
 }
 
-// dispatchSelection sends one parsed selection with the operation its kind needs.
+// dispatchSelection sends one parsed selection: the server's first selection
+// initializes the provider, later ones prepare the next match.
 func dispatchSelection(ctx context.Context, controller hostController, s controlSelection, pair hostctl.AssetPair) (hostctl.Reply, error) {
-	switch {
-	case s.Initialize:
+	if s.Initialize {
 		return controller.Initialize(ctx, pair)
-	case s.ModeKind == "engine":
-		return controller.PrepareEngine(ctx, pair)
-	default:
-		return controller.Prepare(ctx, pair)
 	}
+	return controller.Prepare(ctx, pair)
 }
 func (a *agent) handleControlStatus(w http.ResponseWriter, r *http.Request) {
 	controller := a.getControl()
@@ -125,7 +116,7 @@ func (a *agent) handleControlSelect(w http.ResponseWriter, r *http.Request) {
 	}
 	pair, validation := parseSelection(selection)
 	if err != nil || validation != nil {
-		writeJSON(w, 400, map[string]string{"error": "request requires canonical nonzero map/mode asset/version IDs and mode_kind custom or engine"})
+		writeJSON(w, 400, map[string]string{"error": "request requires canonical nonzero map/mode asset/version IDs"})
 		return
 	}
 	controller := a.getControl()
@@ -185,6 +176,7 @@ func (a *agent) manageHostControl(ctx context.Context, cmd *exec.Cmd) {
 	}()
 	a.log.Info("host control transport connected", "pid", cmd.Process.Pid)
 	if a.cfg.HostControlNative {
+		go a.setGameName(ctx, session.Bridge, time.Second)
 		go a.runLobby(ctx, session.Bridge, lobbyPoll)
 	}
 	switch {

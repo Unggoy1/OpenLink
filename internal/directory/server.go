@@ -17,7 +17,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode/utf8"
 
 	"halocommunity/internal/api"
 )
@@ -284,7 +283,7 @@ func (s *Server) resolvesTo(ctx context.Context, host, ip string) bool {
 func validateRegister(req *api.RegisterRequest) error {
 	req.Name = strings.TrimSpace(req.Name)
 	switch {
-	case req.Name == "" || utf8.RuneCountInString(req.Name) > 48 || !printable(req.Name):
+	case !api.ValidServerName(req.Name):
 		return errors.New("name must be 1-48 printable characters")
 	case req.Port < 1 || req.Port > 65535:
 		return errors.New("bad port")

@@ -47,23 +47,15 @@ func TestCheckPlaylistVotingRules(t *testing.T) {
 	short := func(i int) string { return fmt.Sprintf("e%d", i) }
 	none := func(int) string { return "" }
 
-	if _, _, err := checkPlaylist(c, writeTemp(t, playlistDoc(1, short, none)), true); err == nil {
+	one := writeTemp(t, playlistDoc(1, short, none))
+	if _, _, err := checkPlaylist(c, one, true); err == nil {
 		t.Error("voting with one entry accepted")
 	}
-	// The rotation-only check accepts an engine-only playlist; voting does not.
-	if _, _, err := checkPlaylist(c, writeTemp(t, rotationDocEngineOnly), false); err != nil {
-		t.Errorf("rotation: %v", err)
-	}
-	if _, _, err := checkPlaylist(c, writeTemp(t, rotationDocEngineOnly), true); err == nil {
-		t.Error("voting without a custom mode accepted")
+	// A single entry is fine for rotation without voting.
+	if _, _, err := checkPlaylist(c, one, false); err != nil {
+		t.Errorf("rotation with one entry: %v", err)
 	}
 }
-
-const rotationDocEngineOnly = `{"schema_version": 1, "entries": [
- {"id": "a", "mode_kind": "engine", "map": {"asset_id": "aaaaaaaa-0000-0000-0000-000000000001", "version_id": "aaaaaaaa-0000-0000-0000-000000000002"},
-  "mode": {"asset_id": "aaaaaaaa-0000-0000-0000-000000000003", "version_id": "aaaaaaaa-0000-0000-0000-000000000004"}},
- {"id": "b", "mode_kind": "engine", "map": {"asset_id": "bbbbbbbb-0000-0000-0000-000000000001", "version_id": "bbbbbbbb-0000-0000-0000-000000000002"},
-  "mode": {"asset_id": "bbbbbbbb-0000-0000-0000-000000000003", "version_id": "bbbbbbbb-0000-0000-0000-000000000004"}}]}`
 
 func TestCheckPlaylistBallotSize(t *testing.T) {
 	c := defaults()

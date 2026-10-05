@@ -302,7 +302,7 @@ func TestHeartbeatMatch(t *testing.T) {
 			t.Errorf("invalid match %+v listed as %+v", bad, got)
 		}
 	}
-	// A heartbeat without a match (an older agent, or no host control) clears it.
+	// A heartbeat without a match (a server still starting up) clears it.
 	listed(&want)
 	if got := listed(nil); got != nil {
 		t.Fatalf("match kept after a heartbeat without one: %+v", got)

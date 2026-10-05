@@ -3,6 +3,7 @@ package hostctl
 import (
 	"bytes"
 	"encoding/binary"
+	"strings"
 	"testing"
 )
 
@@ -172,3 +173,46 @@ func TestServerOwnedRequest(t *testing.T) {
 		t.Fatal("accepted server-owned mode 3")
 	}
 }
+
+func TestSetNameRequest(t *testing.T) {
+	long := strings.Repeat("x", MaxNameLength)
+	for _, name := range []string{"A", "Bob's Server #1 ~ (US-West)", long} {
+		var w bytes.Buffer
+		if err := EncodeRequest(&w, Request{Op: OpSetName, ID: 2, Name: name}); err != nil {
+			t.Fatal(err)
+		}
+		if n := binary.LittleEndian.Uint32(w.Bytes()); n != 96 {
+			t.Fatalf("frame length %d", n)
+		}
+		got, err := DecodeRequest(&w)
+		if err != nil || got.Op != OpSetName || got.Name != name {
+			t.Fatalf("round trip %q: %+v %v", name, got, err)
+		}
+	}
+	for _, name := range []string{"", long + "x", "tab\there", "café", "nul\x00"} {
+		if err := EncodeRequest(&bytes.Buffer{}, Request{Op: OpSetName, ID: 2, Name: name}); err == nil {
+			t.Fatalf("encoded %q", name)
+		}
+	}
+	frame := func(field []byte) *bytes.Buffer {
+		b := make([]byte, 48, 96)
+		copy(b, "HICT")
+		binary.LittleEndian.PutUint16(b[4:], 1)
+		binary.LittleEndian.PutUint16(b[6:], OpSetName)
+		binary.LittleEndian.PutUint64(b[8:], 2)
+		var w bytes.Buffer
+		writeFrame(&w, append(b, field...))
+		return &w
+	}
+	padded := func(s string) []byte { f := make([]byte, 48); copy(f, s); return f }
+	unterminated := []byte(long + "x")
+	gap := padded("ab")
+	gap[5] = 'c'
+	for name, field := range map[string][]byte{"empty": padded(""), "unterminated": unterminated, "nonzero padding": gap,
+		"control": padded("a\x01b"), "high byte": padded("a\xe9"), "short": []byte("abc\x00")} {
+		if _, err := DecodeRequest(frame(field)); err == nil {
+			t.Fatalf("accepted %s", name)
+		}
+	}
+}
+

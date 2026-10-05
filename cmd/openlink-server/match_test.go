@@ -33,7 +33,7 @@ func TestMatchReport(t *testing.T) {
 		{"vote open", true, statePreGame, &voteInfo{Phase: "voting", Current: "kusini-ctf"}, nil, &want{api.PhaseVoting, ""}},
 		{"vote closed, starting", true, statePreGame, &voteInfo{Phase: "starting", Winner: "interference-fiesta"}, nil, &want{api.PhaseStarting, "interference-fiesta"}},
 		{"start requested", true, statePreGame, &voteInfo{Phase: "playing", Current: "interference-fiesta"}, nil, &want{api.PhaseStarting, "interference-fiesta"}},
-		{"engine starting", true, stateStarting, &voteInfo{Phase: "playing", Current: "kusini-ctf"}, nil, &want{api.PhaseStarting, "kusini-ctf"}},
+		{"match starting", true, stateStarting, &voteInfo{Phase: "playing", Current: "kusini-ctf"}, nil, &want{api.PhaseStarting, "kusini-ctf"}},
 		{"vote match in game", true, stateInGame, &voteInfo{Phase: "playing", Current: "kusini-ctf"}, nil, &want{api.PhaseInGame, "kusini-ctf"}},
 		{"vote match ended", true, stateEndGame, &voteInfo{Phase: "playing", Current: "kusini-ctf"}, nil, &want{api.PhasePostGame, "kusini-ctf"}},
 		{"state not read yet", false, 0, nil, &rotationInfo{Current: "kusini-ctf"}, nil},

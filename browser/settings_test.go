@@ -16,9 +16,8 @@ func TestLoadSettingsDirectory(t *testing.T) {
 	os.MkdirAll(filepath.Dir(p), 0o755)
 
 	for saved, want := range map[string]string{
-		"": DefaultDirectory, // nothing saved
-		`{"directory": "` + oldDefaultDirectory + `"}`: DefaultDirectory, // the old default moves
-		`{"directory": "https://dir.example"}`:         "https://dir.example",
+		"":                                     DefaultDirectory, // nothing saved
+		`{"directory": "https://dir.example"}`: "https://dir.example",
 	} {
 		os.Remove(p)
 		if saved != "" {

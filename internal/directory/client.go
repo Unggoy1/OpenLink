@@ -91,7 +91,7 @@ func (c *Client) Unregister(ctx context.Context, id, token string) error {
 }
 
 // Self returns the host's own listing, including whether players see it yet
-// (Listed). Older directories do not have this call and answer 404/405.
+// (Listed).
 func (c *Client) Self(ctx context.Context, id, token string) (api.ServerInfo, error) {
 	var out api.ServerInfo
 	err := c.do(ctx, http.MethodGet, "/v1/servers/"+url.PathEscape(id), token, nil, &out)

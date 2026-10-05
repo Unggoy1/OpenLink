@@ -50,7 +50,7 @@ By default OpenLink Server runs in **proxy mode**: the game server listens only 
 
 ## Playing
 
-Open the OpenLink app, click **Join** on a server, then in Halo Infinite go to **Custom Games → Server** and pick the host's PC name. The bar at the bottom shows when you are connected. Keep the app open while you play. See [browser/README.md](browser/README.md).
+Open the OpenLink app, click **Join** on a server, then in Halo Infinite go to **Custom Game → Create Match → Server** and click the server's name, which the bar at the bottom of the app shows as the game lists it (in capitals). The bar also shows when you are connected. Keep the app open while you play. See [browser/README.md](browser/README.md).
 
 - Windows is the main platform. A Linux build of the app (for the game under Proton) is produced by CI but has not been tested yet.
 - If the server is not listed in the game, switch Settings to **LAN broadcast** (also needed when the server runs on the same PC).

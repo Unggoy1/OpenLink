@@ -6,6 +6,7 @@
 #include "tick_slot.h"
 #include "image_validation.h"
 #include "simulation_state.h"
+#include "beacon_name.h"
 #include <atomic>
 #include <cstring>
 
@@ -197,6 +198,45 @@ void TickStart(uintptr_t base,int32_t state,uint32_t gates,uintptr_t simulation)
     start_completed.store(ticket,std::memory_order_release);
 }
 
+// Server name in the in-game list (BackendSetName). The beacon tick 142e9954c
+// runs in the same networking update (1405145e0 -> 1422c2d0c) as the server
+// tick that calls HookTick, so this write never races a beacon serialization.
+constexpr uintptr_t kBeacon=0x4dbfef0;
+SRWLOCK name_lock=SRWLOCK_INIT;
+uint16_t pending_name[kBeaconNameUnits]={};
+std::atomic<uint64_t> name_request{0},name_completed{0},name_sequence{0};
+std::atomic<uint16_t> name_code{CodePending};
+bool WriteAddress(uintptr_t address,const void* source,size_t size) noexcept {
+    MEMORY_BASIC_INFORMATION region={};
+    if(!VirtualQuery(reinterpret_cast<void*>(address),&region,sizeof(region)) || region.State!=MEM_COMMIT ||
+        !(region.Protect&(PAGE_READWRITE|PAGE_WRITECOPY)) || (region.Protect&PAGE_GUARD) ||
+        reinterpret_cast<uintptr_t>(region.BaseAddress)+region.RegionSize<address+size) return false;
+    __try { std::memcpy(reinterpret_cast<void*>(address),source,size); return true; }
+    __except(EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+void TickName(uintptr_t base) noexcept {
+    const uint64_t ticket=name_request.exchange(0,std::memory_order_acq_rel);
+    if(!ticket) return;
+    uint16_t code=CodeUnsupported;
+    uint8_t snapshot[kBeaconSnapshot]={};
+    MEMORY_BASIC_INFORMATION region={};
+    if(VirtualQuery(reinterpret_cast<void*>(base+kBeacon),&region,sizeof(region)) && region.AllocationBase==reinterpret_cast<void*>(base) &&
+        CopyAddress(base+kBeacon,snapshot,sizeof(snapshot))) {
+        const auto check=CheckBeacon(snapshot);
+        if(check==BeaconCheck::NotStarted) code=CodeBusy;
+        if(check==BeaconCheck::Ok) {
+            uint16_t units[kBeaconNameUnits],observed[kBeaconNameUnits]={};
+            AcquireSRWLockShared(&name_lock); std::memcpy(units,pending_name,sizeof(units)); ReleaseSRWLockShared(&name_lock);
+            code=CodeFailed;
+            if(WriteAddress(base+kBeacon+kBeaconName,units,sizeof(units)) &&
+                CopyAddress(base+kBeacon+kBeaconName,observed,sizeof(observed)) && !std::memcmp(units,observed,sizeof(units)))
+                code=CodeOK;
+        }
+    }
+    name_code.store(code,std::memory_order_release);
+    name_completed.store(ticket,std::memory_order_release);
+}
+
 void HookTick(void* server) {
     const auto original=original_tick.load(std::memory_order_acquire);
     if(original) original(server); // exact native call, once; native exceptions keep native semantics
@@ -225,6 +265,7 @@ void HookTick(void* server) {
         current_simulation.store(simulation,std::memory_order_release);
         if(frame.state==HostInGame || frame.state==HostEndGame) start_sent.store(false,std::memory_order_release);
         TickStart(base,frame.state,frame.gates,simulation);
+        TickName(base);
         auto lobby=ReadLobby(base,session,simulation);
         // A Start whose players all left before the engine began the match would
         // otherwise start instantly for the next joiner; withdraw it (start mode 0).
@@ -393,7 +434,7 @@ uint32_t StopGameBackend() noexcept {
             if(result==ERROR_SUCCESS) result=filter;
         }
     }
-    start_request.store(0);
+    start_request.store(0); name_request.store(0);
     AcquireSRWLockExclusive(&selection_lock); lock_active=false; ReleaseSRWLockExclusive(&selection_lock);
     ReleaseSRWLockExclusive(&installation); return result;
 }
@@ -421,6 +462,27 @@ BackendReport BackendStart(uint32_t wait_ms) noexcept {
         for(unsigned i=0;i<100 && start_completed.load(std::memory_order_acquire)!=ticket;++i) Sleep(5);
     report=commands.Status();
     report.code=start_completed.load(std::memory_order_acquire)==ticket ? start_code.load(std::memory_order_acquire) : uint16_t(CodePending);
+    return WithLockGates(report);
+}
+BackendReport BackendSetName(const uint16_t* units,uint32_t wait_ms) noexcept {
+    auto report=commands.Status();
+    if(!running.load(std::memory_order_acquire)) { report.code=CodePending; return WithLockGates(report); }
+    if(wait_ms>2000) wait_ms=2000;
+    const uint64_t ticket=++name_sequence;
+    AcquireSRWLockExclusive(&name_lock);
+    uint64_t idle=0;
+    const bool queued=name_request.load(std::memory_order_acquire)==0;
+    if(queued) std::memcpy(pending_name,units,sizeof(pending_name));
+    ReleaseSRWLockExclusive(&name_lock);
+    if(!queued || !name_request.compare_exchange_strong(idle,ticket)) { report.code=CodeBusy; return WithLockGates(report); }
+    const ULONGLONG deadline=GetTickCount64()+wait_ms;
+    while(name_completed.load(std::memory_order_acquire)!=ticket && GetTickCount64()<deadline) Sleep(5);
+    uint64_t waiting=ticket;
+    // Withdraw an undispatched command; one the tick already took completes shortly.
+    if(name_completed.load(std::memory_order_acquire)!=ticket && !name_request.compare_exchange_strong(waiting,0))
+        for(unsigned i=0;i<100 && name_completed.load(std::memory_order_acquire)!=ticket;++i) Sleep(5);
+    report=commands.Status();
+    report.code=name_completed.load(std::memory_order_acquire)==ticket ? name_code.load(std::memory_order_acquire) : uint16_t(CodePending);
     return WithLockGates(report);
 }
 uint32_t BackendServerOwned(uint32_t mode) noexcept {

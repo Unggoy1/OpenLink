@@ -122,8 +122,6 @@ func loadConfig(fs *flag.FlagSet, args []string) (config, error) {
 		if dir := exeDir(); dir != "" {
 			if p := filepath.Join(dir, "openlink-server.json"); fileExists(p) {
 				path = p
-			} else if fileExists(filepath.Join(dir, "hostagent.json")) {
-				return c, errors.New("found hostagent.json next to the program: rename it to openlink-server.json")
 			}
 		}
 	}
@@ -213,6 +211,9 @@ func loadConfig(fs *flag.FlagSet, args []string) (config, error) {
 		if c.HostControlDLL == "" {
 			c.HostControlDLL = filepath.Join(exeDir(), "openlink-control.dll")
 		}
+	}
+	if c.Directory != "" && !api.ValidServerName(c.Name) {
+		return c, errors.New("name must be 1-48 characters with no control characters (the in-game server list shows up to 47 of them, printable ASCII only)")
 	}
 	if c.Vote != nil && !c.Proxy {
 		return c, errors.New("vote requires proxy mode")

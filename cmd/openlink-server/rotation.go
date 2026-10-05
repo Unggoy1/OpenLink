@@ -37,7 +37,6 @@ func entrySelection(e playlist.Entry, initialize bool) controlSelection {
 	return controlSelection{
 		Map:        contentID{AssetID: e.Map.AssetID, VersionID: e.Map.VersionID},
 		Mode:       contentID{AssetID: e.Mode.AssetID, VersionID: e.Mode.VersionID},
-		ModeKind:   e.ModeKind,
 		Initialize: initialize,
 	}
 }
@@ -59,15 +58,9 @@ func (a *agent) runRotation(ctx context.Context, controller hostController) {
 // rotate selects the first match's entry as soon as the server's lobby is
 // ready (the DLL then holds it against the lobby leader), and the next entry
 // each time the server is back in its lobby after a match started. The first
-// selection initializes the native provider, which requires a custom (UGC)
-// mode; later entries may be custom or engine modes.
+// selection initializes the native provider.
 func (a *agent) rotate(ctx context.Context, controller hostController, bag *playlist.Bag, poll time.Duration) {
-	first, ok := bag.NextMatching(func(e playlist.Entry) bool { return e.ModeKind == "custom" })
-	if !ok {
-		a.setRotation(func(r *rotationInfo) { r.Error = "playlist needs a custom (UGC) mode entry for the first match" })
-		a.log.Error("playlist has no custom mode entry for the first match; rotation off")
-		return
-	}
+	first := bag.Next()
 	pending, initialize := &first, true
 	var baseline uint32 // matches started when the current entry was selected
 	failures := 0
@@ -121,14 +114,9 @@ func (a *agent) rotate(ctx context.Context, controller hostController, bag *play
 				a.setRotation(func(r *rotationInfo) { r.Error = fmt.Sprintf("%s: %v", entry.ID, err) })
 				if failures >= rotationAttempts {
 					a.log.Warn("skipping playlist entry", "entry", entry.ID)
-					next, ok := bag.Next(), true
-					if initialize {
-						next, ok = bag.NextMatching(func(e playlist.Entry) bool { return e.ModeKind == "custom" })
-					}
-					if ok {
-						pending, failures = &next, 0
-						a.setRotation(func(r *rotationInfo) { r.Pending = next.ID })
-					}
+					next := bag.Next()
+					pending, failures = &next, 0
+					a.setRotation(func(r *rotationInfo) { r.Pending = next.ID })
 				}
 			}
 		}

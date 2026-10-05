@@ -77,7 +77,7 @@ jobs:
       - name: Native tests
         shell: cmd
         run: |
-          for %%t in (slot provider mailbox image choice snapshot backend) do (
+          for %%t in (slot provider mailbox image choice snapshot backend beacon) do (
             call native\hostctl\test-%%t.cmd "%GITHUB_WORKSPACE%\native-tests\%%t" || exit /b 1
           )
       - name: DLL-backed Go tests

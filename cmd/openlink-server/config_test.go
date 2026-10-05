@@ -42,21 +42,6 @@ func TestConfigDirectoryDefault(t *testing.T) {
 	}
 }
 
-func TestOldConfigNameIsReported(t *testing.T) {
-	dir := exeDir()
-	if fileExists(filepath.Join(dir, "openlink-server.json")) {
-		t.Skip("a config is next to the test binary")
-	}
-	old := filepath.Join(dir, "hostagent.json")
-	if err := os.WriteFile(old, []byte(`{}`), 0o600); err != nil {
-		t.Skip(err)
-	}
-	defer os.Remove(old)
-	if _, err := loadConfig(flag.NewFlagSet("t", flag.ContinueOnError), nil); err == nil {
-		t.Fatal("hostagent.json next to the program was silently ignored")
-	}
-}
-
 func TestConfigPrecedence(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "openlink-server.json")
@@ -126,5 +111,27 @@ func TestPackagedExampleConfig(t *testing.T) {
 	c, err := loadConfig(flag.NewFlagSet("t", flag.ContinueOnError), []string{"-config", "../../packaging/host/openlink-server.example.json"})
 	if err != nil || !c.HostControlNative || c.Playlist != "playlist.json" || c.ServerIP != "127.0.0.2" {
 		t.Fatalf("packaged config example: %+v %v", c, err)
+	}
+}
+
+func TestConfigServerName(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "openlink-server.json")
+	load := func(doc string) error {
+		os.WriteFile(path, []byte(doc), 0o600)
+		_, err := loadConfig(flag.NewFlagSet("t", flag.ContinueOnError), []string{"-config", path})
+		return err
+	}
+	for _, name := range []string{"Friday Night Halo", strings.Repeat("é", 48)} {
+		if err := load(`{"name": "` + name + `"}`); err != nil {
+			t.Errorf("%q rejected: %v", name, err)
+		}
+	}
+	for _, name := range []string{"", "   ", strings.Repeat("x", 49), `tab\there`} {
+		if err := load(`{"name": "` + name + `"}`); err == nil || !strings.Contains(err.Error(), "1-48") {
+			t.Errorf("%q accepted: %v", name, err)
+		}
+	}
+	if err := load(`{"name": "", "directory": ""}`); err != nil {
+		t.Errorf("unlisted server with no name rejected: %v", err)
 	}
 }

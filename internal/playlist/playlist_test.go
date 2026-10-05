@@ -29,7 +29,7 @@ func TestParseDefaultsAndDisabled(t *testing.T) {
 		t.Fatalf("got selection %q entries %d", f.Selection, len(f.Entries))
 	}
 	for _, e := range f.Entries {
-		if e.ModeKind != "custom" || e.ID == "off" {
+		if e.ID == "off" {
 			t.Fatalf("bad entry %+v", e)
 		}
 	}
@@ -42,7 +42,6 @@ func TestParseRejects(t *testing.T) {
 		"duplicate": strings.Replace(sample, `"kusini-ctf"`, `"interference-fiesta"`, 1),
 		"uuid":      strings.Replace(sample, "70f884d7-6869-469d-b4d2-4219627e2d83", "70f884d7", 1),
 		"zero":      strings.Replace(sample, "70f884d7-6869-469d-b4d2-4219627e2d83", "00000000-0000-0000-0000-000000000000", 1),
-		"kind":      strings.Replace(sample, `{"id": "kusini-ctf",`, `{"id": "kusini-ctf", "mode_kind": "forge",`, 1),
 		"noid":      strings.Replace(sample, `"id": "kusini-ctf",`, ``, 1),
 		"empty":     `{"schema_version": 1, "entries": []}`,
 		"json":      `{`,
@@ -101,18 +100,6 @@ func TestSequentialAndSingleEntry(t *testing.T) {
 		if b.Next().ID != one.Entries[0].ID {
 			t.Fatal("single entry")
 		}
-	}
-}
-
-func TestNextMatching(t *testing.T) {
-	f, _ := Parse([]byte(strings.Replace(sample, `{"id": "kusini-ctf",`, `{"id": "kusini-ctf", "mode_kind": "engine",`, 1)))
-	b := NewBag(f, rand.New(rand.NewPCG(3, 4)))
-	e, ok := b.NextMatching(func(e Entry) bool { return e.ModeKind == "engine" })
-	if !ok || e.ID != "kusini-ctf" {
-		t.Fatalf("got %+v %v", e, ok)
-	}
-	if _, ok := b.NextMatching(func(Entry) bool { return false }); ok {
-		t.Fatal("matched nothing")
 	}
 }
 

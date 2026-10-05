@@ -101,7 +101,7 @@ Known limitation: every LAN server on a PC broadcasts its beacon from the same a
 |---|---|---|
 | `directory` | https://openlink-dir.unggoy.xyz | directory URL; `""` = not listed |
 | `register_key` | | trusted-host key from the directory operator; only needed to list a tunnel or other address (`public_host`). Keep the file private |
-| `name`, `region` | PC name, empty | shown in the browser |
+| `name`, `region` | PC name, empty | `name` (1-48 characters) is shown in the OpenLink app and in Halo's in-game server list (Custom Game → Create Match → Server). In game only printable ASCII is kept (other characters are dropped), at most 47 characters are sent, the game shows them in capitals and about 38 fit before it cuts the name off. If nothing printable is left, the game shows the PC name |
 | `public_host` | (your public IP) | address players use. A DNS name pointing to your own IP (dynamic DNS) works as is; a tunnel or any other address needs `register_key` |
 | `public_port` | 1343 | external UDP port |
 | `install` | auto | game folder containing version.txt |

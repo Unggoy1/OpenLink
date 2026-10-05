@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net"
 	"os/exec"
-	"slices"
 	"strconv"
 	"time"
 
@@ -266,16 +265,7 @@ func (a *agent) directoryLoop(ctx context.Context) {
 func (a *agent) updateReachability(ctx context.Context, dc *directory.Client, id, token string) {
 	s, err := dc.Self(ctx, id, token)
 	if err != nil {
-		// An older directory has no self view; find the listing in the public list.
-		list, lerr := dc.List(ctx, "")
-		if lerr != nil {
-			return
-		}
-		i := slices.IndexFunc(list, func(s api.ServerInfo) bool { return s.ID == id })
-		if i < 0 {
-			return
-		}
-		s, s.Listed = list[i], true
+		return
 	}
 	endpoint := net.JoinHostPort(s.Host, strconv.Itoa(s.Port))
 	a.mu.Lock()

@@ -161,6 +161,7 @@ export namespace main {
 	export class StatusView {
 	    serverId: string;
 	    serverName: string;
+	    gameName: string;
 	    mode: string;
 	    beaconAge: number;
 	    connected: boolean;
@@ -176,6 +177,7 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.serverId = source["serverId"];
 	        this.serverName = source["serverName"];
+	        this.gameName = source["gameName"];
 	        this.mode = source["mode"];
 	        this.beaconAge = source["beaconAge"];
 	        this.connected = source["connected"];

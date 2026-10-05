@@ -48,9 +48,6 @@ func checkPlaylist(c config, path string, voting bool) (*playlist.File, playlist
 	if !voting {
 		return f, rep, nil
 	}
-	if !hasCustom(f.Entries) {
-		return nil, rep, errors.New("playlist: voting needs at least one custom (UGC) mode entry for the first selection")
-	}
 	if len(f.Entries) < 2 {
 		return nil, rep, errors.New("playlist: voting needs at least 2 enabled entries")
 	}

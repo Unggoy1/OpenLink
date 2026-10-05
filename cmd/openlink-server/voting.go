@@ -311,19 +311,13 @@ func (v *voter) closeRound(ctx context.Context, now time.Time) {
 	v.setPhase(phaseWaiting, fmt.Sprintf("selection failed: %v", lastErr))
 }
 
-// initialize makes the server's first selection (a custom entry), which the
+// initialize makes the server's first selection (a random entry), which the
 // native provider needs before any later selection. Returns false if ctx ends.
 func (v *voter) initialize(ctx context.Context) bool {
-	var custom []playlist.Entry
-	for _, e := range v.entries {
-		if e.ModeKind == "custom" {
-			custom = append(custom, e)
-		}
-	}
 	for ctx.Err() == nil && !v.ctl.Closed() {
 		st, err := v.status(ctx)
 		if err == nil && st.Gates&hostctl.GateLobby != 0 {
-			e := custom[v.rng.IntN(len(custom))]
+			e := v.entries[v.rng.IntN(len(v.entries))]
 			selection := entrySelection(e, true)
 			pair, perr := parseSelection(selection)
 			if perr == nil {
@@ -486,13 +480,4 @@ func (a *agent) runVoting(ctx context.Context, controller voteController) {
 	a.log.Info("playlist voting on", "entries", len(f.Entries), "options", v.options,
 		"vote_seconds", v.window.Seconds(), "start_delay_seconds", v.delay.Seconds())
 	v.run(ctx)
-}
-
-func hasCustom(entries []playlist.Entry) bool {
-	for _, e := range entries {
-		if e.ModeKind == "custom" {
-			return true
-		}
-	}
-	return false
 }

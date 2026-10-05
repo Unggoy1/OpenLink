@@ -1,6 +1,6 @@
 # Host control: DLL, server-owned selection and playlist rotation
 
-The DLL/controller, managed loader/local administration, server-owned map/mode selection and playlist rotation are implemented and were tested live on build B002 (Steam 22709428, 2026-10-04, runs R016–R018). With a stock client as lobby leader, the server loaded the agent's pinned map/mode pairs and rotated them across consecutive matches. Requests carry map/mode asset IDs plus pinned version IDs, using the game's normal CMS flow and login. Not yet tested: natural match end by time or score limit, several or remote players, Forge maps, engine (type 10) modes, long unattended runs.
+The DLL/controller, managed loader/local administration, server-owned map/mode selection and playlist rotation are implemented and were tested live on build B002 (Steam 22709428, 2026-10-04, runs R016–R018). With a stock client as lobby leader, the server loaded the agent's pinned map/mode pairs and rotated them across consecutive matches. Requests carry map/mode asset IDs plus pinned version IDs, using the game's normal CMS flow and login. Since tested: natural match end by time, remote players (2026-10-04) and Forge maps. Not yet tested: match end by score limit, scripted Forge maps, long unattended runs.
 
 ## DLL transport
 
@@ -26,10 +26,10 @@ The helper inherits the original managed process handle, verifies its identity a
 The loopback API retains the required `X-OpenLink-Admin: 1` header. `GET /host-control` returns backend status. `POST /host-control/select` accepts this shape (placeholder UUIDs below are examples, not known working content):
 
 ```json
-{"map":{"asset_id":"00112233-4455-6677-8899-aabbccddeeff","version_id":"10112233-4455-6677-8899-aabbccddeeff"},"mode":{"asset_id":"20112233-4455-6677-8899-aabbccddeeff","version_id":"30112233-4455-6677-8899-aabbccddeeff"},"mode_kind":"custom"}
+{"map":{"asset_id":"00112233-4455-6677-8899-aabbccddeeff","version_id":"10112233-4455-6677-8899-aabbccddeeff"},"mode":{"asset_id":"20112233-4455-6677-8899-aabbccddeeff","version_id":"30112233-4455-6677-8899-aabbccddeeff"}}
 ```
 
-Mode kind is `custom` (published UGC variant, native6) or `engine` (base EngineGameVariants resource, native10). An officially published playlist mode can use the UGC path; publication alone does not determine this type. IDs must be canonical/nonzero and versions pinned; map type is preserved from initialized current content. JSON is strict/bounded4096bytes. `openlink-server select <selection.json>` submits the same request locally. A `selected` response establishes descriptor readback only. It does not mean a map was downloaded, a mode's saved settings were applied or a match started. Random playlists require verified loading/start/end and two actual fixed-pair tests first. Parent notes FN013/FN014 and test-card R004 record the next gates.
+The mode is a published game variant (UGC, native type 6), including officially published playlist modes. IDs must be canonical/nonzero and versions pinned; map type is preserved from initialized current content. JSON is strict/bounded4096bytes. `openlink-server select <selection.json>` submits the same request locally. A `selected` response establishes descriptor readback only. It does not mean a map was downloaded, a mode's saved settings were applied or a match started. Random playlists require verified loading/start/end and two actual fixed-pair tests first. Parent notes FN013/FN014 and test-card R004 record the next gates.
 
 ## Server-owned selection and playlist rotation
 
@@ -57,12 +57,12 @@ Every server needs a playlist in openlink-server.json; the program refuses to st
 ```
 
 - `selection`: `shuffle_bag` (default) plays every entry once per cycle in random order, never repeating across a cycle boundary. `sequential` uses file order.
-- Each entry has `mode_kind` `custom` (default, UGC game variant) or `engine`, and `enabled` (default true). The first match must use a `custom` entry, because it initializes the server's selection.
+- Each entry has `enabled` (default true). Every mode is a published game variant (UGC), as in a custom game.
 - Limits, checked when the agent starts (it refuses to start on any error) and by `openlink-server check-playlist [file]`:
   - `id`: required and unique; at most 80 bytes. A short readable slug such as `fiesta-slayer-interference` is best.
   - `name`: optional (players see the `id` without it); at most 80 UTF-8 bytes, not characters (é is 2 bytes, most other scripts 2–3, emoji 4). No control characters in either.
   - Map and mode `asset_id`/`version_id`: canonical, nonzero UUIDs.
-  - With voting: at least 2 enabled entries, at least one `custom`, and the largest possible ballot (the `options` entries with the longest IDs and names, thumbnails included) must fit in 1200 bytes. `&`, `<` and `>` count 6 bytes each. IDs and names both at 80 bytes fit only just (1197 bytes with the default settings) and fail with `max_players` 0 or very long vote timers; with IDs of about 32 bytes, 80-byte names always fit.
+  - With voting: at least 2 enabled entries, and the largest possible ballot (the `options` entries with the longest IDs and names, thumbnails included) must fit in 1200 bytes. `&`, `<` and `>` count 6 bytes each. IDs and names both at 80 bytes fit only just (1197 bytes with the default settings) and fail with `max_players` 0 or very long vote timers; with IDs of about 32 bytes, 80-byte names always fit.
   - `check-playlist` always applies the voting checks, so a playlist that passes works on any server.
 - The playlist is read once when the agent starts; restart the agent after editing it.
 - The agent selects the first entry as soon as the server's lobby is ready, and the next entry each time the server is back in its lobby after a match. A selection that fails three times is skipped.
@@ -83,6 +83,14 @@ By default the first player to join becomes lobby leader, and any player's Play 
 - `auto_start`: once at least `min_players` players are connected (default 1) and have stayed for `delay_seconds` (default 10), the agent starts the match, as a leader's Play would. This repeats in the lobby after every match. Without `server_owned`, a player's Play can still start the match earlier.
 - `GET /status` shows `host_control.lobby`: `lobby.connected` (connected players), `lobby.owner` (leader peer, -1 none), `lobby.start_mode` (1 once a start was requested), `blocked_start` and `blocked_end` (dropped player requests), `starts` and `error`. The agent log line `lobby` records each change.
 - Like selection, this changes the running server process (a code patch and two table hooks, removed when control stops). Operators carry the terms-of-service risk of modifying their server. Clients are not modified.
+
+## Server name in the in-game list
+
+The game lists a LAN server under its PC name, read once at start-up into the server's beacon (O080). When the DLL connects, OpenLink Server sends the configured `name` (hostctl operation 8, `SetName`), and on the next engine tick the DLL replaces the name in the beacon object, after checking the object's fields. Every later beacon carries it, so players see it in **Custom Game → Create Match → Server**.
+
+- The name is sanitized first: only printable ASCII is kept, spaces at the ends are trimmed, and it is cut to 47 characters (the beacon holds 48 UTF-16 units with the terminator). If nothing is left, the PC name stays. The log line `in-game server name set` shows the name used.
+- The game shows it in capitals, and about 38 characters fit before the list cuts the name off (R022, one 47-character name).
+- Not changed: the game's own `system_set_machine_name` override, which the beacon ignores.
 
 ## Playlist voting
 
@@ -107,7 +115,7 @@ The DLL includes choice_adapter.cpp, a bounded conversion/set/cleanup helper for
 
 The internal saved_choices.cpp snapshot component now matches selected native tree indices to menu schema choices and copies paths/scalar records before conversion. It checks recorded engine thread and bounds through a supplied reader; no live reader is installed. ASCII paths longer than127 bytes or six tokens, unsupported kinds, duplicate/unmatched entries and malformed sources fail explicitly. Empty valid saved trees need no schema read. Native fixture tests and copied-choice interoperability pass; NativePending remains unchanged. Source consistency, CMS ownership, native binding and lifecycle remain backend requirements.
 
-The lan_provider.cpp component selects a native descriptor pair through the authoritative LAN provider, preserving the other15 entries and requiring full readback. It includes explicit RFC/native GUID conversion. The opt-in game_b002 backend validates full executable hash/loaded bytes/table targets/LAN role before installing the exact server Tick slot. Its mailbox drains on the captured actual callback thread in lobby states6/8. Map type is preserved from initialized entry0; Prepare selects mode6 and PrepareEngine mode10. No lifecycle state writes or automatic start are implemented.
+The lan_provider.cpp component selects a native descriptor pair through the authoritative LAN provider, preserving the other15 entries and requiring full readback. It includes explicit RFC/native GUID conversion. The opt-in game_b002 backend validates full executable hash/loaded bytes/table targets/LAN role before installing the exact server Tick slot. Its mailbox drains on the captured actual callback thread in lobby states6/8. Map type is preserved from initialized entry0; Prepare selects the published game variant (mode type 6). No lifecycle state writes or automatic start are implemented.
 
 Explicit `initialize:true` in a custom selection JSON routes Initialize5, supplying API-derived map2/mode6. Current entries take precedence; absent Current uses valid Requested or zeroes for unselected entries. The authoritative native setter owns initialization and exact full-array readback is required. Omit initialize for ordinary changes that inherit current map type. Map2 native equivalence and actual first selection still need the separately scoped R007 test.
 

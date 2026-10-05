@@ -4,6 +4,7 @@
 #include <iphlpapi.h>
 #include "bridge_api.h"
 #include "game_b002.h"
+#include "beacon_name.h"
 #include <cstring>
 #include <cstddef>
 
@@ -167,6 +168,17 @@ DWORD session(SOCKET s) {
                         report=hostctl::BackendStatus(); have_report=true;
                         code=changed==ERROR_SUCCESS ? 0 : changed==ERROR_INVALID_FUNCTION ? 1 : 5;
                     }
+                }
+            }
+        }
+        // 8 SetName: 48 bytes of printable ASCII, zero-padded (beacon_name.h).
+        if(op==8 && size==96) {
+            uint16_t units[hostctl::kBeaconNameUnits];
+            if(hostctl::EncodeBeaconName(request+48,units)) {
+                code=2;
+                if(launch.version==2) {
+                    if(backend_result!=ERROR_SUCCESS) code=1;
+                    else { report=hostctl::BackendSetName(units,2000); code=report.code; have_report=true; }
                 }
             }
         }

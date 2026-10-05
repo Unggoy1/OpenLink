@@ -13,12 +13,12 @@ import (
 	"halocommunity/internal/hostctl"
 )
 
-const selectionJSON = `{"map":{"asset_id":"00112233-4455-6677-8899-aabbccddeeff","version_id":"10112233-4455-6677-8899-aabbccddeeff"},"mode":{"asset_id":"20112233-4455-6677-8899-aabbccddeeff","version_id":"30112233-4455-6677-8899-aabbccddeeff"},"mode_kind":"engine"}`
+const selectionJSON = `{"map":{"asset_id":"00112233-4455-6677-8899-aabbccddeeff","version_id":"10112233-4455-6677-8899-aabbccddeeff"},"mode":{"asset_id":"20112233-4455-6677-8899-aabbccddeeff","version_id":"30112233-4455-6677-8899-aabbccddeeff"}}`
 
 type fakeControl struct {
-	engine  bool
-	initial bool
-	calls   int
+	prepared bool
+	initial  bool
+	calls    int
 }
 
 func (*fakeControl) Closed() bool { return false }
@@ -65,11 +65,7 @@ func (*fakeControl) Status(context.Context) (hostctl.Reply, error) {
 	return hostctl.Reply{Code: hostctl.CodeNativePending}, nil
 }
 func (f *fakeControl) Prepare(context.Context, hostctl.AssetPair) (hostctl.Reply, error) {
-	f.calls++
-	return hostctl.Reply{Code: hostctl.CodeSelected}, nil
-}
-func (f *fakeControl) PrepareEngine(context.Context, hostctl.AssetPair) (hostctl.Reply, error) {
-	f.engine = true
+	f.prepared = true
 	f.calls++
 	return hostctl.Reply{Code: hostctl.CodeSelected}, nil
 }
@@ -127,10 +123,11 @@ func TestHostControlSelectValidationAndMeaning(t *testing.T) {
 	r := httptest.NewRequest("POST", "/host-control/select", strings.NewReader(selectionJSON))
 	w := httptest.NewRecorder()
 	a.handleControlSelect(w, r)
-	if w.Code != 200 || !f.engine || f.calls != 1 || !strings.Contains(w.Body.String(), `"status":"selected"`) || strings.Contains(w.Body.String(), `"status":"applied"`) {
+	if w.Code != 200 || !f.prepared || f.calls != 1 || !strings.Contains(w.Body.String(), `"status":"selected"`) || strings.Contains(w.Body.String(), `"status":"applied"`) {
 		t.Fatalf("%d %s %+v", w.Code, w.Body.String(), f)
 	}
-	for _, body := range []string{selectionJSON + `{}`, strings.Replace(selectionJSON, `"engine"`, `"unknown"`, 1), strings.Replace(selectionJSON, "00112233-4455-6677-8899-aabbccddeeff", "00000000-0000-0000-0000-000000000000", 1), strings.Replace(selectionJSON, `"mode_kind"`, `"typo"`, 1)} {
+	withField := func(field string) string { return strings.TrimSuffix(selectionJSON, "}") + "," + field + "}" }
+	for _, body := range []string{selectionJSON + `{}`, strings.Replace(selectionJSON, "00112233-4455-6677-8899-aabbccddeeff", "00000000-0000-0000-0000-000000000000", 1), withField(`"typo":1`), withField(`"mode_kind":"custom"`)} {
 		w = httptest.NewRecorder()
 		a.handleControlSelect(w, httptest.NewRequest("POST", "/host-control/select", strings.NewReader(body)))
 		if w.Code != 400 || f.calls != 1 {
@@ -148,15 +145,10 @@ func TestHostControlSelectValidationAndMeaning(t *testing.T) {
 func TestExplicitInitialSelection(t *testing.T) {
 	f := &fakeControl{}
 	a := &agent{control: f}
-	body := strings.Replace(selectionJSON, `"mode_kind":"engine"`, `"mode_kind":"custom","initialize":true`, 1)
+	body := strings.TrimSuffix(selectionJSON, "}") + `,"initialize":true}`
 	w := httptest.NewRecorder()
 	a.handleControlSelect(w, httptest.NewRequest("POST", "/host-control/select", strings.NewReader(body)))
-	if w.Code != 200 || f.calls != 1 || !f.initial || f.engine {
+	if w.Code != 200 || f.calls != 1 || !f.initial || f.prepared {
 		t.Fatalf("explicit initialization rejected: %d %s", w.Code, w.Body.String())
-	}
-	w = httptest.NewRecorder()
-	a.handleControlSelect(w, httptest.NewRequest("POST", "/host-control/select", strings.NewReader(strings.Replace(body, `"custom"`, `"engine"`, 1))))
-	if w.Code != 400 || f.calls != 1 {
-		t.Fatal("engine mode initialization executed")
 	}
 }

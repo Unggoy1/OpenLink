@@ -40,12 +40,12 @@ func (d *demoState) servers() []ServerView {
 		row("kusini", "Kusini Nights", "eu-west", 1, 142, true, &api.Match{Phase: api.PhaseLobby, Name: "CTF: Arena on Kusini Bay", Thumb: kusini}),
 		row("bazaar", "Bazaar Brawl", "us-west", 6, 25, true, &api.Match{Phase: api.PhasePostGame, Name: "A map without a thumbnail",
 			Thumb: vote.MapThumbRef("00000000-0000-0000-0000-000000000001", "00000000-0000-0000-0000-000000000001")}),
-		row("old", "Older host agent", "us-east", -1, -1, false, nil),
+		row("new", "Just Started", "us-east", -1, -1, false, nil), // no match report yet
 	}
 }
 
 func (*demoState) status() *StatusView {
-	return &StatusView{ServerID: "demo", ServerName: "Vote Test (demo)", Mode: "loopback", BeaconAge: 1, Connected: true, UpKB: 812, DownKB: 2048}
+	return &StatusView{ServerID: "demo", ServerName: "Vote Test (demo)", GameName: gameListName("Vote Test (demo)"), Mode: "loopback", BeaconAge: 1, Connected: true, UpKB: 812, DownKB: 2048}
 }
 
 func (d *demoState) ballot() *BallotView {

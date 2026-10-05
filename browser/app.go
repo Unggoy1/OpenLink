@@ -81,14 +81,17 @@ func matchView(m *api.Match) *MatchView {
 
 // StatusView describes the active session.
 type StatusView struct {
-	ServerID   string  `json:"serverId"`
-	ServerName string  `json:"serverName"`
-	Mode       string  `json:"mode"`
-	BeaconAge  float64 `json:"beaconAge"` // seconds; -1 = no beacon yet
-	Connected  bool    `json:"connected"` // the server answered in the last few seconds
-	UpKB       float64 `json:"upKB"`
-	DownKB     float64 `json:"downKB"`
-	Error      string  `json:"error"`
+	ServerID   string `json:"serverId"`
+	ServerName string `json:"serverName"`
+	// GameName is how the server appears in Halo's in-game server list (capitals,
+	// api.GameName); "" when the game shows the host's PC name.
+	GameName  string  `json:"gameName"`
+	Mode      string  `json:"mode"`
+	BeaconAge float64 `json:"beaconAge"` // seconds; -1 = no beacon yet
+	Connected bool    `json:"connected"` // the server answered in the last few seconds
+	UpKB      float64 `json:"upKB"`
+	DownKB    float64 `json:"downKB"`
+	Error     string  `json:"error"`
 }
 
 // GetSettings returns the current settings.
@@ -270,6 +273,9 @@ func (a *App) Status() *StatusView {
 	if st.BeaconAge >= 0 {
 		age = st.BeaconAge.Seconds()
 	}
-	return &StatusView{ServerID: st.Server.ID, ServerName: st.Server.Name, Mode: st.Mode, BeaconAge: age,
+	return &StatusView{ServerID: st.Server.ID, ServerName: st.Server.Name, GameName: gameListName(st.Server.Name), Mode: st.Mode, BeaconAge: age,
 		Connected: st.Connected(), UpKB: float64(st.UpBytes) / 1024, DownKB: float64(st.DownBytes) / 1024, Error: st.Err}
 }
+
+// gameListName is a server's name as Halo's in-game server list shows it.
+func gameListName(name string) string { return strings.ToUpper(api.GameName(name)) }

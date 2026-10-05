@@ -49,7 +49,7 @@ func TestNativeBackendOptInRejectsOwnedExecutable(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer bridge.Close()
-	for _, operation := range []func(context.Context) (Reply, error){bridge.Status, func(ctx context.Context) (Reply, error) { return bridge.PrepareEngine(ctx, testPair()) }, func(ctx context.Context) (Reply, error) { return bridge.Initialize(ctx, testPair()) }} {
+	for _, operation := range []func(context.Context) (Reply, error){bridge.Status, func(ctx context.Context) (Reply, error) { return bridge.PrepareEngine(ctx, testPair()) }, func(ctx context.Context) (Reply, error) { return bridge.Initialize(ctx, testPair()) }, func(ctx context.Context) (Reply, error) { return bridge.SetName(ctx, "Name Test") }} {
 		reply, err := operation(ctx)
 		if err != nil || reply.Code != CodeUnsupported || reply.Gates != 0 || reply.Generation != 0 || reply.Pair != (AssetPair{}) {
 			t.Fatalf("owned opt-in rejection %+v %v", reply, err)
@@ -119,6 +119,10 @@ func TestNativeDLLTransport(t *testing.T) {
 	r, err = b.Initialize(ctx, testPair())
 	if err != nil || r.Code != CodeNativePending || r.Pair != (AssetPair{}) {
 		t.Fatalf("initialize transport: %+v %v", r, err)
+	}
+	r, err = b.SetName(ctx, "Transport Name")
+	if err != nil || r.Code != CodeNativePending {
+		t.Fatalf("set name transport: %+v %v", r, err)
 	}
 	b.Close()
 	select {

@@ -45,9 +45,6 @@ func (s *voteServer) sel(p hostctl.AssetPair) (hostctl.Reply, error) {
 func (s *voteServer) Prepare(_ context.Context, p hostctl.AssetPair) (hostctl.Reply, error) {
 	return s.sel(p)
 }
-func (s *voteServer) PrepareEngine(_ context.Context, p hostctl.AssetPair) (hostctl.Reply, error) {
-	return s.sel(p)
-}
 func (s *voteServer) Initialize(_ context.Context, p hostctl.AssetPair) (hostctl.Reply, error) {
 	return s.sel(p)
 }
@@ -112,7 +109,7 @@ func voteEntries() []playlist.Entry {
 	var es []playlist.Entry
 	for i, id := range ids {
 		es = append(es, playlist.Entry{ID: "e" + string(rune('1'+i)), Name: "Entry " + string(rune('1'+i)),
-			Map: playlist.Content{AssetID: id, VersionID: id}, Mode: playlist.Content{AssetID: id, VersionID: id}, ModeKind: "custom"})
+			Map: playlist.Content{AssetID: id, VersionID: id}, Mode: playlist.Content{AssetID: id, VersionID: id}})
 	}
 	return es
 }

@@ -43,6 +43,7 @@ usage:
   hi-hostagent kick <ip> [minutes]      disconnect a player and keep them out (default 10 min)
   hi-hostagent ban <ip> [minutes]       ban a player (default: permanent)
   hi-hostagent unban <ip> | bans        remove a ban | list bans
+  hi-hostagent select <selection.json> select pinned map/mode descriptors (loading/start unverified)
   hi-hostagent version
 
 flags:
@@ -55,12 +56,18 @@ type agent struct {
 	beacons beacon.Store
 	bans    *banList
 	fwd     *relay.Forwarder // nil without proxy mode
+	// onLaunch, when set, receives each managed launch's original process
+	// (scoped read-only diagnostics). Nil in production.
+	onLaunch func(*os.Process)
 
 	mu           sync.Mutex
 	status       string // starting, ready, exited, simulated
 	pid          int
 	listingID    string
 	reachability string
+	control      hostController
+	controlError string
+	rotation     *rotationInfo // nil without a playlist
 }
 
 func (a *agent) setStatus(s string) {
@@ -128,6 +135,11 @@ func runCommand(c config, args []string) error {
 		return runAutostart(c, args)
 	case "status", "kick", "ban", "unban", "bans":
 		return runAdminCommand(c.Admin, args)
+	case "select":
+		if len(args) != 2 {
+			return fmt.Errorf("usage: select <selection.json>")
+		}
+		return selectCommand(c.Admin, args[1])
 	}
 	return fmt.Errorf("unknown command %q (run with -h for help)", args[0])
 }

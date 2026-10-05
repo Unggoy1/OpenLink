@@ -25,6 +25,7 @@ type config struct {
 	Install    string `json:"install,omitempty"`
 	Sandbox    string `json:"sandbox"`
 	Manage     bool   `json:"manage"`
+	Restart    bool   `json:"restart"`
 	StopServer bool   `json:"stop_server"`
 
 	// Proxy mode: the server binds ServerIP:1343 and the agent listens on
@@ -38,8 +39,12 @@ type config struct {
 
 	BindIP string `json:"bind_ip,omitempty"` // without proxy mode: the server's -bindip
 
-	Admin    string `json:"admin"`     // local admin API address ("" = off)
-	BansFile string `json:"bans_file"` // relative paths are next to the config file
+	Admin             string `json:"admin"`     // local admin API address ("" = off)
+	BansFile          string `json:"bans_file"` // relative paths are next to the config file
+	HostControlDLL    string `json:"hostctl_dll,omitempty"`
+	HostControlNative bool   `json:"hostctl_native,omitempty"`
+	// Playlist, with the native backend: map/mode rotation file (internal/playlist).
+	Playlist string `json:"playlist,omitempty"`
 
 	Simulate     bool          `json:"-"`
 	Loopback     bool          `json:"-"`
@@ -51,7 +56,7 @@ type config struct {
 func defaults() config {
 	host, _ := os.Hostname()
 	return config{
-		Name: host, PublicPort: api.GamePort, Sandbox: "RETAIL", Manage: true,
+		Name: host, PublicPort: api.GamePort, Sandbox: "RETAIL", Manage: true, Restart: true,
 		Proxy: true, Listen: fmt.Sprintf("0.0.0.0:%d", api.GamePort), ServerIP: "127.0.0.1",
 		MaxPlayers: 32, MaxPPS: 500, Admin: "127.0.0.1:7180", BansFile: "bans.json",
 		CaptureDelay: 5 * time.Second,
@@ -74,6 +79,7 @@ func loadConfig(fs *flag.FlagSet, args []string) (config, error) {
 	fs.StringVar(&f.Install, "install", "", "game install root (folder with version.txt); empty = search common locations")
 	fs.StringVar(&f.Sandbox, "sandbox", c.Sandbox, "value for -lan_sandbox")
 	fs.BoolVar(&f.Manage, "manage", c.Manage, "start the server and restart it if it exits")
+	fs.BoolVar(&f.Restart, "restart", c.Restart, "restart a managed server after exit (false for a single scoped test)")
 	fs.BoolVar(&f.StopServer, "stop-server", false, "stop the managed server when the agent exits")
 	fs.BoolVar(&f.Proxy, "proxy", c.Proxy, "proxy mode: front the server for player counts, probes, bans and rate limits")
 	fs.StringVar(&f.Listen, "listen", c.Listen, "proxy mode: public UDP listen address")
@@ -83,6 +89,9 @@ func loadConfig(fs *flag.FlagSet, args []string) (config, error) {
 	fs.StringVar(&f.BindIP, "bind-ip", "", "without proxy mode: pass -bindip to the server")
 	fs.StringVar(&f.Admin, "admin", c.Admin, "local admin API address for status/kick/ban commands (empty = off)")
 	fs.StringVar(&f.BansFile, "bans", c.BansFile, "ban list file")
+	fs.StringVar(&f.HostControlDLL, "hostctl-dll", "", "explicit DLL loading for servers launched by this agent (off by default)")
+	fs.BoolVar(&f.HostControlNative, "hostctl-native", false, "with hostctl-dll: opt into the B002 native LAN selection backend")
+	fs.StringVar(&f.Playlist, "playlist", "", "with hostctl-native: map/mode rotation file; the server picks every match from it")
 	fs.BoolVar(&f.Simulate, "simulate", false, "no game: send simulated beacons and answer probes on the game port")
 	fs.BoolVar(&f.Loopback, "loopback", false, "with -simulate: keep simulated beacons on 127.0.0.1")
 	fs.DurationVar(&f.CaptureDelay, "capture-delay", c.CaptureDelay, "wait after setupComplete before listening for beacons")
@@ -129,6 +138,8 @@ func loadConfig(fs *flag.FlagSet, args []string) (config, error) {
 			c.Sandbox = f.Sandbox
 		case "manage":
 			c.Manage = f.Manage
+		case "restart":
+			c.Restart = f.Restart
 		case "stop-server":
 			c.StopServer = f.StopServer
 		case "proxy":
@@ -147,6 +158,12 @@ func loadConfig(fs *flag.FlagSet, args []string) (config, error) {
 			c.Admin = f.Admin
 		case "bans":
 			c.BansFile = f.BansFile
+		case "hostctl-dll":
+			c.HostControlDLL = f.HostControlDLL
+		case "hostctl-native":
+			c.HostControlNative = f.HostControlNative
+		case "playlist":
+			c.Playlist = f.Playlist
 		}
 	})
 	// Environment fallbacks for values the file left empty.
@@ -159,6 +176,15 @@ func loadConfig(fs *flag.FlagSet, args []string) (config, error) {
 	c.Simulate, c.Loopback, c.CaptureDelay = f.Simulate, f.Loopback, f.CaptureDelay
 	if c.PublicPort < 1 || c.PublicPort > 65535 {
 		return c, errors.New("public port must be 1-65535")
+	}
+	if c.HostControlNative && c.HostControlDLL == "" {
+		return c, errors.New("hostctl-native requires hostctl-dll")
+	}
+	if c.HostControlDLL != "" && (!c.Manage || c.Simulate) {
+		return c, errors.New("hostctl-dll requires a managed real server")
+	}
+	if c.Playlist != "" && !c.HostControlNative {
+		return c, errors.New("playlist requires hostctl-native")
 	}
 	return c, nil
 }

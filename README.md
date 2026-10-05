@@ -2,7 +2,7 @@
 
 **Community dedicated servers for Halo Infinite.** Run your own Halo Infinite server, list it in a community directory, and let players anywhere join it, using the game's own LAN server mode. Nothing in the game is modified.
 
-> Working name. The programs (`hi-hostagent`, `hi-directory`, `hi-connector`) keep their current names until the project name is final.
+> Working name. The programs (`hi-hostagent`, `hi-directory`) keep their current names until the project name is final.
 
 > Unofficial fan project. Not affiliated with or endorsed by Microsoft, Xbox or Halo Studios. Halo is a trademark of Microsoft.
 
@@ -13,7 +13,7 @@ Halo Infinite ships with a LAN server mode. A LAN server announces itself with a
 ```
  server host                         directory                        player PC
 ┌───────────────────────┐   beacons  ┌──────────┐   beacons   ┌──────────────────────────┐
-│ Halo Infinite         │──────────▶ │ hi-      │ ──────────▶ │ hi-connector             │
+│ Halo Infinite         │──────────▶ │ hi-      │ ──────────▶ │ OpenLink app             │
 │ LAN server  (UDP 1343)│  (agent)   │ directory│             │  replays beacon locally  │
 │ hi-hostagent          │            └──────────┘             │  forwards UDP 1343 ──┐   │
 └──────────▲────────────┘                                     │ Halo Infinite ◀──────┘   │
@@ -22,11 +22,9 @@ Halo Infinite ships with a LAN server mode. A LAN server announces itself with a
 
 - **`hi-hostagent`** runs on the server machine. It starts the LAN server, restarts it if it exits, picks up the server's beacon and keeps the directory listing fresh.
 - **`hi-directory`** is the public server list. Hosts register and send heartbeats; players list servers and fetch beacons.
-- **The player side runs on each player's PC.** For the chosen server it replays that server's own beacon to the local game and forwards the game's traffic to the server. To the game, it looks like an ordinary LAN game. It comes in two forms:
-  - the **browser app** (`browser/`): a desktop server list with a Join button;
-  - **`hi-connector`**: the same thing on the command line, also for Linux.
+- **The OpenLink app** (`browser/`) runs on each player's PC: a desktop server list with a Join button. For the chosen server it replays that server's own beacon to the local game and forwards the game's traffic to the server. To the game, it looks like an ordinary LAN game.
 
-The connector forwards game packets unchanged. They are encrypted by the game, and this project never reads, decrypts or alters them.
+The app forwards game packets unchanged. They are encrypted by the game, and this project never reads, decrypts or alters them.
 
 **What this project does not do:** it does not modify game files, touch game memory or interact with anti-cheat. It does not handle Xbox/Microsoft credentials: players sign in inside the game as usual, and the directory stores only what hosts send it (name, address, build, status, beacon).
 
@@ -48,22 +46,10 @@ By default the agent runs in **proxy mode**: the game server listens only on 127
 
 ## Playing
 
-**With the browser app (Windows):** open it, enter the directory address once in Settings, click **Join** on a server, then in Halo Infinite go to **Custom Games → Server** and pick the host's PC name. The bar at the bottom shows when you are connected. Keep the app open while you play. See [browser/README.md](browser/README.md).
+Open the OpenLink app, click **Join** on a server, then in Halo Infinite go to **Custom Games → Server** and pick the host's PC name. The bar at the bottom shows when you are connected. Keep the app open while you play. See [browser/README.md](browser/README.md).
 
-**With the command line (Windows or Linux):**
-
-```
-hi-connector -directory https://DIRECTORY list
-hi-connector -directory https://DIRECTORY join "My Server"
-```
-
-Keep the connector running, then start Halo Infinite and go to **Custom Games → Server**. The host appears under the server PC's name. Join it. Closing the connector disconnects you.
-
-- The connector prints one status line every 5 s: beacon age (should stay at a few seconds) and the packets going to and coming from the server.
-- Set `HICOMM_DIRECTORY` once instead of passing `-directory` every time.
-- Do not run a LAN server on the same PC: the connector needs local UDP 1343.
-- If the server is not listed, try `-advertise broadcast` (the default is `loopback`, which is the mode tested on both Windows and Linux).
-- **Linux/Proton:** use the native Linux build of `hi-connector` (not under Wine). If your Steam library is not in a standard location, pass `-install "/path/to/steamapps/common/Halo Infinite"` so the build check works.
+- Windows is the main platform. A Linux build of the app (for the game under Proton) is produced by CI but has not been tested yet.
+- If the server is not listed in the game, switch Settings to **LAN broadcast** (also needed when the server runs on the same PC).
 
 ## Running a directory
 
@@ -104,14 +90,14 @@ Requires Go 1.27+. On Windows:
 .\build.ps1
 ```
 
-This runs the tests and writes `bin\*.exe`, plus `bin\linux-amd64\hi-connector` and `hi-directory`. The code uses only the Go standard library.
+This runs the tests and writes `bin\hi-hostagent.exe`, `bin\hi-directory.exe` and `bin\linux-amd64\hi-directory`. These use only the Go standard library. The player app is built separately in `browser/` (see its README).
 
 ## Status and known limitations
 
-- **Tested:** remote players on Windows and on Linux/Proton listed a hosted server through the connector and played several full matches in a row. In that test the host's UDP 1343 was exposed through a tunnel rather than a router port forward. A direct port-forwarded host should behave the same, but it has not been tested yet.
+- **Tested:** remote players on Windows and on Linux/Proton listed a hosted server through the command-line connector (since retired in favour of the app) and played several full matches in a row. In that test the host's UDP 1343 was exposed through a tunnel rather than a router port forward. A direct port-forwarded host should behave the same, but it has not been tested yet.
 - **Lobby control:** the first player to join owns the lobby and picks the map and mode. There is no server-side map rotation yet.
 - **Updates:** every game update requires hosts and players to update together. The directory filters servers by build.
-- Player counts, ping and reachability need proxy mode on the host (the default). The browser app is Windows-only for now; Linux players use `hi-connector`.
+- Player counts, ping and reachability need proxy mode on the host (the default). The app's Linux build is untested.
 - Proxy mode, bans and several servers on one PC are new and have not been tested with the real game yet.
 - Untested: many simultaneous players, long-running uptime, and host CPU and memory use.
 

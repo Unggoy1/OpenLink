@@ -1,6 +1,6 @@
 # OpenLink browser (player app)
 
-A desktop server browser for players: list community servers, click **Join**, then pick the server in Halo Infinite under **Custom Games → Server**. It runs the same join logic as `hi-connector` (the shared `connect` package).
+A desktop server browser for players: list community servers, click **Join**, then pick the server in Halo Infinite under **Custom Games → Server**. The join logic lives in the shared `connect` package.
 
 Built with [Wails](https://wails.io) v2 (Go back end, Svelte 5 + TypeScript front end, WebView2 on Windows). It is a separate Go module, so Wails' dependencies stay out of the server tools.
 
@@ -43,4 +43,4 @@ Preview without the game: `wails build -tags demo`, run it, then switch to anoth
 
 ## Linux
 
-Linux builds need WebKitGTK and must be built on Linux (or in CI). Until then, Linux players can use the command-line `hi-connector`.
+Linux builds need WebKitGTK and must be built on Linux (or in CI). The CI build has not been tested on a Linux machine yet. The command-line connector that Linux players used before was retired on 2026-10-05.

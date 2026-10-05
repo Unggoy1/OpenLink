@@ -51,12 +51,9 @@ jobs:
             GOOS=$1 GOARCH=$2 go build -trimpath -ldflags "-s -w -X main.version=$VERSION" \
               -o "dist/$3-$1-$2$ext" "./cmd/$3"
           }
-          build windows amd64 hi-connector
           build windows amd64 hi-hostagent
           build windows amd64 hi-directory
-          build linux   amd64 hi-connector
           build linux   amd64 hi-directory
-          build linux   arm64 hi-connector
           build linux   arm64 hi-directory
           ls -l dist
       - uses: actions/upload-artifact@v4
@@ -133,7 +130,7 @@ jobs:
           path: browser/build/bin/OpenLink-windows-amd64.exe
 
   # Experimental: the Linux app has not been tested yet. A failure here does
-  # not block the release; Linux players can use hi-connector meanwhile.
+  # not block the release.
   browser-linux:
     needs: test
     runs-on: ubuntu-24.04

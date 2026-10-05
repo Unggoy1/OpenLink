@@ -69,7 +69,9 @@ Status as of 2026-10-05. Tick items as they are done and note the date and how i
   - [ ] image layout: game files mounted rather than baked in (game files and account data must never go into a published image)
 - [ ] **Website** update (the brief is in the discovery kit: research/sanitized/site-brief-2026-10-05/).
 - [ ] **Unsigned executables**: Windows SmartScreen and some antivirus will warn. Either sign the builds or explain the warning on the download page.
-- [ ] **Production directory** (openlink-dir.unggoy.xyz): confirm the registration-key policy, request limits, logging and a way to remove abusive listings.
+- [x] **Open registration with safeguards** (built 2026-10-05, unit-tested and run locally with a simulated server; not yet deployed): anyone can list a server; players see it only after its port answers the probe (unconfirmed listings dropped after 5 min); the register key became an optional trusted-host key (tunnels and other addresses); dynamic-DNS names allowed without a key; 12 registrations per IP per 10 min; admin API (`OPENLINK_ADMIN_KEY`) to list, remove and ban; lasting bans via `OPENLINK_BANNED_IPS` / `OPENLINK_BANNED_NAMES`; OpenLink Server requires proxy mode when listed.
+- [ ] **Production directory settings on Railway**: set `OPENLINK_ADMIN_KEY`; keep `OPENLINK_REGISTER_KEY` (or the old `HICOMM_REGISTER_KEY`) as the trusted-host key for tunnels; set `OPENLINK_REQUIRE_KEY=1` only to keep the directory private until release. Check logging.
+- [ ] **Live check of the safeguards** after deploying: a port-forwarded host appears within about a minute; a tunnel host with the key appears; a host with a closed port never appears and its log says so; an admin ban removes a listing.
 - [ ] **Privacy note**: the directory sees host IP addresses; the app talks to the directory, GitHub (update check) and Halo Waypoint (map thumbnails). It never asks for Xbox credentials.
 - [ ] **Decide what is in the alpha** and say so in the docs: overlay = experimental and Windows-only; scripted Forge maps = untested; engine game variants = not supported.
 

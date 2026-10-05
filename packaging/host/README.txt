@@ -8,8 +8,11 @@ Files
 
 Setup
   1. Keep all files in one folder.
-  2. Copy openlink-server.example.json to openlink-server.json and fill in name,
-     register_key and public_host/public_port (your port forward or tunnel).
+  2. Copy openlink-server.example.json to openlink-server.json and fill in name
+     and public_port (your port forward). No key is needed. register_key and
+     public_host are only for listing a tunnel address (ask the directory
+     operator for a key). Players see your server once the directory has
+     reached its port, usually within a minute.
   3. Copy playlist.example.json to playlist.json and list your map/mode pairs
      (asset and version IDs from the game's content browser; "name" is what
      players see when they vote). A playlist is required: openlink-server will not

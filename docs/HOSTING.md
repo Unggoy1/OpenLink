@@ -31,7 +31,7 @@ Within about a minute openlink-server logs either `the directory reached your se
 
 ## 3. Set up the config and playlist, then run
 
-1. Copy `openlink-server.example.json` to `openlink-server.json` next to the program and fill in `name`, `region`, `register_key` and `public_port`. It already points `playlist` at `playlist.json`. Keep `openlink-control.dll` and `openlink-loader.exe` in the same folder: the server finds them there (the program refuses to start if they are missing).
+1. Copy `openlink-server.example.json` to `openlink-server.json` next to the program and fill in `name`, `region` and `public_port` (`register_key` is only for listing a tunnel address; see the settings below). It already points `playlist` at `playlist.json`. Keep `openlink-control.dll` and `openlink-loader.exe` in the same folder: the server finds them there (the program refuses to start if they are missing).
 2. Copy `playlist.example.json` to `playlist.json` and list your map/mode pairs (format and limits: [HOST-CONTROL.md](HOST-CONTROL.md)).
 3. Check it, then run:
 
@@ -40,9 +40,9 @@ openlink-server check-playlist
 openlink-server
 ```
 
-Running `openlink-server` with no flags uses `openlink-server.json`; flags override it. It checks the playlist before it starts anything and stops with an error if the file is missing or invalid: bad IDs, an `id` or `name` over 80 bytes, or (with voting) a ballot that would not fit. The playlist is read once at start, so restart the agent after editing it.
+Running `openlink-server` with no flags uses `openlink-server.json`; flags override it. It checks the playlist before it starts anything and stops with an error if the file is missing or invalid: bad IDs, an `id` or `name` over 80 bytes, or (with voting) a ballot that would not fit. The playlist is read once at start, so restart OpenLink Server after editing it.
 
-The agent starts the game server (`HaloInfinite.exe -server -console -lan -lan_sandbox RETAIL -bindip 127.0.0.1`) in its own console window, restarts it if it exits, and keeps the listing fresh. Leave both windows open.
+OpenLink Server starts the game server (`HaloInfinite.exe -server -console -lan -lan_sandbox RETAIL -bindip 127.0.0.1`) in its own console window, restarts it if it exits, and keeps the listing fresh. Leave both windows open. Players see your server once the directory has reached its port, usually within a minute; the log says `your server is now in the server list`.
 
 ### Start automatically
 
@@ -56,13 +56,13 @@ Why a logon task and not a Windows service: a service runs in a separate, non-in
 
 ## Proxy mode (default)
 
-The agent listens on the public port and passes each player's traffic to the server on 127.0.0.1. Packets are never read or changed. This gives you:
+OpenLink Server listens on the public port and passes each player's traffic to the server on 127.0.0.1. Packets are never read or changed. This gives you:
 
 - **Player count** in the server list.
 - **Reachability**: the directory periodically checks that your port answers, and players see your **ping**.
 - **Admin**: see players, kick and ban by IP, a per-player packet limit (`max_pps`, default 500/s, about ten times normal play) and a connection limit (`max_players`, default 32).
 
-To turn it off, use `-proxy=false`. The server then listens on the public port itself, and counts, ping and bans are not available.
+Proxy mode is required for a listed server: the directory only shows servers whose port has answered its probe, and only proxy mode answers. `"proxy": false` is accepted only with `"directory": ""` (an unlisted server for your own LAN).
 
 ## Admin commands
 
@@ -99,13 +99,13 @@ Known limitation: every LAN server on a PC broadcasts its beacon from the same a
 
 | Key | Default | Meaning |
 |---|---|---|
-| `directory` | | directory URL |
-| `register_key` | | directory registration key, if required (keep the file private) |
+| `directory` | https://openlink-dir.unggoy.xyz | directory URL; `""` = not listed |
+| `register_key` | | trusted-host key from the directory operator; only needed to list a tunnel or other address (`public_host`). Keep the file private |
 | `name`, `region` | PC name, empty | shown in the browser |
-| `public_host` | (your public IP) | address players use, e.g. a DNS name (needs `register_key`) |
+| `public_host` | (your public IP) | address players use. A DNS name pointing to your own IP (dynamic DNS) works as is; a tunnel or any other address needs `register_key` |
 | `public_port` | 1343 | external UDP port |
 | `install` | auto | game folder containing version.txt |
-| `manage` | true | start and restart the server |
+| `manage` | true | start and restart the server (must stay true) |
 | `stop_server` | false | stop the game server when openlink-server exits |
 | `proxy` | true | proxy mode |
 | `listen` | 0.0.0.0:1343 | proxy: public UDP address |

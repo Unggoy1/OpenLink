@@ -24,9 +24,29 @@ import (
 
 // Config controls limits and trust.
 type Config struct {
-	// RegisterKey, when set, must be sent as X-Register-Key to register. It also
-	// allows a host to list an address other than its own source IP.
+	// RegisterKey is the trusted-host key (X-Register-Key). Registration is
+	// open; the key only lets a host list an address other than its own
+	// source IP, such as a tunnel. With RequireKey every host needs it.
 	RegisterKey string
+	RequireKey  bool
+	// AdminKey, when set, enables the /v1/admin endpoints (X-Admin-Key).
+	AdminKey string
+	// ShowUnconfirmed lists servers before the reachability probe has
+	// answered once. Off in production: a listing is shown to players only
+	// once confirmed, and dropped if not confirmed within ConfirmWithin.
+	ShowUnconfirmed bool
+	ConfirmWithin   time.Duration // default 5 minutes
+	// RegisterBurst registrations are allowed per IP per RegisterWindow
+	// (defaults 12 per 10 minutes).
+	RegisterBurst  int
+	RegisterWindow time.Duration
+	// BannedIPs (addresses or CIDR ranges) may not register; a name
+	// containing one of BannedNames (any case) is refused. The admin API adds
+	// more at run time; those last until the directory restarts.
+	BannedIPs   []string
+	BannedNames []string
+	// LookupIP resolves a host name a host lists (default: the system resolver).
+	LookupIP func(ctx context.Context, host string) ([]net.IP, error)
 	// ClientIPHeader names the header a trusted reverse proxy uses to pass the
 	// client address. Empty: use the TCP peer address. "X-Forwarded-For": use the
 	// rightmost entry, the one the proxy appended; entries to its left come
@@ -47,19 +67,25 @@ type Config struct {
 }
 
 type entry struct {
-	info     api.ServerInfo
-	token    string
-	ownerIP  string
-	beacon   []byte
-	beaconAt time.Time
+	info         api.ServerInfo
+	token        string
+	ownerIP      string
+	beacon       []byte
+	beaconAt     time.Time
+	registeredAt time.Time
+	confirmed    bool // the reachability probe has answered at least once
 }
 
 // Server is the HTTP handler plus its in-memory store.
 type Server struct {
-	cfg     Config
-	mu      sync.Mutex
-	servers map[string]*entry
-	mux     *http.ServeMux
+	cfg       Config
+	mu        sync.Mutex
+	servers   map[string]*entry
+	regTimes  map[string][]time.Time // recent registrations per IP
+	bannedIP  map[string]bool
+	bannedNet []*net.IPNet
+	bannedNm  []string // lower case
+	mux       *http.ServeMux
 }
 
 // New builds a directory with defaults filled in.
@@ -76,7 +102,28 @@ func New(cfg Config) *Server {
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
-	s := &Server{cfg: cfg, servers: map[string]*entry{}, mux: http.NewServeMux()}
+	if cfg.ConfirmWithin == 0 {
+		cfg.ConfirmWithin = 5 * time.Minute
+	}
+	if cfg.RegisterBurst == 0 {
+		cfg.RegisterBurst = 12
+	}
+	if cfg.RegisterWindow == 0 {
+		cfg.RegisterWindow = 10 * time.Minute
+	}
+	if cfg.LookupIP == nil {
+		cfg.LookupIP = func(ctx context.Context, host string) ([]net.IP, error) {
+			return net.DefaultResolver.LookupIP(ctx, "ip", host)
+		}
+	}
+	s := &Server{cfg: cfg, servers: map[string]*entry{}, regTimes: map[string][]time.Time{},
+		bannedIP: map[string]bool{}, mux: http.NewServeMux()}
+	for _, b := range cfg.BannedIPs {
+		s.ban(b)
+	}
+	for _, n := range cfg.BannedNames {
+		s.banName(n)
+	}
 	s.mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("ok\n")) })
 	// whoami shows the address the directory attributes to the caller, so an
 	// operator can check the proxy setup and a host can learn its public IP.
@@ -98,7 +145,15 @@ func New(cfg Config) *Server {
 	s.mux.HandleFunc("PUT /v1/servers/{id}", s.heartbeat)
 	s.mux.HandleFunc("DELETE /v1/servers/{id}", s.remove)
 	s.mux.HandleFunc("GET /v1/servers", s.list)
+	s.mux.HandleFunc("GET /v1/servers/{id}", s.self)
 	s.mux.HandleFunc("GET /v1/servers/{id}/beacon", s.beacon)
+	if cfg.AdminKey != "" {
+		s.mux.HandleFunc("GET /v1/admin/servers", s.admin(s.adminServers))
+		s.mux.HandleFunc("DELETE /v1/admin/servers/{id}", s.admin(s.adminRemove))
+		s.mux.HandleFunc("GET /v1/admin/bans", s.admin(s.adminBans))
+		s.mux.HandleFunc("POST /v1/admin/bans", s.admin(s.adminBan))
+		s.mux.HandleFunc("DELETE /v1/admin/bans", s.admin(s.adminUnban))
+	}
 	return s
 }
 
@@ -107,14 +162,23 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mux.ServeHTTP(w, r)
 }
 
-// Expire removes listings whose heartbeat is older than the TTL. Call it periodically.
+// Expire removes listings whose heartbeat is older than the TTL, and listings
+// the reachability probe never confirmed within ConfirmWithin. Call it
+// periodically.
 func (s *Server) Expire() {
-	cutoff := s.cfg.Now().Add(-s.cfg.TTL)
+	now := s.cfg.Now()
+	cutoff := now.Add(-s.cfg.TTL)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for id, e := range s.servers {
-		if e.info.LastSeen.Before(cutoff) {
+		unconfirmed := !s.cfg.ShowUnconfirmed && !e.confirmed && now.Sub(e.registeredAt) > s.cfg.ConfirmWithin
+		if e.info.LastSeen.Before(cutoff) || unconfirmed {
 			delete(s.servers, id)
+		}
+	}
+	for ip, ts := range s.regTimes {
+		if len(ts) == 0 || now.Sub(ts[len(ts)-1]) > s.cfg.RegisterWindow {
+			delete(s.regTimes, ip)
 		}
 	}
 }
@@ -124,7 +188,7 @@ var hostRe = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$
 func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 	keyOK := s.cfg.RegisterKey != "" &&
 		subtle.ConstantTimeCompare([]byte(r.Header.Get("X-Register-Key")), []byte(s.cfg.RegisterKey)) == 1
-	if s.cfg.RegisterKey != "" && !keyOK {
+	if s.cfg.RequireKey && !keyOK {
 		httpError(w, http.StatusUnauthorized, "registration key required")
 		return
 	}
@@ -138,12 +202,24 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	s.mu.Lock()
+	banned, badName := s.bannedLocked(ip), s.badNameLocked(req.Name)
+	s.mu.Unlock()
+	switch {
+	case banned:
+		httpError(w, http.StatusForbidden, "this address may not list servers")
+		return
+	case badName:
+		httpError(w, http.StatusForbidden, "server name not allowed")
+		return
+	}
 	if req.Host == "" {
 		req.Host = ip
 	}
-	// Without the operator key a host may only list its own address, so the
-	// directory cannot be used to point players' traffic at a third party.
-	if !keyOK && req.Host != ip {
+	// Without the trusted-host key a host may only list its own address (or
+	// a DNS name that resolves to it), so the directory cannot be used to
+	// point players' traffic at a third party.
+	if !keyOK && req.Host != ip && !s.resolvesTo(r.Context(), req.Host, ip) {
 		httpError(w, http.StatusForbidden, "host must be the registering address")
 		return
 	}
@@ -152,6 +228,17 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	recent := s.regTimes[ip][:0]
+	for _, t := range s.regTimes[ip] {
+		if now.Sub(t) < s.cfg.RegisterWindow {
+			recent = append(recent, t)
+		}
+	}
+	s.regTimes[ip] = append(recent, now)
+	if len(recent) >= s.cfg.RegisterBurst {
+		httpError(w, http.StatusTooManyRequests, "too many registrations from this address; try again later")
+		return
+	}
 	if len(s.servers) >= s.cfg.MaxServers {
 		httpError(w, http.StatusServiceUnavailable, "directory full")
 		return
@@ -169,9 +256,29 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 	s.servers[id] = &entry{
 		info: api.ServerInfo{ID: id, Name: req.Name, Host: req.Host, Port: req.Port, Build: req.Build,
 			Region: req.Region, Status: "starting", Players: -1, LastSeen: now, Reachability: api.ReachUnknown},
-		token: tok, ownerIP: ip,
+		token: tok, ownerIP: ip, registeredAt: now,
 	}
 	writeJSON(w, http.StatusCreated, api.RegisterResponse{ID: id, Token: tok, Host: req.Host})
+}
+
+// resolvesTo reports whether host is a DNS name with an address equal to ip
+// (for example a dynamic-DNS name for the host's own connection).
+func (s *Server) resolvesTo(ctx context.Context, host, ip string) bool {
+	if net.ParseIP(host) != nil {
+		return false // a different literal address
+	}
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	addrs, err := s.cfg.LookupIP(ctx, host)
+	if err != nil {
+		return false
+	}
+	for _, a := range addrs {
+		if normIP(a.String()) == ip {
+			return true
+		}
+	}
+	return false
 }
 
 func validateRegister(req *api.RegisterRequest) error {
@@ -279,13 +386,34 @@ func (s *Server) list(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	out := make([]api.ServerInfo, 0, len(s.servers))
 	for _, e := range s.servers {
-		if build == "" || e.info.Build == build {
+		if (build == "" || e.info.Build == build) && s.listed(e) {
 			out = append(out, s.view(e, now))
 		}
 	}
 	s.mu.Unlock()
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	writeJSON(w, http.StatusOK, out)
+}
+
+// listed reports whether players see e: once the probe has confirmed it.
+func (s *Server) listed(e *entry) bool { return s.cfg.ShowUnconfirmed || e.confirmed }
+
+// self returns a host's own listing (token required), shown or not, so its
+// agent can tell the host whether the directory has reached the server yet.
+func (s *Server) self(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	e, code := s.authorized(r)
+	var info api.ServerInfo
+	if code == 0 {
+		info = s.view(e, s.cfg.Now())
+		info.Listed = s.listed(e)
+	}
+	s.mu.Unlock()
+	if code != 0 {
+		httpError(w, code, http.StatusText(code))
+		return
+	}
+	writeJSON(w, http.StatusOK, info)
 }
 
 func (s *Server) beacon(w http.ResponseWriter, r *http.Request) {
@@ -402,6 +530,7 @@ func (s *Server) CheckReachability(ctx context.Context, interval time.Duration, 
 				e.info.Reachability = api.ReachUnreachable
 				if ok {
 					e.info.Reachability = api.ReachOK
+					e.confirmed = true
 				}
 				e.info.CheckedAt = s.cfg.Now()
 			}

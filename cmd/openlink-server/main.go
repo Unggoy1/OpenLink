@@ -67,6 +67,8 @@ type agent struct {
 	pid          int
 	listingID    string
 	reachability string
+	listed       bool // players see the listing (the directory confirmed the port)
+	waitNoted    bool // the host was told the listing awaits confirmation
 	control      hostController
 	controlError string
 	playlist     *playlist.File // checked at start; nil only with -simulate

@@ -99,6 +99,13 @@ func TestHostControlConfiguration(t *testing.T) {
 	if _, err := load("-manage=false"); err == nil {
 		t.Fatal("a real server the agent does not start was accepted")
 	}
+	// Only proxy mode answers the directory's probes, which listing needs.
+	if _, err := load("-proxy=false"); err == nil {
+		t.Fatal("a listed server without proxy mode was accepted")
+	}
+	if _, err := load("-proxy=false", "-directory", ""); err != nil {
+		t.Fatalf("an unlisted server without proxy mode: %v", err)
+	}
 }
 
 func TestCheckControlFiles(t *testing.T) {

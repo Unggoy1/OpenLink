@@ -204,6 +204,11 @@ func loadConfig(fs *flag.FlagSet, args []string) (config, error) {
 		if !c.Manage {
 			return c, errors.New(`openlink-server must start the game server itself: remove "manage": false`)
 		}
+		// The directory lists a server only once its port answers a probe,
+		// and only proxy mode answers probes.
+		if !c.Proxy && c.Directory != "" {
+			return c, errors.New(`a listed server needs proxy mode: remove "proxy": false`)
+		}
 		c.HostControlNative = true
 		if c.HostControlDLL == "" {
 			c.HostControlDLL = filepath.Join(exeDir(), "openlink-control.dll")

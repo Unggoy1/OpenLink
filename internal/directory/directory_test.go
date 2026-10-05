@@ -3,6 +3,7 @@ package directory
 import (
 	"context"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -21,7 +22,14 @@ type clock struct {
 func (c *clock) Now() time.Time      { c.mu.Lock(); defer c.mu.Unlock(); return c.t }
 func (c *clock) Add(d time.Duration) { c.mu.Lock(); c.t = c.t.Add(d); c.mu.Unlock() }
 
+// setup lists servers without waiting for the reachability probe, which most
+// tests do not exercise; setupGated keeps the production behaviour.
 func setup(t *testing.T, cfg Config) (*Server, *Client, *clock) {
+	cfg.ShowUnconfirmed = true
+	return setupGated(t, cfg)
+}
+
+func setupGated(t *testing.T, cfg Config) (*Server, *Client, *clock) {
 	clk := &clock{t: time.Date(2026, 10, 3, 0, 0, 0, 0, time.UTC)}
 	cfg.Now = clk.Now
 	s := New(cfg)
@@ -121,7 +129,7 @@ func TestAuthAndValidation(t *testing.T) {
 }
 
 func TestRegisterKeyAndForeignHost(t *testing.T) {
-	_, c, _ := setup(t, Config{RegisterKey: "k"})
+	_, c, _ := setup(t, Config{RegisterKey: "k", RequireKey: true})
 	ctx := context.Background()
 	reg, err := c.Register(ctx, api.RegisterRequest{Name: "A", Host: "play.example.org", Port: 1343, Build: "b"})
 	if err != nil || reg.Host != "play.example.org" {
@@ -298,5 +306,168 @@ func TestHeartbeatMatch(t *testing.T) {
 	listed(&want)
 	if got := listed(nil); got != nil {
 		t.Fatalf("match kept after a heartbeat without one: %+v", got)
+	}
+}
+
+func TestOpenRegistrationWithTrustedKey(t *testing.T) {
+	_, c, _ := setup(t, Config{RegisterKey: "k"})
+	ctx := context.Background()
+	c.RegisterKey = "" // setup hands the client the key; start without it
+	// Open: no key needed to list your own address.
+	if _, err := c.Register(ctx, api.RegisterRequest{Name: "Mine", Port: 1343, Build: "b"}); err != nil {
+		t.Fatalf("open registration: %v", err)
+	}
+	// Another address (a tunnel, say) needs the trusted-host key.
+	if _, err := c.Register(ctx, api.RegisterRequest{Name: "Tunnel", Host: "203.0.113.9", Port: 1343, Build: "b"}); code(err) != 403 {
+		t.Fatalf("foreign address without the key: %v", err)
+	}
+	c.RegisterKey = "k"
+	if reg, err := c.Register(ctx, api.RegisterRequest{Name: "Tunnel", Host: "203.0.113.9", Port: 1343, Build: "b"}); err != nil || reg.Host != "203.0.113.9" {
+		t.Fatalf("foreign address with the key: %+v %v", reg, err)
+	}
+}
+
+func TestDNSNameForOwnAddress(t *testing.T) {
+	_, c, _ := setup(t, Config{LookupIP: func(_ context.Context, host string) ([]net.IP, error) {
+		switch host {
+		case "home.example.net":
+			return []net.IP{net.ParseIP("127.0.0.1")}, nil // the test client's address
+		case "elsewhere.example.net":
+			return []net.IP{net.ParseIP("203.0.113.5")}, nil
+		}
+		return nil, errors.New("no such host")
+	}})
+	ctx := context.Background()
+	if _, err := c.Register(ctx, api.RegisterRequest{Name: "DDNS", Host: "home.example.net", Port: 1343, Build: "b"}); err != nil {
+		t.Fatalf("name resolving to the host's own address: %v", err)
+	}
+	for _, h := range []string{"elsewhere.example.net", "missing.example.net"} {
+		if _, err := c.Register(ctx, api.RegisterRequest{Name: "X", Host: h, Port: 1343, Build: "b"}); code(err) != 403 {
+			t.Fatalf("%s: %v", h, err)
+		}
+	}
+}
+
+func TestUnconfirmedServersHiddenThenDropped(t *testing.T) {
+	s, c, clk := setupGated(t, Config{TTL: time.Hour})
+	ctx := context.Background()
+	up, _ := c.Register(ctx, api.RegisterRequest{Name: "Up", Port: 1343, Build: "b"})
+	down, _ := c.Register(ctx, api.RegisterRequest{Name: "Down", Port: 1344, Build: "b"})
+	for _, r := range []api.RegisterResponse{up, down} {
+		c.Heartbeat(ctx, r.ID, r.Token, api.Heartbeat{Status: "ready", Proxy: true})
+	}
+	if list, _ := c.List(ctx, ""); len(list) != 0 {
+		t.Fatalf("unconfirmed servers listed: %+v", list)
+	}
+	if me, err := c.Self(ctx, up.ID, up.Token); err != nil || me.Listed || me.Name != "Up" {
+		t.Fatalf("self before the probe: %+v %v", me, err)
+	}
+	if _, err := c.Self(ctx, up.ID, "wrong"); code(err) != 401 {
+		t.Fatalf("self with a wrong token: %v", err)
+	}
+	s.CheckReachability(ctx, time.Minute, func(_ context.Context, _ string, port int) bool { return port == 1343 })
+	list, _ := c.List(ctx, "")
+	if len(list) != 1 || list[0].Name != "Up" || list[0].Listed {
+		t.Fatalf("after the probe: %+v", list)
+	}
+	if me, _ := c.Self(ctx, up.ID, up.Token); !me.Listed {
+		t.Fatal("self after the probe: not listed")
+	}
+	// The never-confirmed listing is dropped after ConfirmWithin; the confirmed one stays.
+	clk.Add(6 * time.Minute)
+	for _, r := range []api.RegisterResponse{up, down} {
+		c.Heartbeat(ctx, r.ID, r.Token, api.Heartbeat{Status: "ready", Proxy: true})
+	}
+	s.Expire()
+	if err := c.Heartbeat(ctx, down.ID, down.Token, api.Heartbeat{Status: "ready", Proxy: true}); code(err) != 404 {
+		t.Fatalf("unconfirmed listing kept: %v", err)
+	}
+	if list, _ := c.List(ctx, ""); len(list) != 1 {
+		t.Fatalf("confirmed listing lost: %+v", list)
+	}
+}
+
+func TestRegisterRateLimit(t *testing.T) {
+	s, c, clk := setup(t, Config{RegisterBurst: 3, MaxPerIP: 100})
+	ctx := context.Background()
+	for i := 0; i < 3; i++ {
+		if _, err := c.Register(ctx, api.RegisterRequest{Name: "A", Port: 1343, Build: "b"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := c.Register(ctx, api.RegisterRequest{Name: "A", Port: 1343, Build: "b"}); code(err) != 429 {
+		t.Fatalf("burst: %v", err)
+	}
+	clk.Add(11 * time.Minute)
+	s.Expire()
+	if _, err := c.Register(ctx, api.RegisterRequest{Name: "A", Port: 1343, Build: "b"}); err != nil {
+		t.Fatalf("after the window: %v", err)
+	}
+}
+
+func TestBansAndAdmin(t *testing.T) {
+	s, c, _ := setup(t, Config{AdminKey: "adm", BannedNames: []string{"BadWord"}, BannedIPs: []string{"10.9.0.0/16"}})
+	ctx := context.Background()
+	if _, err := c.Register(ctx, api.RegisterRequest{Name: "my badword server", Port: 1343, Build: "b"}); code(err) != 403 {
+		t.Fatalf("banned name word: %v", err)
+	}
+	reg, err := c.Register(ctx, api.RegisterRequest{Name: "Fine", Port: 1343, Build: "b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	admin := func(method, path, key, body string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(method, path, strings.NewReader(body))
+		if key != "" {
+			r.Header.Set("X-Admin-Key", key)
+		}
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, r)
+		return w
+	}
+	if w := admin("GET", "/v1/admin/servers", "", ""); w.Code != 401 {
+		t.Fatalf("admin without key: %d", w.Code)
+	}
+	if w := admin("GET", "/v1/admin/servers", "adm", ""); w.Code != 200 || !strings.Contains(w.Body.String(), `"owner_ip":"127.0.0.1"`) {
+		t.Fatalf("admin list: %d %s", w.Code, w.Body)
+	}
+	// Banning the owner's address removes its listing and blocks it.
+	if w := admin("POST", "/v1/admin/bans", "adm", `{"ip":"127.0.0.1"}`); w.Code != 200 || !strings.Contains(w.Body.String(), `"removed":1`) {
+		t.Fatalf("ban: %d %s", w.Code, w.Body)
+	}
+	if err := c.Heartbeat(ctx, reg.ID, reg.Token, api.Heartbeat{Status: "ready"}); code(err) != 404 {
+		t.Fatalf("banned listing kept: %v", err)
+	}
+	if _, err := c.Register(ctx, api.RegisterRequest{Name: "Again", Port: 1343, Build: "b"}); code(err) != 403 {
+		t.Fatalf("banned address registered: %v", err)
+	}
+	if w := admin("GET", "/v1/admin/bans", "adm", ""); !strings.Contains(w.Body.String(), "10.9.0.0/16") || !strings.Contains(w.Body.String(), "badword") {
+		t.Fatalf("ban list: %s", w.Body)
+	}
+	if w := admin("DELETE", "/v1/admin/bans", "adm", `{"ip":"127.0.0.1"}`); w.Code != 200 {
+		t.Fatalf("unban: %d %s", w.Code, w.Body)
+	}
+	again, err := c.Register(ctx, api.RegisterRequest{Name: "Again", Port: 1343, Build: "b"})
+	if err != nil {
+		t.Fatalf("after unban: %v", err)
+	}
+	if w := admin("DELETE", "/v1/admin/servers/"+again.ID, "adm", ""); w.Code != 204 {
+		t.Fatalf("admin remove: %d", w.Code)
+	}
+	if list, _ := c.List(ctx, ""); len(list) != 0 {
+		t.Fatalf("removed listing still shown: %+v", list)
+	}
+	if w := admin("POST", "/v1/admin/bans", "adm", `{"ip":"not an ip"}`); w.Code != 400 {
+		t.Fatalf("bad ban accepted: %d", w.Code)
+	}
+}
+
+func TestAdminOffWithoutKey(t *testing.T) {
+	s := New(Config{})
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("GET", "/v1/admin/servers", nil)
+	r.Header.Set("X-Admin-Key", "")
+	s.ServeHTTP(w, r)
+	if w.Code != 404 {
+		t.Fatalf("admin API without an admin key: %d", w.Code)
 	}
 }

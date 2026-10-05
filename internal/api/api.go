@@ -114,6 +114,10 @@ type ServerInfo struct {
 	Reachability string    `json:"reachability"` // ReachUnknown, ReachOK or ReachUnreachable
 	CheckedAt    time.Time `json:"checked_at,omitempty"`
 	Match        *Match    `json:"match,omitempty"` // from the latest heartbeat; nil when unknown
+	// Listed is set only in a host's own view of its listing (GET
+	// /v1/servers/{id}): whether players see it yet. The directory shows a
+	// server once its reachability probe has answered.
+	Listed bool `json:"listed,omitempty"`
 }
 
 // ProbePrefix marks probe datagrams. A host agent in proxy mode (and the

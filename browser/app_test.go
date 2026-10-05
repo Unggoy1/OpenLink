@@ -22,7 +22,7 @@ func TestAppListFavoritesSettings(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	ts := httptest.NewServer(directory.New(directory.Config{RegisterKey: "k"}))
+	ts := httptest.NewServer(directory.New(directory.Config{RegisterKey: "k", ShowUnconfirmed: true}))
 	defer ts.Close()
 	dc := directory.NewClient(ts.URL, "k")
 

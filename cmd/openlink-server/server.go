@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"os/exec"
+	"slices"
 	"strconv"
 	"time"
 
@@ -227,7 +228,7 @@ func (a *agent) directoryLoop(ctx context.Context) {
 			}
 			reg, backoff = r, 5*time.Second
 			a.mu.Lock()
-			a.listingID, a.reachability = reg.ID, api.ReachUnknown
+			a.listingID, a.reachability, a.listed, a.waitNoted = reg.ID, api.ReachUnknown, false, false
 			a.mu.Unlock()
 			a.log.Info("listed in directory", "id", reg.ID, "endpoint", net.JoinHostPort(reg.Host, strconv.Itoa(a.cfg.PublicPort)))
 		}
@@ -246,7 +247,7 @@ func (a *agent) directoryLoop(ctx context.Context) {
 		}
 		if hb.Proxy && time.Since(lastCheck) > 30*time.Second {
 			lastCheck = time.Now()
-			a.updateReachability(ctx, dc, reg.ID)
+			a.updateReachability(ctx, dc, reg.ID, reg.Token)
 		}
 		sleep(ctx, 2*time.Second)
 	}
@@ -260,31 +261,44 @@ func (a *agent) directoryLoop(ctx context.Context) {
 }
 
 // updateReachability reads the directory's probe result for our listing and
-// logs it when it changes: the built-in "is my server reachable?" check.
-func (a *agent) updateReachability(ctx context.Context, dc *directory.Client, id string) {
-	list, err := dc.List(ctx, "")
+// logs it when it changes: the built-in "is my server reachable?" check. The
+// directory shows a server to players only once its port has answered.
+func (a *agent) updateReachability(ctx context.Context, dc *directory.Client, id, token string) {
+	s, err := dc.Self(ctx, id, token)
 	if err != nil {
-		return
-	}
-	for _, s := range list {
-		if s.ID != id {
-			continue
-		}
-		a.mu.Lock()
-		changed := a.reachability != s.Reachability
-		a.reachability = s.Reachability
-		a.mu.Unlock()
-		if !changed {
+		// An older directory has no self view; find the listing in the public list.
+		list, lerr := dc.List(ctx, "")
+		if lerr != nil {
 			return
 		}
+		i := slices.IndexFunc(list, func(s api.ServerInfo) bool { return s.ID == id })
+		if i < 0 {
+			return
+		}
+		s, s.Listed = list[i], true
+	}
+	endpoint := net.JoinHostPort(s.Host, strconv.Itoa(s.Port))
+	a.mu.Lock()
+	changed := a.reachability != s.Reachability
+	nowListed := s.Listed && !a.listed
+	waiting := !s.Listed && s.Reachability == api.ReachUnknown && !a.waitNoted
+	a.reachability, a.listed = s.Reachability, s.Listed
+	a.waitNoted = a.waitNoted || waiting
+	a.mu.Unlock()
+	if waiting {
+		a.log.Info("waiting for the directory to reach your server; players see it once it answers", "endpoint", endpoint)
+	}
+	if changed {
 		switch s.Reachability {
 		case api.ReachOK:
-			a.log.Info("the directory reached your server from the internet", "endpoint", net.JoinHostPort(s.Host, strconv.Itoa(s.Port)))
+			a.log.Info("the directory reached your server from the internet", "endpoint", endpoint)
 		case api.ReachUnreachable:
-			a.log.Warn("the directory could NOT reach your server: check the UDP port forward and firewall",
-				"endpoint", net.JoinHostPort(s.Host, strconv.Itoa(s.Port)))
+			a.log.Warn("the directory could NOT reach your server: check the UDP port forward and firewall. "+
+				"Players will not see it until it answers", "endpoint", endpoint)
 		}
-		return
+	}
+	if nowListed {
+		a.log.Info("your server is now in the server list")
 	}
 }
 

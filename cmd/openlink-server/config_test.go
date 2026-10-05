@@ -60,7 +60,7 @@ func TestOldConfigNameIsReported(t *testing.T) {
 func TestConfigPrecedence(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "openlink-server.json")
-	os.WriteFile(path, []byte(`{"directory":"https://file.example","name":"From File","public_port":2000,"max_pps":42,"proxy":false}`), 0o600)
+	os.WriteFile(path, []byte(`{"directory":"https://file.example","name":"From File","public_port":2000,"max_pps":42,"max_players":7}`), 0o600)
 
 	fs := flag.NewFlagSet("t", flag.ContinueOnError)
 	c, err := loadConfig(fs, []string{"-config", path, "-name", "From Flag", "init-config"})
@@ -70,7 +70,7 @@ func TestConfigPrecedence(t *testing.T) {
 	switch {
 	case c.Name != "From Flag":
 		t.Fatalf("explicit flag must win: %q", c.Name)
-	case c.Directory != "https://file.example" || c.PublicPort != 2000 || c.MaxPPS != 42 || c.Proxy:
+	case c.Directory != "https://file.example" || c.PublicPort != 2000 || c.MaxPPS != 42 || c.MaxPlayers != 7:
 		t.Fatalf("file values lost: %+v", c)
 	case c.Listen != "0.0.0.0:1343" || c.ServerIP != "127.0.0.1":
 		t.Fatalf("defaults for keys absent from the file lost: %+v", c)

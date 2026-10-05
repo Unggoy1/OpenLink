@@ -65,7 +65,11 @@ The directory is a single small HTTP service. It carries no game traffic: player
 |---|---|
 | `OPENLINK_CLIENT_IP_HEADER` | the header your platform's proxy uses for the client address, e.g. `X-Forwarded-For` (the rightmost entry is used, because entries to its left can be forged by clients) |
 | `OPENLINK_CLIENT_IP_HOPS` | with `X-Forwarded-For`: how many trusted proxies append to it (default 1). On Railway it is likely `2` (its edge has an outer layer whose address is appended last). Confirm with `/v1/whoami?debug=1` |
-| `OPENLINK_REGISTER_KEY` | optional. When set, hosts need it to register, and only key holders may list an address other than their own IP |
+| `OPENLINK_REGISTER_KEY` | optional **trusted-host key**. Registration is open to everyone; hosts that send this key may also list an address other than their own IP, such as a tunnel |
+| `OPENLINK_REQUIRE_KEY` | `1` makes the directory private: every host needs the register key |
+| `OPENLINK_ADMIN_KEY` | enables the admin API below (keep it secret, and different from the register key) |
+| `OPENLINK_BANNED_IPS` | addresses or CIDR ranges that may not list servers, comma separated; these survive redeploys |
+| `OPENLINK_BANNED_NAMES` | words not allowed in server names, comma separated, any case |
 
 The older `HICOMM_…` names of these variables still work, so an existing deployment keeps running; switch to the `OPENLINK_…` names when convenient.
 
@@ -76,17 +80,33 @@ After deploying, open `https://YOUR-DIRECTORY/v1/whoami` from home. It must show
 openlink-directory -listen 127.0.0.1:8080 -client-ip-header X-Forwarded-For
 ```
 
-Listings expire 45 s after the last heartbeat. The directory also probes proxy-mode hosts about once a minute and lists them as reachable or unreachable. It only probes listed endpoints, never addresses a caller supplies. Without the register key, a host can only list its own public IP; this stops the directory being used to point players' traffic at third parties.
+**How listings are kept honest.** Anyone can list a server, so the directory checks instead of asking for keys:
+
+- A server appears in the player list only after its game port has answered the directory's probe (within about a minute of starting). A listing that never answers is dropped after 5 minutes (`-confirm-within`). Only proxy-mode hosts answer probes, so OpenLink Server requires proxy mode to be listed.
+- Without the register key, a host can only list its own public IP, or a DNS name that resolves to it (dynamic DNS). This stops the directory being used to point players' traffic at third parties. The directory only probes listed endpoints, never addresses a caller supplies.
+- Limits: 8 listings per IP, 12 registrations per IP per 10 minutes, 500 listings in total.
+- Listings expire 45 s after the last heartbeat. A confirmed server that stops answering stays listed, shown as unreachable.
 
 | Endpoint | |
 |---|---|
 | `POST /v1/servers` | register (returns an ID and an update token) |
 | `PUT /v1/servers/{id}` | heartbeat with status and latest beacon (token required) |
+| `GET /v1/servers/{id}` | the host's own listing, including whether players see it yet (token required) |
 | `DELETE /v1/servers/{id}` | unregister (token required) |
-| `GET /v1/servers[?build=…]` | list |
+| `GET /v1/servers[?build=…]` | list (confirmed servers only) |
 | `GET /v1/servers/{id}/beacon` | latest beacon |
 | `GET /v1/whoami` | the address the directory sees for the caller |
 | `GET /healthz` | health check |
+
+**Admin API** (only with `OPENLINK_ADMIN_KEY`; send it as `X-Admin-Key`). Bans added here last until the next restart or redeploy; put lasting ones in `OPENLINK_BANNED_IPS` / `OPENLINK_BANNED_NAMES`.
+
+```
+curl -H "X-Admin-Key: $KEY" https://YOUR-DIRECTORY/v1/admin/servers                     # every listing, with owner IP and whether it is shown
+curl -X DELETE -H "X-Admin-Key: $KEY" https://YOUR-DIRECTORY/v1/admin/servers/ID          # remove one listing
+curl -X POST -H "X-Admin-Key: $KEY" -d '{"ip":"203.0.113.7"}' https://YOUR-DIRECTORY/v1/admin/bans   # ban an IP or CIDR range (removes its listings)
+curl -X POST -H "X-Admin-Key: $KEY" -d '{"name":"badword"}' https://YOUR-DIRECTORY/v1/admin/bans     # ban a word in server names
+curl -H "X-Admin-Key: $KEY" https://YOUR-DIRECTORY/v1/admin/bans                       # list bans; DELETE with the same body to lift one
+```
 
 ## Building
 

@@ -7,7 +7,34 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"halocommunity/internal/api"
 )
+
+func TestConfigDirectoryDefault(t *testing.T) {
+	t.Setenv("HICOMM_DIRECTORY", "")
+	dir := t.TempDir()
+	load := func(doc string) config {
+		t.Helper()
+		path := filepath.Join(dir, "hostagent.json")
+		os.WriteFile(path, []byte(doc), 0o600)
+		c, err := loadConfig(flag.NewFlagSet("t", flag.ContinueOnError), []string{"-config", path})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+	if c := load(`{"name": "x"}`); c.Directory != api.DefaultDirectory {
+		t.Errorf("no directory in the file: got %q", c.Directory)
+	}
+	if c := load(`{"directory": ""}`); c.Directory != "" {
+		t.Errorf(`"directory": "" should turn listing off, got %q`, c.Directory)
+	}
+	t.Setenv("HICOMM_DIRECTORY", "http://127.0.0.1:8080")
+	if c := load(`{"name": "x"}`); c.Directory != "http://127.0.0.1:8080" {
+		t.Errorf("env: got %q", c.Directory)
+	}
+}
 
 func TestConfigPrecedence(t *testing.T) {
 	dir := t.TempDir()

@@ -10,7 +10,11 @@ import (
 
 // DefaultDirectory is the community directory used until the player changes it.
 // HICOMM_DIRECTORY overrides it.
-const DefaultDirectory = "https://openlink.unggoy.xyz"
+const DefaultDirectory = "https://openlink-dir.unggoy.xyz"
+
+// oldDefaultDirectory was the default before 2026-10-05. Settings saved with
+// it move to DefaultDirectory; any other address the player chose is kept.
+const oldDefaultDirectory = "https://openlink.unggoy.xyz"
 
 // Settings are stored per user.
 type Settings struct {
@@ -44,6 +48,9 @@ func loadSettings() Settings {
 		if b, err := os.ReadFile(p); err == nil {
 			json.Unmarshal(b, &s)
 		}
+	}
+	if s.Directory == oldDefaultDirectory {
+		s.Directory = DefaultDirectory
 	}
 	if s.Mode == "" {
 		s.Mode = connect.ModeLoopback

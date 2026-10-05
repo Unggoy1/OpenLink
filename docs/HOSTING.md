@@ -6,7 +6,8 @@ This guide sets up a Halo Infinite community server that players anywhere can jo
 
 - Windows with Halo Infinite installed through Steam, on **the same game version** as your players.
 - A router where you can forward a UDP port, and a public IPv4 address (not carrier-grade NAT).
-- `hi-hostagent.exe` from the latest release.
+- The host package from the latest release (`hi-hostagent.exe`, `hi-hostctl.dll`, `hostctl-loader.exe` and the example files).
+- **A playlist.** Every OpenLink server runs from one: the server picks the map and mode of every match. The agent will not start without a valid playlist. To host without one, host an ordinary custom game instead of using OpenLink.
 
 ## 1. Forward the game port
 
@@ -23,19 +24,23 @@ The game server itself does not need a firewall rule: in proxy mode (the default
 ## 2. Check reachability before using the game
 
 ```
-hi-hostagent -simulate -directory https://openlink.unggoy.xyz -name "My Server"
+hi-hostagent -simulate -directory https://openlink-dir.unggoy.xyz -name "My Server"
 ```
 
 Within about a minute the agent logs either `the directory reached your server from the internet` or `the directory could NOT reach your server`. In the second case, re-check the port forward and the firewall rule. Stop the simulation (Ctrl+C) when it passes.
 
-## 3. Save your settings and run
+## 3. Set up the config and playlist, then run
+
+1. Copy `hostagent.example.json` to `hostagent.json` next to the program and fill in `name`, `region`, `register_key` and `public_port`. It already sets the required `hostctl_dll`, `hostctl_native` and `playlist`.
+2. Copy `playlist.example.json` to `playlist.json` and list your map/mode pairs (format and limits: [HOST-CONTROL.md](HOST-CONTROL.md)).
+3. Check it, then run:
 
 ```
-hi-hostagent -directory https://openlink.unggoy.xyz -name "My Server" -region us-west init-config
+hi-hostagent check-playlist
 hi-hostagent
 ```
 
-`init-config` writes `hostagent.json` next to the program. From then on, running `hi-hostagent` with no flags uses it. Edit the file to change settings. Flags still override it.
+Running `hi-hostagent` with no flags uses `hostagent.json`; flags override it. The agent checks the playlist before it starts anything and stops with an error if the file is missing or invalid: bad IDs, an `id` or `name` over 80 bytes, or (with voting) a ballot that would not fit. The playlist is read once at start, so restart the agent after editing it.
 
 The agent starts the game server (`HaloInfinite.exe -server -console -lan -lan_sandbox RETAIL -bindip 127.0.0.1`) in its own console window, restarts it if it exits, and keeps the listing fresh. Leave both windows open.
 

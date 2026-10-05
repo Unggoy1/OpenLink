@@ -39,7 +39,7 @@ flags:
 
 func main() {
 	fs := flag.NewFlagSet("hi-connector", flag.ExitOnError)
-	dirURL := fs.String("directory", envOr("HICOMM_DIRECTORY", "http://127.0.0.1:8080"), "directory URL (env HICOMM_DIRECTORY)")
+	dirURL := fs.String("directory", envOr("HICOMM_DIRECTORY", api.DefaultDirectory), "directory URL (env HICOMM_DIRECTORY)")
 	install := fs.String("install", "", "game install root, used to check the build; empty = search common locations")
 	all := fs.Bool("all", false, "list: include servers of other builds")
 	mode := fs.String("advertise", "loopback", "join: how to show the server to the game: loopback (127.0.0.1, proven on Windows and Linux) or broadcast (LAN IP)")

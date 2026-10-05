@@ -12,9 +12,13 @@ Setup
      register_key and public_host/public_port (your port forward or tunnel).
   3. Copy playlist.example.json to playlist.json and list your map/mode pairs
      (asset and version IDs from the game's content browser; "name" is what
-     players see when they vote).
-  4. Run hi-hostagent.exe from a normal (not administrator) terminal.
-     Ctrl+C stops the agent and the server.
+     players see when they vote). A playlist is required: the agent will not
+     start without a valid one. Limits: "id" and "name" at most 80 bytes
+     (UTF-8 bytes, not characters).
+  4. Check it: hi-hostagent.exe check-playlist
+  5. Run hi-hostagent.exe from a normal (not administrator) terminal.
+     Ctrl+C stops the agent and the server. The playlist is read once at
+     start: restart the agent after editing it.
 
 What the example config does
   - "playlist": the server decides the map and mode of every match.

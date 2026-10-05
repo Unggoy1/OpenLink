@@ -42,14 +42,14 @@ func entrySelection(e playlist.Entry, initialize bool) controlSelection {
 	}
 }
 
-// runRotation loads the playlist and drives map/mode selection for the
-// connected server until ctx ends or the transport closes.
+// runRotation drives map/mode selection for the connected server, from the
+// playlist checked at agent start, until ctx ends or the transport closes.
 func (a *agent) runRotation(ctx context.Context, controller hostController) {
 	a.setRotation(func(*rotationInfo) {})
-	f, err := playlist.Load(a.cfg.resolve(a.cfg.Playlist))
-	if err != nil {
-		a.log.Error("playlist unusable; rotation off", "err", err)
-		a.setRotation(func(r *rotationInfo) { r.Error = err.Error() })
+	f := a.playlist
+	if f == nil {
+		a.log.Error("no checked playlist; rotation off")
+		a.setRotation(func(r *rotationInfo) { r.Error = "no checked playlist" })
 		return
 	}
 	a.log.Info("playlist loaded", "entries", len(f.Entries), "selection", f.Selection)

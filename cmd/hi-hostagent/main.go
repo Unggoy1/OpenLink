@@ -22,6 +22,7 @@ import (
 	"halocommunity/internal/api"
 	"halocommunity/internal/beacon"
 	"halocommunity/internal/game"
+	"halocommunity/internal/playlist"
 	"halocommunity/internal/relay"
 	"halocommunity/internal/sim"
 	"halocommunity/internal/udpx"
@@ -44,6 +45,7 @@ usage:
   hi-hostagent ban <ip> [minutes]       ban a player (default: permanent)
   hi-hostagent unban <ip> | bans        remove a ban | list bans
   hi-hostagent select <selection.json> select pinned map/mode descriptors (loading/start unverified)
+  hi-hostagent check-playlist [file]    check a playlist (default: the configured one) and exit
   hi-hostagent version
 
 flags:
@@ -67,10 +69,11 @@ type agent struct {
 	reachability string
 	control      hostController
 	controlError string
-	rotation     *rotationInfo // nil without a playlist
-	lobby        *lobbyInfo    // nil until the native backend connects
-	voter        *voter        // nil unless voting runs
-	vote         *voteInfo     // nil unless voting runs
+	playlist     *playlist.File // checked at start; nil only with -simulate
+	rotation     *rotationInfo  // nil until rotation runs
+	lobby        *lobbyInfo     // nil until the native backend connects
+	voter        *voter         // nil unless voting runs
+	vote         *voteInfo      // nil unless voting runs
 }
 
 func (a *agent) setStatus(s string) {
@@ -106,6 +109,18 @@ func main() {
 	}
 
 	a := &agent{cfg: c, log: slog.New(slog.NewTextHandler(os.Stderr, nil))}
+	if !c.Simulate {
+		// Every real server runs from a playlist; refuse to start without a
+		// usable one rather than discover it once the server is up.
+		f, report, err := checkPlaylist(c, c.resolve(c.Playlist), c.Vote != nil)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(2)
+		}
+		a.playlist = f
+		a.log.Info("playlist checked", "file", c.Playlist, "entries", len(f.Entries), "selection", f.Selection,
+			"voting", c.Vote != nil, "largest_ballot_bytes", report.ballot)
+	}
 	a.log.Info("hi-hostagent", "version", version, "config", orDash(c.path))
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -143,6 +158,8 @@ func runCommand(c config, args []string) error {
 			return fmt.Errorf("usage: select <selection.json>")
 		}
 		return selectCommand(c.Admin, args[1])
+	case "check-playlist":
+		return checkPlaylistCommand(c, args)
 	}
 	return fmt.Errorf("unknown command %q (run with -h for help)", args[0])
 }

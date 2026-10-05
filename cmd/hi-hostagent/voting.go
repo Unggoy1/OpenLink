@@ -157,11 +157,7 @@ func (v *voter) ballotLocked(client string, now time.Time) vote.Ballot {
 	r := v.round
 	b := vote.Ballot{Round: r.id, Counts: make([]int, len(r.options)), Mine: -1, Winner: -1, StartMS: -1}
 	for _, e := range r.options {
-		name := e.Name
-		if name == "" {
-			name = e.ID
-		}
-		b.Options = append(b.Options, vote.Option{ID: vote.Name(e.ID), Name: vote.Name(name), Thumb: e.ThumbRef()})
+		b.Options = append(b.Options, ballotOption(e))
 	}
 	for k, choice := range r.votes {
 		b.Counts[choice]++
@@ -454,16 +450,24 @@ func (a *agent) interceptVote(b []byte, client *net.UDPAddr) ([]byte, bool) {
 	return v.intercept(b, client)
 }
 
-// runVoting loads the playlist and runs voting for the connected server.
-func (a *agent) runVoting(ctx context.Context, controller voteController) {
-	f, err := playlist.Load(a.cfg.resolve(a.cfg.Playlist))
-	if err == nil && !hasCustom(f.Entries) {
-		err = fmt.Errorf("playlist needs a custom (UGC) mode entry for the first selection")
+// ballotOption is how a playlist entry appears on a ballot. The playlist
+// check (playlistcheck.go) sizes ballots with it too.
+func ballotOption(e playlist.Entry) vote.Option {
+	name := e.Name
+	if name == "" {
+		name = e.ID
 	}
-	if err != nil {
-		a.log.Error("playlist unusable; voting off", "err", err)
+	return vote.Option{ID: vote.Name(e.ID), Name: vote.Name(name), Thumb: e.ThumbRef()}
+}
+
+// runVoting runs voting for the connected server with the playlist checked
+// at agent start.
+func (a *agent) runVoting(ctx context.Context, controller voteController) {
+	f := a.playlist
+	if f == nil {
+		a.log.Error("no checked playlist; voting off")
 		a.mu.Lock()
-		a.vote = &voteInfo{Phase: "off", Error: err.Error()}
+		a.vote = &voteInfo{Phase: "off", Error: "no checked playlist"}
 		a.mu.Unlock()
 		return
 	}

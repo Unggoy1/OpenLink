@@ -81,6 +81,15 @@ func Parse(b []byte) (*File, error) {
 			return nil, fmt.Errorf("playlist: duplicate entry id %q", e.ID)
 		}
 		seen[e.ID] = true
+		// IDs and names go on vote ballots, which cap them at vote.MaxNameBytes.
+		for _, f := range []struct{ field, value string }{{"id", e.ID}, {"name", e.Name}} {
+			if n := len(f.value); n > vote.MaxNameBytes {
+				return nil, fmt.Errorf("playlist: entry %q %s is %d bytes; the limit is %d UTF-8 bytes (not characters)", e.ID, f.field, n, vote.MaxNameBytes)
+			}
+			if strings.IndexFunc(f.value, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0 {
+				return nil, fmt.Errorf("playlist: entry %q %s contains a control character", e.ID, f.field)
+			}
+		}
 		if e.ModeKind == "" {
 			e.ModeKind = "custom"
 		}

@@ -9,6 +9,10 @@ import (
 )
 
 const (
+	// DefaultDirectory is the community directory the tools use unless
+	// HICOMM_DIRECTORY or a flag/config says otherwise. The OpenLink app
+	// has its own copy (browser/settings.go).
+	DefaultDirectory = "https://openlink-dir.unggoy.xyz"
 	// GamePort is the UDP port a LAN client always dials on the host.
 	GamePort = 1343
 	// DiscoveryPort is the UDP port of the LAN beacon broadcast.

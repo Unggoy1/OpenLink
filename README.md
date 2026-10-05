@@ -42,7 +42,7 @@ Full guide: **[docs/HOSTING.md](docs/HOSTING.md)**. In short:
 
 1. Forward **UDP 1343** to the server PC and allow `hi-hostagent.exe` in the Windows firewall.
 2. Check reachability with `hi-hostagent -simulate -directory https://DIRECTORY -name "My Server"`. The agent logs whether the directory could reach your port.
-3. Save your settings once with `hi-hostagent -directory https://DIRECTORY -name "My Server" -region us-west init-config`. After that, `hi-hostagent` with no flags runs the server. `hi-hostagent autostart enable` starts it at logon.
+3. Copy `hostagent.example.json` and `playlist.example.json` from the host package to `hostagent.json` and `playlist.json` and fill them in. **A playlist is required**: the agent refuses to start without a valid one (`hi-hostagent check-playlist` checks it). After that, `hi-hostagent` with no flags runs the server. `hi-hostagent autostart enable` starts it at logon.
 
 By default the agent runs in **proxy mode**: the game server listens only on 127.0.0.1 and the agent fronts the public port. That gives player counts, ping and reachability checks, and `status` / `kick` / `ban` commands, with per-player rate limits.
 

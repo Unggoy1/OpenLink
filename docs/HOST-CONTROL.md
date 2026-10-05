@@ -35,7 +35,7 @@ Mode kind is `custom` (published UGC variant, native6) or `engine` (base EngineG
 
 A lobby leader's client pushes its own lobby default (for example Bazaar/Slayer) into the server's selection. After a successful selection, the DLL locks entry 0 of the server's selection: any later write from game code keeps its other entries but gets the hostagent's map/mode. `GET /host-control` reports `gates` with Locked (64) and Intercepted (128, the lock rewrote another writer). With a v2 DLL it also reports `state` (8 lobby, 11 starting, 9 in game, 10 end of game) and `matches` (matches started). The leader's lobby screen may still show its own map name. The server loads the selected content.
 
-To rotate automatically, add a playlist to hostagent.json (requires `hostctl_native`):
+Every server needs a playlist in hostagent.json (requires `hostctl_native`); the agent refuses to start without one:
 
 ```json
 {"hostctl_dll": "C:/path/hi-hostctl.dll", "hostctl_native": true, "playlist": "playlist.json"}
@@ -58,6 +58,13 @@ To rotate automatically, add a playlist to hostagent.json (requires `hostctl_nat
 
 - `selection`: `shuffle_bag` (default) plays every entry once per cycle in random order, never repeating across a cycle boundary. `sequential` uses file order.
 - Each entry has `mode_kind` `custom` (default, UGC game variant) or `engine`, and `enabled` (default true). The first match must use a `custom` entry, because it initializes the server's selection.
+- Limits, checked when the agent starts (it refuses to start on any error) and by `hi-hostagent check-playlist [file]`:
+  - `id`: required and unique; at most 80 bytes. A short readable slug such as `fiesta-slayer-interference` is best.
+  - `name`: optional (players see the `id` without it); at most 80 UTF-8 bytes, not characters (é is 2 bytes, most other scripts 2–3, emoji 4). No control characters in either.
+  - Map and mode `asset_id`/`version_id`: canonical, nonzero UUIDs.
+  - With voting: at least 2 enabled entries, at least one `custom`, and the largest possible ballot (the `options` entries with the longest IDs and names, thumbnails included) must fit in 1200 bytes. `&`, `<` and `>` count 6 bytes each. IDs and names both at 80 bytes fit only just (1197 bytes with the default settings) and fail with `max_players` 0 or very long vote timers; with IDs of about 32 bytes, 80-byte names always fit.
+  - `check-playlist` always applies the voting checks, so a playlist that passes works on any server.
+- The playlist is read once when the agent starts; restart the agent after editing it.
 - The agent selects the first entry as soon as the server's lobby is ready, and the next entry each time the server is back in its lobby after a match. A selection that fails three times is skipped.
 - `GET /status` shows `host_control.rotation` with `current`, `pending`, `matches`, `selections` and `error`.
 - With a tunnel (for example playit) pointed at 127.0.0.1:1343 in proxy mode, set `"server_ip": "127.0.0.2"`. Otherwise the game server receives the tunnel traffic, the directory marks the host unreachable, and the OpenLink app blocks Join. With this setup, five players (four remote) played three matches that cycled a three-entry playlist (2026-10-04).

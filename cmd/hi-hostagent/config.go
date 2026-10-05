@@ -67,8 +67,12 @@ type config struct {
 
 func defaults() config {
 	host, _ := os.Hostname()
+	dir := os.Getenv("HICOMM_DIRECTORY")
+	if dir == "" {
+		dir = api.DefaultDirectory
+	}
 	return config{
-		Name: host, PublicPort: api.GamePort, Sandbox: "RETAIL", Manage: true, Restart: true,
+		Directory: dir, Name: host, PublicPort: api.GamePort, Sandbox: "RETAIL", Manage: true, Restart: true,
 		Proxy: true, Listen: fmt.Sprintf("0.0.0.0:%d", api.GamePort), ServerIP: "127.0.0.1",
 		MaxPlayers: 32, MaxPPS: 500, Admin: "127.0.0.1:7180", BansFile: "bans.json",
 		CaptureDelay: 5 * time.Second,
@@ -82,7 +86,7 @@ func loadConfig(fs *flag.FlagSet, args []string) (config, error) {
 	c := defaults()
 	f := c // flag targets; copied over the file values only when set
 	cfgPath := fs.String("config", "", "config file (default: hostagent.json next to the program, if present)")
-	fs.StringVar(&f.Directory, "directory", os.Getenv("HICOMM_DIRECTORY"), "directory URL (env HICOMM_DIRECTORY); empty = do not list")
+	fs.StringVar(&f.Directory, "directory", c.Directory, "directory URL (env HICOMM_DIRECTORY); empty = do not list")
 	fs.StringVar(&f.RegisterKey, "register-key", os.Getenv("HICOMM_REGISTER_KEY"), "directory registration key, if the directory requires one")
 	fs.StringVar(&f.Name, "name", c.Name, "server name shown in the browser")
 	fs.StringVar(&f.Region, "region", "", "region label, e.g. us-west")
@@ -103,7 +107,7 @@ func loadConfig(fs *flag.FlagSet, args []string) (config, error) {
 	fs.StringVar(&f.BansFile, "bans", c.BansFile, "ban list file")
 	fs.StringVar(&f.HostControlDLL, "hostctl-dll", "", "explicit DLL loading for servers launched by this agent (off by default)")
 	fs.BoolVar(&f.HostControlNative, "hostctl-native", false, "with hostctl-dll: opt into the B002 native LAN selection backend")
-	fs.StringVar(&f.Playlist, "playlist", "", "with hostctl-native: map/mode rotation file; the server picks every match from it")
+	fs.StringVar(&f.Playlist, "playlist", "", "map/mode playlist file (required to run a server; needs hostctl-native); the server picks every match from it")
 	fs.BoolVar(&f.Simulate, "simulate", false, "no game: send simulated beacons and answer probes on the game port")
 	fs.BoolVar(&f.Loopback, "loopback", false, "with -simulate: keep simulated beacons on 127.0.0.1")
 	fs.DurationVar(&f.CaptureDelay, "capture-delay", c.CaptureDelay, "wait after setupComplete before listening for beacons")
@@ -178,10 +182,9 @@ func loadConfig(fs *flag.FlagSet, args []string) (config, error) {
 			c.Playlist = f.Playlist
 		}
 	})
-	// Environment fallbacks for values the file left empty.
-	if c.Directory == "" {
-		c.Directory = f.Directory
-	}
+	// Environment fallbacks for values the file left empty. (The directory's
+	// default is set in defaults(), so an explicit "" in the file still means
+	// "do not list".)
 	if c.RegisterKey == "" {
 		c.RegisterKey = f.RegisterKey
 	}

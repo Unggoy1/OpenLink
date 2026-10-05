@@ -12,6 +12,7 @@ import (
 	"halocommunity/internal/api"
 	"halocommunity/internal/directory"
 	"halocommunity/internal/sim"
+	"halocommunity/vote"
 )
 
 func freePort(t *testing.T) int {
@@ -122,5 +123,29 @@ func TestPing(t *testing.T) {
 	defer dead.Close()
 	if _, ok := Ping(ctx, Server{Host: "127.0.0.1", Port: dead.LocalAddr().(*net.UDPAddr).Port}); ok {
 		t.Fatal("silent endpoint reported as answering")
+	}
+}
+
+func TestSessionKeepsBallots(t *testing.T) {
+	ss := &Session{}
+	if ss.takeBallot([]byte("game datagram")) {
+		t.Fatal("consumed a game datagram")
+	}
+	if !ss.takeBallot([]byte(vote.BallotPrefix + "{broken")) {
+		t.Fatal("passed a malformed ballot to the game")
+	}
+	if _, _, ok := ss.Ballot(); ok {
+		t.Fatal("kept a malformed ballot")
+	}
+	d, err := vote.EncodeBallot(vote.Ballot{Round: 2, Options: []vote.Option{{ID: "a", Name: "A"}}, Counts: []int{0},
+		Mine: -1, Winner: -1, StartMS: -1, RemainingMS: 1000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ss.takeBallot(d) {
+		t.Fatal("ballot not consumed")
+	}
+	if b, at, ok := ss.Ballot(); !ok || b.Round != 2 || at.IsZero() {
+		t.Fatalf("%+v %v %v", b, at, ok)
 	}
 }

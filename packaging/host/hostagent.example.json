@@ -8,5 +8,7 @@
   "stop_server": true,
   "hostctl_dll": "hi-hostctl.dll",
   "hostctl_native": true,
-  "playlist": "playlist.json"
+  "playlist": "playlist.json",
+  "server_owned": true,
+  "vote": {"seconds": 30, "options": 4, "start_delay_seconds": 5}
 }

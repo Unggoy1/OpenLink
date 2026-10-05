@@ -15,6 +15,7 @@
   let directory = $state(initial.directory);
   let mode = $state(initial.mode || 'loopback');
   let installDir = $state(initial.installDir);
+  let voteSound = $state(!initial.muteVoteSound);
   let error = $state('');
   let saving = $state(false);
 
@@ -23,7 +24,7 @@
     error = '';
     saving = true;
     try {
-      await onsave(new main.Settings({ directory, mode, installDir }));
+      await onsave(new main.Settings({ directory, mode, installDir, muteVoteSound: !voteSound }));
     } catch (err) {
       error = String(err);
     } finally {
@@ -55,9 +56,14 @@
     </label>
     <label class="radio">
       <input type="radio" bind:group={mode} value="broadcast" />
-      <span>LAN broadcast: try this only if servers never appear in game</span>
+      <span>LAN broadcast: if servers never appear in game, or you host the server on this PC</span>
     </label>
   </fieldset>
+
+  <label class="radio">
+    <input type="checkbox" bind:checked={voteSound} />
+    <span>Play a sound when a vote for the next match opens</span>
+  </label>
 
   {#if error}<p class="error">{error}</p>{/if}
 

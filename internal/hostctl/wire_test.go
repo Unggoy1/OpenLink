@@ -116,3 +116,59 @@ func TestReplyVersion2Lifecycle(t *testing.T) {
 		}
 	}
 }
+
+// Version 3 replies append the lobby observation at byte 112.
+func TestReplyVersion3Lobby(t *testing.T) {
+	b := make([]byte, 176)
+	copy(b, "HICR")
+	binary.LittleEndian.PutUint16(b[4:], 3)
+	binary.LittleEndian.PutUint64(b[8:], 9)
+	binary.LittleEndian.PutUint32(b[16:], 70)
+	binary.LittleEndian.PutUint32(b[96:], 8)
+	binary.LittleEndian.PutUint32(b[112:], LobbyValid|LobbyStartMode)
+	binary.LittleEndian.PutUint32(b[116:], 2)
+	binary.LittleEndian.PutUint32(b[128:], 0xffffffff)
+	binary.LittleEndian.PutUint32(b[140:], 1)
+	b[144], b[149] = 1, 1
+	binary.LittleEndian.PutUint32(b[152:], 1)
+	var w bytes.Buffer
+	writeFrame(&w, b)
+	got, err := DecodeReply(&w)
+	l := got.Lobby
+	if err != nil || got.Version != 3 || got.State != 8 || l.Connected != 2 || l.Owner != -1 || l.StartMode != 1 ||
+		l.Allowed != 1 || l.Start != 1 || l.UsersRequired != 1 || l.Flags != LobbyValid|LobbyStartMode {
+		t.Fatalf("v3 decode: %+v %v", got, err)
+	}
+	var short bytes.Buffer
+	writeFrame(&short, b[:112])
+	if _, err := DecodeReply(&short); err == nil {
+		t.Fatal("accepted v3 header on a v2-length frame")
+	}
+}
+
+func TestServerOwnedRequest(t *testing.T) {
+	for _, mode := range []uint32{ServerOwnedOff, ServerOwnedNoOwner, ServerOwnedFilterOnly} {
+		var w bytes.Buffer
+		if err := EncodeRequest(&w, Request{Op: OpServerOwned, ID: 2, Mode: mode}); err != nil {
+			t.Fatal(err)
+		}
+		got, err := DecodeRequest(&w)
+		if err != nil || got.Op != OpServerOwned || got.Mode != mode {
+			t.Fatalf("round trip %v: %+v %v", mode, got, err)
+		}
+	}
+	if err := EncodeRequest(&bytes.Buffer{}, Request{Op: OpServerOwned, ID: 2, Mode: 3}); err == nil {
+		t.Fatal("encoded server-owned mode 3")
+	}
+	b := make([]byte, 52)
+	copy(b, "HICT")
+	binary.LittleEndian.PutUint16(b[4:], 1)
+	binary.LittleEndian.PutUint16(b[6:], OpServerOwned)
+	binary.LittleEndian.PutUint64(b[8:], 2)
+	binary.LittleEndian.PutUint32(b[48:], 3)
+	var w bytes.Buffer
+	writeFrame(&w, b)
+	if _, err := DecodeRequest(&w); err == nil {
+		t.Fatal("accepted server-owned mode 3")
+	}
+}

@@ -80,7 +80,10 @@ bool ValidateImage(uintptr_t base) noexcept {
         {0x2e1d478,{0x48,0x89,0x5c,0x24,0x08,0x48,0x89,0x6c,0x24,0x10,0x48,0x89,0x74,0x24,0x18,0x57}},
         {0x2e1cb9c,{0x48,0x89,0x5c,0x24,0x08,0x48,0x89,0x6c,0x24,0x10,0x48,0x89,0x74,0x24,0x18,0x57}},
         {0x2e0dc08,{0x48,0x89,0x5c,0x24,0x08,0x48,0x89,0x74,0x24,0x10,0x57,0x48,0x83,0xec,0x20,0x48}},
-        {kServerTick,{0x40,0x53,0x48,0x83,0xec,0x20,0x48,0x8b,0xd9,0xe8,0xca,0x06,0x00,0x00,0x48,0x8b}}
+        {kServerTick,{0x40,0x53,0x48,0x83,0xec,0x20,0x48,0x8b,0xd9,0xe8,0xca,0x06,0x00,0x00,0x48,0x8b}},
+        {0x2e1d270,{0x40,0x53,0x48,0x83,0xec,0x20,0x4c,0x8b,0xca,0x48,0x8b,0xd9,0x45,0x33,0xc0,0xe8}},
+        {0x2e0d870,{0x40,0x53,0x48,0x83,0xec,0x20,0x8b,0x81,0xc8,0x00,0x00,0x00,0x48,0x8b,0xd9,0x3b}},
+        {0x2e0dcb8,{0x40,0x53,0x48,0x83,0xec,0x20,0x44,0x0f,0xb6,0x81,0xc8,0x00,0x00,0x00,0x48,0x8b}}
     };
     for(const auto& target:targets) {
         uint8_t observed[16]={}; MEMORY_BASIC_INFORMATION region={};
@@ -88,8 +91,12 @@ bool ValidateImage(uintptr_t base) noexcept {
             !(region.Protect&(PAGE_EXECUTE|PAGE_EXECUTE_READ|PAGE_EXECUTE_READWRITE|PAGE_EXECUTE_WRITECOPY)) ||
             !CopyAddress(base+target.rva,observed,sizeof(observed)) || std::memcmp(observed,target.bytes,sizeof(observed))) return false;
     }
-    uintptr_t tick=0,getter=0,setter=0,requested=0,request=0,apply=0;
-    return Read(base+kServerTable+0x18,tick) && tick==base+kServerTick &&
+    uintptr_t tick=0,getter=0,setter=0,requested=0,request=0,apply=0,int_getter=0,int_set=0,int_apply=0,byte_apply=0;
+    return Read(base+0x3d44a80+0xa0,int_getter) && int_getter==base+0x4e5cec &&
+        Read(base+0x3d44a80+0xb0,int_set) && int_set==base+0x2e1d270 &&
+        Read(base+0x3d44a80+0x78,int_apply) && int_apply==base+0x2e0d870 &&
+        Read(base+0x3e06a20+0x78,byte_apply) && byte_apply==base+0x2e0dcb8 &&
+        Read(base+kServerTable+0x18,tick) && tick==base+kServerTick &&
         Read(base+kProviderTable+0xa0,getter) && getter==base+0x4e5cec &&
         Read(base+kProviderTable+0xa8,requested) && requested==base+0x2e0d234 &&
         Read(base+kProviderTable+0xb0,setter) && setter==base+0x2e1d478 &&
@@ -100,6 +107,96 @@ bool IsLan(uintptr_t base) noexcept {
     uint8_t server=0,lan=0,thunder=0;
     return Read(base+kServerFlag,server) && Read(base+kLanFlag,lan) && Read(base+0x4eadd49,thunder) && server && lan && !thunder;
 }
+// Lobby observation and the start command. Both run on the engine tick only.
+constexpr uintptr_t kPregameHandler=0x4dc51e8,kPregameTable=0x3706df0,kSessionKind=0x4c253b0;
+constexpr uintptr_t kIntTable=0x3d44a80,kIntSet=0x2e1d270,kStartMode=0x541f0;
+using IntSet=uint8_t (*)(void*,const int32_t*);
+SRWLOCK probe_lock=SRWLOCK_INIT;
+LobbyProbe probe={};
+std::atomic<uint64_t> start_request{0},start_completed{0},start_sequence{0};
+std::atomic<uint16_t> start_code{CodePending};
+std::atomic<bool> start_sent{false},server_owned{false},owner_patched{false};
+
+// Player request filter (server-owned lobby). Requests from clients reach the
+// server through the component tables' +0x78 apply; the server's own writes use
+// Set (+0xb0). Applies to the start-mode and end-game components are dropped.
+constexpr uintptr_t kIntApply=0x2e0d870,kByteTable=0x3e06a20,kByteApply=0x2e0dcb8,kEndGame=0xb4c4b0;
+std::atomic<uintptr_t> current_simulation{0};
+std::atomic<uint32_t> blocked_start{0},blocked_end{0};
+std::atomic<bool> filter_active{false};
+using IntApply=uint8_t (*)(void*,const int32_t*);
+using ByteApply=uint8_t (*)(void*,const uint8_t*);
+bool FilterRequest(void* component,uintptr_t offset) noexcept {
+    const uintptr_t simulation=current_simulation.load(std::memory_order_acquire);
+    return filter_active.load(std::memory_order_acquire) && simulation &&
+        reinterpret_cast<uintptr_t>(component)==simulation+offset;
+}
+uint8_t HookIntApply(void* component,const int32_t* value) {
+    if(FilterRequest(component,kStartMode)) { blocked_start.fetch_add(1); return 1; }
+    return reinterpret_cast<IntApply>(image.load(std::memory_order_acquire)+kIntApply)(component,value);
+}
+uint8_t HookByteApply(void* component,const uint8_t* value) {
+    if(FilterRequest(component,kEndGame)) { blocked_end.fetch_add(1); return 1; }
+    return reinterpret_cast<ByteApply>(image.load(std::memory_order_acquire)+kByteApply)(component,value);
+}
+
+LobbyProbe ReadLobby(uintptr_t base,uintptr_t session,uintptr_t simulation) noexcept {
+    LobbyProbe p={}; p.owner=p.host_peer=p.start_mode=-1;
+    if(session && Read(session+0xa0,p.peers) && Read(session+0xa4,p.peer_mask) && Read(session+0x6c,p.owner) &&
+        Read(session+0x70,p.host_peer) && Read(session+0x18a8,p.players)) {
+        p.flags|=LobbyValid;
+        for(unsigned i=0;i<32;++i) {
+            int32_t state=0;
+            if((p.peer_mask>>i)&1 && Read(session+0xb0+uintptr_t(i)*0xc0,state) && state==8) ++p.connected;
+        }
+    }
+    uintptr_t table=0; uint8_t available=0;
+    if(simulation && Read(simulation+kStartMode,table) && table==base+kIntTable &&
+        Read(simulation+kStartMode+0xc0,available) && (available&1) && Read(simulation+kStartMode+0xc8,p.start_mode))
+        p.flags|=LobbyStartMode;
+    uintptr_t handler_table=0,handler_context=0;
+    const uintptr_t handler=base+kPregameHandler;
+    if(Read(handler,handler_table) && handler_table==base+kPregameTable && Read(handler+0x38,handler_context) &&
+        handler_context==base+kContext && Read(handler+0x58,p.content_prepared) && Read(handler+0x68,p.prep_started) &&
+        Read(handler+0x69,p.prep_done) && Read(handler+0x74,p.loading) && Read(handler+0x76,p.start))
+        p.flags|=LobbyHandler;
+    Read(base+kContext+0x280,p.allowed); Read(base+kContext+0xec,p.users_required); Read(base+kContext+0xe8,p.game_type);
+    uintptr_t kind=0; if(!Read(base+kSessionKind,kind) || !kind || !Read(kind+8,p.session_kind)) p.session_kind=-1;
+    uintptr_t end_table=0; uint8_t end_value=0; p.end_game=-1;
+    if(simulation && Read(simulation+kEndGame,end_table) && end_table>=base && end_table-base<0x10000000) {
+        p.end_game_table=int32_t(end_table-base);
+        if(Read(simulation+kEndGame+0xc8,end_value)) p.end_game=end_value;
+    }
+    p.blocked_start=uint8_t(blocked_start.load()>255 ? 255 : blocked_start.load());
+    p.blocked_end=uint8_t(blocked_end.load()>255 ? 255 : blocked_end.load());
+    if(server_owned.load(std::memory_order_acquire)) p.flags|=LobbyServerOwned;
+    if(owner_patched.load(std::memory_order_acquire)) p.flags|=LobbyNoOwner;
+    if(start_sent.load(std::memory_order_acquire)) p.flags|=LobbyStartSent;
+    return p;
+}
+// Executes a queued Start on the engine thread: HostPreGame only, validated
+// component table, native authority-checked Set, then readback.
+void TickStart(uintptr_t base,int32_t state,uint32_t gates,uintptr_t simulation) noexcept {
+    const uint64_t ticket=start_request.exchange(0,std::memory_order_acq_rel);
+    if(!ticket) return;
+    uint16_t code=CodeBusy;
+    const uint32_t required=GateRole|GateDispatch;
+    if(state==HostPreGame && (gates&required)==required && simulation) {
+        code=CodeFailed;
+        const uintptr_t component=simulation+kStartMode; uintptr_t table=0,set=0; uint8_t available=0;
+        if(Read(component,table) && table==base+kIntTable && Read(table+0xb0,set) && set==base+kIntSet &&
+            Read(component+0xc0,available) && (available&1)) {
+            const int32_t value=1; int32_t observed=0;
+            if(reinterpret_cast<IntSet>(set)(reinterpret_cast<void*>(component),&value) &&
+                Read(component+0xc8,observed) && observed==value) {
+                code=CodeOK; start_sent.store(true,std::memory_order_release);
+            }
+        }
+    }
+    start_code.store(code,std::memory_order_release);
+    start_completed.store(ticket,std::memory_order_release);
+}
+
 void HookTick(void* server) {
     const auto original=original_tick.load(std::memory_order_acquire);
     if(original) original(server); // exact native call, once; native exceptions keep native semantics
@@ -111,20 +208,38 @@ void HookTick(void* server) {
          reinterpret_cast<decltype(ProviderFunctions::Current)>(base+0x4e5cec),
          reinterpret_cast<decltype(ProviderFunctions::Set)>(base+0x2e1d478),
          reinterpret_cast<decltype(ProviderFunctions::Requested)>(base+0x2e0d234)}};
-    uintptr_t table=0,current_server=0;
+    uintptr_t table=0,current_server=0,session=0,simulation=0;
     if(IsLan(base) && Read(base+kManager+0x70,current_server) && current_server==reinterpret_cast<uintptr_t>(server) &&
         Read(reinterpret_cast<uintptr_t>(server),table) && table==base+kServerTable) {
         frame.gates|=GateRole|GateDispatch;
         uint8_t active=0;
         if(Read(base+0x4dc3180,active) && active) Read(base+kContext,frame.state);
-        uintptr_t session=0,simulation=0; int32_t valid=0;
+        int32_t valid=0;
         if(Read(base+kContext+0x78,session) && session && session<=UINTPTR_MAX-0x5a080 &&
             Read(session+0x5a078,valid) && SimulationAvailable(valid) && Read(session+0x59f78,simulation) &&
             simulation && simulation<=UINTPTR_MAX-0xb4b510) {
             const auto provider=simulation+0xb4afc8;
             uintptr_t provider_table=0;
             if(Read(provider,provider_table) && provider_table==frame.provider_table) frame.provider=reinterpret_cast<void*>(provider);
+        } else simulation=0;
+        current_simulation.store(simulation,std::memory_order_release);
+        if(frame.state==HostInGame || frame.state==HostEndGame) start_sent.store(false,std::memory_order_release);
+        TickStart(base,frame.state,frame.gates,simulation);
+        auto lobby=ReadLobby(base,session,simulation);
+        // A Start whose players all left before the engine began the match would
+        // otherwise start instantly for the next joiner; withdraw it (start mode 0).
+        if(frame.state==HostPreGame && start_sent.load(std::memory_order_acquire) && simulation &&
+            (lobby.flags&(LobbyValid|LobbyStartMode))==(LobbyValid|LobbyStartMode) && lobby.connected==0 && lobby.start_mode==1 && !lobby.start) {
+            const uintptr_t component=simulation+kStartMode; uintptr_t component_table=0,set=0;
+            if(Read(component,component_table) && component_table==base+kIntTable && Read(component_table+0xb0,set) && set==base+kIntSet) {
+                const int32_t none=0;
+                if(reinterpret_cast<IntSet>(set)(reinterpret_cast<void*>(component),&none)) {
+                    start_sent.store(false,std::memory_order_release);
+                    lobby=ReadLobby(base,session,simulation);
+                }
+            }
         }
+        AcquireSRWLockExclusive(&probe_lock); probe=lobby; ReleaseSRWLockExclusive(&probe_lock);
     }
     commands.Tick(frame);
 }
@@ -179,6 +294,48 @@ DWORD RestoreProviderSlot(uintptr_t base,uintptr_t offset,uintptr_t native,void*
     const auto cleanup=RestoreTickProtection(reinterpret_cast<void* volatile*>(base+kProviderTable+offset),state,slot_functions);
     return result==ERROR_SUCCESS ? cleanup : result;
 }
+
+// Lobby-owner patch. The aligned qword at 14236f828 holds the tail of
+// "lea rcx,[g_HostInitDesc]" and the whole "call cand_HostInitConfigured" in
+// 1409cdbf0's cold block; replacing the call with "mov al,1; nop x3" takes the
+// game's own host-init branch (no owner assigned). One atomic 8-byte exchange.
+constexpr uintptr_t kOwnerSite=0x236f828;
+constexpr uint64_t kOwnerNative=0xfe63699ce802a53aull,kOwnerPatched=0x90909001b002a53aull;
+DWORD SwapOwnerSite(uintptr_t base,uint64_t expected,uint64_t replacement) noexcept {
+    uint8_t before[4]={},after[6]={};
+    static const uint8_t lea[4]={0x48,0x8d,0x0d,0x25},test[6]={0x84,0xc0,0x0f,0x85,0x38,0xe4};
+    if(!CopyAddress(base+kOwnerSite-4,before,sizeof(before)) || std::memcmp(before,lea,sizeof(lea)) ||
+        !CopyAddress(base+kOwnerSite+8,after,sizeof(after)) || std::memcmp(after,test,sizeof(test))) return ERROR_INVALID_FUNCTION;
+    const auto site=reinterpret_cast<volatile LONG64*>(base+kOwnerSite);
+    DWORD old=0;
+    if(!VirtualProtect(const_cast<LONG64*>(site),8,PAGE_EXECUTE_READWRITE,&old)) return GetLastError();
+    const auto seen=uint64_t(InterlockedCompareExchange64(site,LONG64(replacement),LONG64(expected)));
+    DWORD ignored=0; VirtualProtect(const_cast<LONG64*>(site),8,old,&ignored);
+    FlushInstructionCache(GetCurrentProcess(),const_cast<LONG64*>(site),8);
+    return seen==expected || seen==replacement ? ERROR_SUCCESS : ERROR_INVALID_FUNCTION;
+}
+// Swaps the int/byte table +0x78 applies for the request filter hooks, or back.
+// A slot that holds neither expected value is left untouched.
+SlotProtection int_apply_protection,byte_apply_protection;
+DWORD SwapApplySlot(uintptr_t base,uintptr_t table,uintptr_t native,void* hook,bool install,SlotProtection& state) noexcept {
+    const auto slot=reinterpret_cast<void* volatile*>(base+table+0x78);
+    uintptr_t observed=0;
+    if(!Read(base+table+0x78,observed)) return ERROR_READ_FAULT;
+    void* const from=install ? reinterpret_cast<void*>(base+native) : hook;
+    void* const to=install ? hook : reinterpret_cast<void*>(base+native);
+    if(observed==reinterpret_cast<uintptr_t>(to)) return ERROR_SUCCESS;
+    return ReplaceTickSlot(slot,from,to,state,slot_functions);
+}
+DWORD SetRequestFilter(uintptr_t base,bool enable) noexcept {
+    if(!enable) filter_active.store(false,std::memory_order_release);
+    DWORD result=SwapApplySlot(base,kIntTable,kIntApply,reinterpret_cast<void*>(&HookIntApply),enable,int_apply_protection);
+    if(result==ERROR_SUCCESS || !enable)
+        result=SwapApplySlot(base,kByteTable,kByteApply,reinterpret_cast<void*>(&HookByteApply),enable,byte_apply_protection)==ERROR_SUCCESS ? result : ERROR_INVALID_DATA;
+    if(enable && result!=ERROR_SUCCESS)
+        SwapApplySlot(base,kIntTable,kIntApply,reinterpret_cast<void*>(&HookIntApply),false,int_apply_protection);
+    if(enable && result==ERROR_SUCCESS) filter_active.store(true,std::memory_order_release);
+    return result;
+}
 }
 uint32_t InstallGameBackend() noexcept {
     AcquireSRWLockExclusive(&installation);
@@ -227,7 +384,16 @@ uint32_t StopGameBackend() noexcept {
         if(result==ERROR_SUCCESS) result=apply;
         if(result==ERROR_SUCCESS) result=request;
         if(result==ERROR_SUCCESS) result=set;
+        if(owner_patched.exchange(false)) {
+            const auto owner_site=SwapOwnerSite(base,kOwnerPatched,kOwnerNative);
+            if(result==ERROR_SUCCESS) result=owner_site;
+        }
+        if(server_owned.exchange(false)) {
+            const auto filter=SetRequestFilter(base,false);
+            if(result==ERROR_SUCCESS) result=filter;
+        }
     }
+    start_request.store(0);
     AcquireSRWLockExclusive(&selection_lock); lock_active=false; ReleaseSRWLockExclusive(&selection_lock);
     ReleaseSRWLockExclusive(&installation); return result;
 }
@@ -236,8 +402,44 @@ BackendReport WithLockGates(BackendReport report) noexcept {
     ContentSelection entry;
     if(LockedEntry(entry)) report.gates|=GateLocked;
     if(intercepted.load(std::memory_order_acquire)) report.gates|=GateIntercepted;
+    AcquireSRWLockShared(&probe_lock); report.lobby=probe; ReleaseSRWLockShared(&probe_lock);
     return report;
 }
+}
+BackendReport BackendStart(uint32_t wait_ms) noexcept {
+    auto report=commands.Status();
+    if(!running.load(std::memory_order_acquire)) { report.code=CodePending; return WithLockGates(report); }
+    if(wait_ms>2000) wait_ms=2000;
+    const uint64_t ticket=++start_sequence;
+    uint64_t idle=0;
+    if(!start_request.compare_exchange_strong(idle,ticket)) { report.code=CodeBusy; return WithLockGates(report); }
+    const ULONGLONG deadline=GetTickCount64()+wait_ms;
+    while(start_completed.load(std::memory_order_acquire)!=ticket && GetTickCount64()<deadline) Sleep(5);
+    uint64_t queued=ticket;
+    // Withdraw an undispatched command; one the tick already took completes shortly.
+    if(start_completed.load(std::memory_order_acquire)!=ticket && !start_request.compare_exchange_strong(queued,0))
+        for(unsigned i=0;i<100 && start_completed.load(std::memory_order_acquire)!=ticket;++i) Sleep(5);
+    report=commands.Status();
+    report.code=start_completed.load(std::memory_order_acquire)==ticket ? start_code.load(std::memory_order_acquire) : uint16_t(CodePending);
+    return WithLockGates(report);
+}
+uint32_t BackendServerOwned(uint32_t mode) noexcept {
+    if(mode>ServerOwnedFilterOnly) return ERROR_INVALID_PARAMETER;
+    AcquireSRWLockExclusive(&installation);
+    const auto base=image.load(); DWORD result=ERROR_NOT_READY;
+    if(running.load() && base) {
+        const bool filter=mode!=ServerOwnedOff,no_owner=mode==ServerOwnedNoOwner;
+        result=SetRequestFilter(base,filter);
+        if(result==ERROR_SUCCESS) {
+            result=no_owner ? SwapOwnerSite(base,kOwnerNative,kOwnerPatched) : SwapOwnerSite(base,kOwnerPatched,kOwnerNative);
+            if(result!=ERROR_SUCCESS && filter && !server_owned.load()) SetRequestFilter(base,false);
+        }
+        if(result==ERROR_SUCCESS) {
+            server_owned.store(filter,std::memory_order_release);
+            owner_patched.store(no_owner,std::memory_order_release);
+        }
+    }
+    ReleaseSRWLockExclusive(&installation); return result;
 }
 BackendReport BackendStatus() noexcept { return WithLockGates(commands.Status()); }
 BackendReport BackendSelect(const ContentSelection& desired,uint32_t wait_ms) noexcept {

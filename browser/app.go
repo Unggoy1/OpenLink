@@ -21,6 +21,8 @@ type App struct {
 	mu       sync.Mutex
 	settings Settings
 	sess     *connect.Session
+
+	notified uint64 // last vote round the player was alerted to
 }
 
 // NewApp creates the app with saved settings.
@@ -28,7 +30,10 @@ func NewApp() *App {
 	return &App{settings: loadSettings()}
 }
 
-func (a *App) startup(ctx context.Context) { a.ctx = ctx }
+func (a *App) startup(ctx context.Context) {
+	a.ctx = ctx
+	go a.watchVotes(ctx)
+}
 
 // shutdown releases the game ports when the window closes.
 func (a *App) shutdown(context.Context) { a.Leave() }
@@ -220,6 +225,9 @@ func (a *App) Leave() {
 
 // Status returns the active session, or nil when not joined.
 func (a *App) Status() *StatusView {
+	if demo != nil {
+		return demo.status()
+	}
 	a.mu.Lock()
 	sess := a.sess
 	a.mu.Unlock()

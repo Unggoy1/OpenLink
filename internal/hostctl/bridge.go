@@ -110,7 +110,28 @@ func (b *Bridge) Initialize(ctx context.Context, pair AssetPair) (Reply, error) 
 	return b.exchange(ctx, OpInitialize, pair)
 }
 
+// Start asks the server to start its lobby's match, as a lobby leader's Play
+// does. CodeOK means the engine accepted start mode 1; the engine's own
+// pregame checks (content prepared, a connected player) still decide when the
+// match loads. CodeBusy means the server was not in HostPreGame.
+func (b *Bridge) Start(ctx context.Context) (Reply, error) {
+	return b.exchange(ctx, OpStart, AssetPair{})
+}
+
+// ServerOwned sets the lobby control mode (ServerOwned* constants). Both
+// non-zero modes drop players' start and end-game requests; ServerOwnedNoOwner
+// also stops the first joiner becoming lobby owner. Send it before players
+// join. CodeOK on success; CodeUnsupported if the code bytes differ.
+func (b *Bridge) ServerOwned(ctx context.Context, mode uint32) (Reply, error) {
+	return b.send(ctx, Request{Op: OpServerOwned, Mode: mode})
+}
+
 func (b *Bridge) exchange(ctx context.Context, op uint16, pair AssetPair) (Reply, error) {
+	return b.send(ctx, Request{Op: op, Pair: pair})
+}
+
+func (b *Bridge) send(ctx context.Context, req Request) (Reply, error) {
+	op, pair := req.Op, req.Pair
 	select {
 	case b.serial <- struct{}{}:
 	case <-ctx.Done():
@@ -136,7 +157,8 @@ func (b *Bridge) exchange(ctx context.Context, op uint16, pair AssetPair) (Reply
 		return fail(errors.New("request IDs exhausted"))
 	}
 	b.nextID++
-	if err := EncodeRequest(b.conn, Request{Op: op, ID: b.nextID, Token: b.token, Pair: pair}); err != nil {
+	req.ID, req.Token = b.nextID, b.token
+	if err := EncodeRequest(b.conn, req); err != nil {
 		return fail(err)
 	}
 	r, err := DecodeReply(b.conn)

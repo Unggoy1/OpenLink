@@ -68,6 +68,9 @@ type agent struct {
 	control      hostController
 	controlError string
 	rotation     *rotationInfo // nil without a playlist
+	lobby        *lobbyInfo    // nil until the native backend connects
+	voter        *voter        // nil unless voting runs
+	vote         *voteInfo     // nil unless voting runs
 }
 
 func (a *agent) setStatus(s string) {
@@ -238,7 +241,7 @@ func (a *agent) startProxy(ctx context.Context, wg *sync.WaitGroup) error {
 		return fmt.Errorf("bad server-ip %q", a.cfg.ServerIP)
 	}
 	a.fwd = &relay.Forwarder{Listen: conn, Upstream: server, Allow: a.bans.Allowed, Intercept: sim.Answer,
-		MaxSessions: a.cfg.MaxPlayers, MaxPPS: a.cfg.MaxPPS}
+		InterceptFrom: a.interceptVote, MaxSessions: a.cfg.MaxPlayers, MaxPPS: a.cfg.MaxPPS}
 	a.log.Info("proxy listening", "public", conn.LocalAddr(), "server", server,
 		"max_players", a.cfg.MaxPlayers, "max_pps", a.cfg.MaxPPS)
 	wg.Add(1)

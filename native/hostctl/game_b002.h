@@ -20,6 +20,44 @@ enum BackendGate : uint32_t { GateBuild=1,GateRole=2,GateDispatch=4,GateContent=
     GateLocked=64,GateIntercepted=128 };
 enum BackendCode : uint16_t { CodeOK=0,CodeUnsupported=1,CodePending=2,CodeBusy=3,CodeInvalid=4,CodeFailed=5,CodeApplied=6,CodeSelected=7 };
 
+enum LobbyFlag : uint32_t {
+    LobbyValid=1,        // session/membership readable this tick
+    LobbyStartMode=2,    // start-mode component validated; start_mode is its value
+    LobbyHandler=4,      // pregame handler validated; handler bytes are live
+    LobbyServerOwned=8,  // player start/end-game requests are dropped (BackendServerOwned mode 1 or 2)
+    LobbyStartSent=16,   // a Start command set start mode in the current lobby
+    LobbyNoOwner=32      // join-time lobby-owner assignment is disabled (mode 1)
+};
+// BackendServerOwned modes. FilterOnly keeps the game's own owner (first joiner,
+// handed to the longest-present player by 142e1c454 when the owner leaves): that
+// player's client still shows Play/End Game (inert), other clients hide them
+// because an owner exists that is not them (O071, user report).
+enum ServerOwnedMode : uint32_t { ServerOwnedOff=0,ServerOwnedNoOwner=1,ServerOwnedFilterOnly=2 };
+// Read on the engine tick. B002 offsets (session = context+0x78): membership at
+// session+0x60 (peer count +0xa0, mask +0xa4, owner +0x6c, host peer +0x70, peer
+// state session+0xb0+i*0xc0, 8 = connected, as 142ded82c counts); session+0x18a8
+// player count (142f4252c "NoPlayersConnected"); start mode = int component at
+// simulation+0x541f0 (table 143d44a80, value +0xc8); context+0x280 allowed-to-start
+// byte and +0xec users required (142fbe864); context+0xe8 host-init game type;
+// pregame handler 144dc51e8 one-shot bytes +0x58/+0x68/+0x69/+0x74/+0x76.
+struct LobbyProbe {
+    uint32_t flags;
+    int32_t connected;
+    int32_t peers;
+    uint32_t peer_mask;
+    int32_t owner;
+    int32_t host_peer;
+    int32_t players;
+    int32_t start_mode;
+    uint8_t allowed,content_prepared,prep_started,prep_done,loading,start;
+    uint8_t blocked_start,blocked_end; // player requests dropped by the server-owned filter (saturating)
+    int32_t users_required;
+    int32_t game_type;
+    int32_t session_kind; // *(144c253b0)+8; selects the host-init content branch in 142fbc7c8
+    int32_t end_game_table; // RVA of simulation+0xb4c4b0's table (end-game request), 0 unknown
+    int32_t end_game;       // its value (+0xc8 byte), -1 unknown
+};
+
 struct BackendReport {
     uint16_t code;
     uint32_t gates;
@@ -30,6 +68,7 @@ struct BackendReport {
     uint64_t ticks;
     uint32_t detail;          // install error or last ProviderResult
     uint32_t matches;         // transitions into HostInGame observed by the tick hook
+    LobbyProbe lobby;         // last engine-tick lobby observation
 };
 
 // Verifies that the host process is the B002 dedicated LAN server and installs
@@ -49,6 +88,25 @@ BackendReport BackendStatus() noexcept;
 // request (+b8) calls from game code keep their other entries but get entry0
 // replaced, so a lobby leader cannot override the server's selection.
 BackendReport BackendSelect(const ContentSelection& native,uint32_t wait_ms) noexcept;
+// Starts the lobby's match the way a lobby leader's Play does (143578748 requests
+// start mode 1): on the next HostPreGame engine tick, the start-mode component's
+// authoritative Set (142e1d270) receives 1. The engine's own pregame checks still
+// apply (content prepared, map precached, a connected player). Returns OK
+// when Set accepted it, Busy outside HostPreGame, Pending if no lobby tick ran.
+BackendReport BackendStart(uint32_t wait_ms) noexcept;
+// Disables the server's join-time lobby-owner assignment: 1409cdbf0 gives the
+// first joining peer ownership unless host-init is configured, and its predicate
+// call at 14236f82b is replaced by "configured" (mov al,1). Players then never get
+// the lobby leader role. Later joins only; an existing owner is unchanged.
+// The server also applies any player's start request (143578748, start mode 1)
+// and pause-menu end request (142ec0544, simulation+0xb4c4b0 = 1) whether or not
+// that player owns the lobby (R019C). Those arrive through the component tables'
+// +0x78 apply (int 143d44a80 -> 142e0d870, byte 143e06a20 -> 142e0dcb8); while
+// enabled, applies to those two components are dropped. Server code uses Set
+// (+0xb0), as BackendStart does, so server starts and natural ends still work.
+// Returns ERROR_SUCCESS, ERROR_INVALID_FUNCTION (bytes differ) or a Win32 error.
+// StopGameBackend restores the original bytes.
+uint32_t BackendServerOwned(uint32_t mode) noexcept;
 // Cancels pending work and restores our table slot; module remains pinned so
 // a callback already fetched by another thread still has a valid target.
 uint32_t StopGameBackend() noexcept;

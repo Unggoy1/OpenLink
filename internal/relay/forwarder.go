@@ -1,8 +1,9 @@
 // Package relay forwards UDP game traffic between local clients and an
 // upstream server, one upstream socket per client endpoint. It is used on the
 // player side (game → remote server) and on the host side (players → local
-// server). Datagrams are never inspected or changed; the optional Intercept
-// hook only sees whole datagrams and can answer ones it recognises.
+// server). Game datagrams are never inspected or changed; the optional
+// Intercept hooks only see whole datagrams and can answer or consume ones they
+// recognise (reachability probes, playlist votes).
 package relay
 
 import (
@@ -51,10 +52,16 @@ type Forwarder struct {
 	Idle     time.Duration // drop a client session after this long without traffic (default 2 min)
 
 	// Optional controls, used on the host side.
-	Allow       func(ip net.IP) bool                        // false drops the datagram (bans)
-	Intercept   func(b []byte) (reply []byte, handled bool) // answer a datagram instead of forwarding it
-	MaxSessions int                                         // 0 = unlimited
-	MaxPPS      int                                         // per-client packets per second; 0 = unlimited
+	Allow     func(ip net.IP) bool                        // false drops the datagram (bans)
+	Intercept func(b []byte) (reply []byte, handled bool) // answer a datagram instead of forwarding it
+	// InterceptFrom is like Intercept but also gets the sender, for messages
+	// that belong to a client's session (votes). It runs after Intercept.
+	InterceptFrom func(b []byte, client *net.UDPAddr) (reply []byte, handled bool)
+	// InterceptDown sees each server datagram before it is forwarded to the
+	// client; true consumes it (used on the player side for ballots).
+	InterceptDown func(b []byte) bool
+	MaxSessions   int // 0 = unlimited
+	MaxPPS        int // per-client packets per second; 0 = unlimited
 
 	Stats Stats
 
@@ -112,6 +119,14 @@ func (f *Forwarder) Run(ctx context.Context) error {
 		}
 		if f.Intercept != nil {
 			if reply, ok := f.Intercept(buf[:n]); ok {
+				if reply != nil {
+					f.Listen.WriteToUDP(reply, client)
+				}
+				continue
+			}
+		}
+		if f.InterceptFrom != nil {
+			if reply, ok := f.InterceptFrom(buf[:n], client); ok {
 				if reply != nil {
 					f.Listen.WriteToUDP(reply, client)
 				}
@@ -201,6 +216,9 @@ func (f *Forwarder) downstream(ctx context.Context, s *session) {
 		if !from.IP.Equal(f.Upstream.IP) || from.Port != f.Upstream.Port {
 			continue // only the server may answer through this session
 		}
+		if f.InterceptDown != nil && f.InterceptDown(buf[:n]) {
+			continue
+		}
 		if _, err := f.Listen.WriteToUDP(buf[:n], s.client); err == nil {
 			now := time.Now().UnixNano()
 			s.last.Store(now)
@@ -237,6 +255,53 @@ func (f *Forwarder) Active(window time.Duration) int {
 		}
 	}
 	f.mu.Unlock()
+	return n
+}
+
+// Clients lists the client endpoints that sent traffic within window.
+func (f *Forwarder) Clients(window time.Duration) []*net.UDPAddr {
+	cutoff := time.Now().Add(-window).UnixNano()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]*net.UDPAddr, 0, len(f.sessions))
+	for _, s := range f.sessions {
+		if s.last.Load() >= cutoff {
+			out = append(out, s.client)
+		}
+	}
+	return out
+}
+
+// HasSession reports whether client has a session that sent traffic within window.
+func (f *Forwarder) HasSession(client *net.UDPAddr, window time.Duration) bool {
+	f.mu.Lock()
+	s, ok := f.sessions[client.String()]
+	f.mu.Unlock()
+	return ok && s.last.Load() >= time.Now().Add(-window).UnixNano()
+}
+
+// SendTo sends b to a client from the listening socket, as the server's replies appear.
+func (f *Forwarder) SendTo(client *net.UDPAddr, b []byte) error {
+	_, err := f.Listen.WriteToUDP(b, client)
+	return err
+}
+
+// SendUpstream sends b to the server through every client session's socket,
+// so the server sees it from the same address as that client's traffic.
+// It returns the number of sessions it was sent through.
+func (f *Forwarder) SendUpstream(b []byte) int {
+	f.mu.Lock()
+	ups := make([]*net.UDPConn, 0, len(f.sessions))
+	for _, s := range f.sessions {
+		ups = append(ups, s.up)
+	}
+	f.mu.Unlock()
+	n := 0
+	for _, up := range ups {
+		if _, err := up.WriteToUDP(b, f.Upstream); err == nil {
+			n++
+		}
+	}
 	return n
 }
 

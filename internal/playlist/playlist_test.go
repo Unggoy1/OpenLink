@@ -103,3 +103,11 @@ func TestNextMatching(t *testing.T) {
 		t.Fatal("matched nothing")
 	}
 }
+
+// The playlist shipped in the host release zip must stay valid.
+func TestPackagedExample(t *testing.T) {
+	f, err := Load("../../packaging/host/playlist.example.json")
+	if err != nil || len(f.Entries) == 0 {
+		t.Fatalf("packaged playlist example: %v", err)
+	}
+}

@@ -64,6 +64,48 @@ jobs:
           name: tools
           path: dist/*
 
+  # Host package: hi-hostagent.exe, the host-control DLL and its loader, plus
+  # example configs, in one zip. The DLL is built with the runner's MSVC x64
+  # tools (native/hostctl/vcvars.cmd finds them) and a static C runtime.
+  host-windows:
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build DLL and loader
+        shell: cmd
+        run: call native\hostctl\build.cmd "%GITHUB_WORKSPACE%\native-out"
+      - name: Native tests
+        shell: cmd
+        run: |
+          for %%t in (slot provider mailbox image choice snapshot backend) do (
+            call native\hostctl\test-%%t.cmd "%GITHUB_WORKSPACE%\native-tests\%%t" || exit /b 1
+          )
+      - name: DLL-backed Go tests
+        shell: pwsh
+        run: |
+          $env:HOSTCTL_TEST_DLL = "$env:GITHUB_WORKSPACE\native-out\hi-hostctl.dll"
+          $env:HOSTCTL_TEST_HARNESS = "$env:GITHUB_WORKSPACE\native-out\hostctl-harness.exe"
+          go test -count=1 ./internal/hostctl/
+      - name: Package
+        shell: pwsh
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          New-Item -ItemType Directory host | Out-Null
+          go build -trimpath -ldflags "-s -w -X main.version=$env:VERSION" -o host\hi-hostagent.exe ./cmd/hi-hostagent
+          Copy-Item native-out\hi-hostctl.dll, native-out\hostctl-loader.exe host\
+          Copy-Item packaging\host\* host\
+          Compress-Archive -Path host\* -DestinationPath OpenLink-host-windows-amd64.zip
+          Get-ChildItem host | Format-Table Name, Length
+      - uses: actions/upload-artifact@v4
+        with:
+          name: host-windows
+          path: OpenLink-host-windows-amd64.zip
+
   browser-windows:
     needs: test
     runs-on: windows-latest
@@ -117,7 +159,7 @@ jobs:
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [tools, browser-windows, browser-linux]
+    needs: [tools, host-windows, browser-windows, browser-linux]
     runs-on: ubuntu-latest
     permissions:
       contents: write

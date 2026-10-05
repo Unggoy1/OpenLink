@@ -68,3 +68,11 @@ func TestBans(t *testing.T) {
 		t.Fatal("unban failed")
 	}
 }
+
+// The config shipped in the host release zip must stay loadable.
+func TestPackagedExampleConfig(t *testing.T) {
+	c, err := loadConfig(flag.NewFlagSet("t", flag.ContinueOnError), []string{"-config", "../../packaging/host/hostagent.example.json"})
+	if err != nil || !c.HostControlNative || c.Playlist != "playlist.json" || c.ServerIP != "127.0.0.2" {
+		t.Fatalf("packaged config example: %+v %v", c, err)
+	}
+}

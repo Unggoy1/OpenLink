@@ -1,10 +1,10 @@
-# Host control: preflight, DLL transport and selection backend
+# Host control: DLL, server-owned selection and playlist rotation
 
 The DLL/controller, managed hostagent loader/local administration, server-owned map/mode selection and playlist rotation are implemented and were tested live on build B002 (Steam 22709428, 2026-10-04, runs R016–R018). With a stock client as lobby leader, the server loaded the agent's pinned map/mode pairs and rotated them across consecutive matches. Requests carry map/mode asset IDs plus pinned version IDs, using the game's normal CMS flow and login. Not yet tested: natural match end by time or score limit, several or remote players, Forge maps, engine (type 10) modes, long unattended runs.
 
 ## DLL transport
 
-Source: `native/hostctl/`; Go library: `internal/hostctl/{wire,bridge}.go`. Build with the verified VS2017 MSVC x64 tools:
+Source: `native/hostctl/`; Go library: `internal/hostctl/{wire,bridge}.go`. Build with Visual Studio 2017 or later C++ x64 tools (`native/hostctl/vcvars.cmd` finds them; set `VCVARSALL` to override). Releases build the same way in GitHub Actions and publish `OpenLink-host-windows-amd64.zip` (agent, DLL, loader, example configs; see `packaging/host/`).
 
 ```powershell
 .\native\hostctl\build.cmd 'C:\build\hostctl'
@@ -61,43 +61,6 @@ To rotate automatically, add a playlist to hostagent.json (requires `hostctl_nat
 - The agent selects the first entry as soon as the server's lobby is ready, and the next entry each time the server is back in its lobby after a match. A selection that fails three times is skipped.
 - `GET /status` shows `host_control.rotation` with `current`, `pending`, `matches`, `selections` and `error`.
 - With a tunnel (for example playit) pointed at 127.0.0.1:1343 in proxy mode, set `"server_ip": "127.0.0.2"`. Otherwise the game server receives the tunnel traffic, the directory marks the host unreachable, and the OpenLink app blocks Join. With this setup, five players (four remote) played three matches that cycled a three-entry playlist (2026-10-04).
-
-## Offline preflight
-
-`hi-host-preflight` is the first offline diagnostic for that backend. It opens an executable read-only, checks its full SHA-256 against the B002 allowlist, validates PE layout, and checks seven candidate handler locations in executable, file-backed sections. It does not launch a game, inspect a process, load a DLL or change content. A verified location establishes matching bytes, not verified function semantics.
-
-Build from the `community` directory with Go 1.27 or later:
-
-```powershell
-go build -o bin/hi-host-preflight.exe ./cmd/hi-host-preflight
-```
-
-Run the diagnostic against the installed executable:
-
-```powershell
-.\bin\hi-host-preflight.exe -exe 'D:\SteamLibrary\steamapps\common\Halo Infinite\game\HaloInfinite.exe'
-$LASTEXITCODE
-```
-
-Reports are JSON on stdout. Paths containing spaces must be quoted. To save a report, redirect stdout to a private local location; the command itself does not save files. This tool is not included in the release build script yet.
-
-| Exit | Meaning |
-|---|---|
-| 0 | The on-disk file and all candidate target bytes match the allowlist. |
-| 3 | Structurally valid executable rejected: unknown hash, incompatible PE identity or failed target validation. |
-| 2 | Invalid arguments, unreadable input, malformed PE or report output error; explanation on stderr. |
-
-`-h` prints help and exits 0. `-exe` is the only input option. There are no launch, attach or process-control commands.
-
-The initial allowlist is B002, Steam build 22709428, SHA-256 `5DA518EC21F5AB7BAEB021AEED2B9892EEB65320DC17D2682F8F55271C203DA8`, amd64 PE32+, preferred image base `0x140000000`. Target RVAs are offsets from that base, rather than absolute runtime addresses. Unknown builds are rejected; there is no operator override for hashes or offsets.
-
-Even exit 0 always reports `control_ready: false` and these pending gates:
-
-- `variant_consumer`: establish how prepared game variants reach the server's content objects.
-- `engine_dispatch`: identify a suitable engine execution point for game-control calls.
-- `server_lifecycle`: establish startup timing and verified match-end/lobby transitions.
-
-File verification does not prove loaded-module identity, server role, server ownership, safe calls or successful map changes. The future DLL must perform its own loaded-module and role checks and use corroborated engine paths. First acceptance will be a fixed stock pair followed by a second fixed pair at a verified transition; random playlists and custom/Forge entries follow that milestone. See the approved design in the parent workspace's `research/HOST-CONTROL-PLAYLIST.md`.
 
 ## Internal selected-option component
 

@@ -147,25 +147,28 @@ func TestReplyVersion3Lobby(t *testing.T) {
 }
 
 func TestServerOwnedRequest(t *testing.T) {
-	for _, enable := range []bool{false, true} {
+	for _, mode := range []uint32{ServerOwnedOff, ServerOwnedNoOwner, ServerOwnedFilterOnly} {
 		var w bytes.Buffer
-		if err := EncodeRequest(&w, Request{Op: OpServerOwned, ID: 2, Enable: enable}); err != nil {
+		if err := EncodeRequest(&w, Request{Op: OpServerOwned, ID: 2, Mode: mode}); err != nil {
 			t.Fatal(err)
 		}
 		got, err := DecodeRequest(&w)
-		if err != nil || got.Op != OpServerOwned || got.Enable != enable {
-			t.Fatalf("round trip %v: %+v %v", enable, got, err)
+		if err != nil || got.Op != OpServerOwned || got.Mode != mode {
+			t.Fatalf("round trip %v: %+v %v", mode, got, err)
 		}
+	}
+	if err := EncodeRequest(&bytes.Buffer{}, Request{Op: OpServerOwned, ID: 2, Mode: 3}); err == nil {
+		t.Fatal("encoded server-owned mode 3")
 	}
 	b := make([]byte, 52)
 	copy(b, "HICT")
 	binary.LittleEndian.PutUint16(b[4:], 1)
 	binary.LittleEndian.PutUint16(b[6:], OpServerOwned)
 	binary.LittleEndian.PutUint64(b[8:], 2)
-	binary.LittleEndian.PutUint32(b[48:], 2)
+	binary.LittleEndian.PutUint32(b[48:], 3)
 	var w bytes.Buffer
 	writeFrame(&w, b)
 	if _, err := DecodeRequest(&w); err == nil {
-		t.Fatal("accepted server-owned value 2")
+		t.Fatal("accepted server-owned mode 3")
 	}
 }

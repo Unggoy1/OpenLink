@@ -35,7 +35,7 @@ type lobbyController interface {
 	Closed() bool
 	Status(context.Context) (hostctl.Reply, error)
 	Start(context.Context) (hostctl.Reply, error)
-	ServerOwned(context.Context, bool) (hostctl.Reply, error)
+	ServerOwned(context.Context, uint32) (hostctl.Reply, error)
 }
 
 // lobbyInfo is the lobby state shown by the admin API.
@@ -62,17 +62,20 @@ const lobbyPoll = time.Second
 // configured, logs lobby changes, and with auto_start starts each match once
 // enough players stay connected for the delay.
 func (a *agent) runLobby(ctx context.Context, controller lobbyController, poll time.Duration) {
-	owned := a.cfg.ServerOwned
 	a.setLobby(func(l *lobbyInfo) { l.AutoStart = a.cfg.AutoStart != nil })
-	if owned {
+	if a.cfg.ServerOwned {
+		mode := hostctl.ServerOwnedNoOwner
+		if a.cfg.LobbyOwner == "first_player" {
+			mode = hostctl.ServerOwnedFilterOnly
+		}
 		request, cancel := context.WithTimeout(ctx, 4*time.Second)
-		reply, err := controller.ServerOwned(request, true)
+		reply, err := controller.ServerOwned(request, mode)
 		cancel()
 		if err != nil || reply.Code != hostctl.CodeOK {
-			a.log.Error("server-owned lobby unavailable; players keep the leader role", "err", err, "code", reply.Code)
+			a.log.Error("server-owned lobby unavailable; players keep lobby control", "err", err, "code", reply.Code)
 			a.setLobby(func(l *lobbyInfo) { l.Error = "server_owned failed" })
 		} else {
-			a.log.Info("server owns the lobby: players will not become lobby leader")
+			a.log.Info("server owns the lobby: player start and end-game requests are dropped", "lobby_owner", a.cfg.lobbyOwner())
 			a.setLobby(func(l *lobbyInfo) { l.ServerOwned = true })
 		}
 	}

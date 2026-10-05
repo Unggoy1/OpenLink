@@ -14,7 +14,7 @@ const (
 	OpPrepareEngine        uint16 = 4
 	OpInitialize           uint16 = 5
 	OpStart                uint16 = 6 // start the lobby's match (start mode 1), HostPreGame only
-	OpServerOwned          uint16 = 7 // disable (1) or restore (0) join-time lobby-owner assignment
+	OpServerOwned          uint16 = 7 // lobby control mode (ServerOwned* constants)
 	CodeOK                 uint16 = 0
 	CodeUnsupported        uint16 = 1
 	CodeNativePending      uint16 = 2
@@ -54,13 +54,21 @@ func (p AssetPair) Valid() bool {
 }
 
 type Request struct {
-	Op     uint16
-	ID     uint64
-	Token  [32]byte
-	PID    uint32
-	Pair   AssetPair
-	Enable bool // OpServerOwned
+	Op    uint16
+	ID    uint64
+	Token [32]byte
+	PID   uint32
+	Pair  AssetPair
+	Mode  uint32 // OpServerOwned
 }
+
+// OpServerOwned modes.
+const (
+	ServerOwnedOff         uint32 = 0 // stock lobby: owner assigned, player requests applied
+	ServerOwnedNoOwner     uint32 = 1 // no owner; player start/end-game requests dropped
+	ServerOwnedFilterOnly  uint32 = 2 // game assigns the owner; player start/end-game requests dropped
+	serverOwnedHighestMode        = ServerOwnedFilterOnly
+)
 
 // Lobby flags (Reply.Lobby.Flags).
 const (
@@ -69,6 +77,7 @@ const (
 	LobbyHandler     uint32 = 4  // pregame handler bytes are live
 	LobbyServerOwned uint32 = 8  // join-time lobby-owner assignment is disabled
 	LobbyStartSent   uint32 = 16 // a Start succeeded since the last match began
+	LobbyNoOwner     uint32 = 32 // join-time lobby-owner assignment is disabled
 )
 
 // Lobby is the DLL's per-tick lobby observation (version 3 replies).
@@ -127,6 +136,9 @@ func requestSize(r Request) (int, error) {
 	case OpStatus, OpStart:
 		return 48, nil
 	case OpServerOwned:
+		if r.Mode > serverOwnedHighestMode {
+			return 0, errors.New("invalid server-owned mode")
+		}
 		return 52, nil
 	case OpPrepare, OpPrepareEngine, OpInitialize:
 		if !r.Pair.Valid() {
@@ -155,8 +167,8 @@ func EncodeRequest(w io.Writer, r Request) error {
 	if r.Op == OpPrepare || r.Op == OpPrepareEngine || r.Op == OpInitialize {
 		copy(b[48:], r.Pair[:])
 	}
-	if r.Op == OpServerOwned && r.Enable {
-		binary.LittleEndian.PutUint32(b[48:], 1)
+	if r.Op == OpServerOwned {
+		binary.LittleEndian.PutUint32(b[48:], r.Mode)
 	}
 	return writeFrame(w, b)
 }
@@ -187,12 +199,8 @@ func DecodeRequest(rd io.Reader) (Request, error) {
 		if len(b) != 52 {
 			return r, errors.New("invalid server-owned size")
 		}
-		switch binary.LittleEndian.Uint32(b[48:]) {
-		case 0:
-		case 1:
-			r.Enable = true
-		default:
-			return r, errors.New("invalid server-owned value")
+		if r.Mode = binary.LittleEndian.Uint32(b[48:]); r.Mode > serverOwnedHighestMode {
+			return r, errors.New("invalid server-owned mode")
 		}
 	case OpPrepare, OpPrepareEngine, OpInitialize:
 		if len(b) != 112 {

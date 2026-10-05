@@ -24,9 +24,15 @@ enum LobbyFlag : uint32_t {
     LobbyValid=1,        // session/membership readable this tick
     LobbyStartMode=2,    // start-mode component validated; start_mode is its value
     LobbyHandler=4,      // pregame handler validated; handler bytes are live
-    LobbyServerOwned=8,  // join-time lobby-owner assignment is disabled (BackendServerOwned)
-    LobbyStartSent=16    // a Start command set start mode in the current lobby
+    LobbyServerOwned=8,  // player start/end-game requests are dropped (BackendServerOwned mode 1 or 2)
+    LobbyStartSent=16,   // a Start command set start mode in the current lobby
+    LobbyNoOwner=32      // join-time lobby-owner assignment is disabled (mode 1)
 };
+// BackendServerOwned modes. FilterOnly keeps the game's own owner (first joiner,
+// handed to the longest-present player by 142e1c454 when the owner leaves): that
+// player's client still shows Play/End Game (inert), other clients hide them
+// because an owner exists that is not them (O071, user report).
+enum ServerOwnedMode : uint32_t { ServerOwnedOff=0,ServerOwnedNoOwner=1,ServerOwnedFilterOnly=2 };
 // Read on the engine tick. B002 offsets (session = context+0x78): membership at
 // session+0x60 (peer count +0xa0, mask +0xa4, owner +0x6c, host peer +0x70, peer
 // state session+0xb0+i*0xc0, 8 = connected, as 142ded82c counts); session+0x18a8
@@ -100,7 +106,7 @@ BackendReport BackendStart(uint32_t wait_ms) noexcept;
 // (+0xb0), as BackendStart does, so server starts and natural ends still work.
 // Returns ERROR_SUCCESS, ERROR_INVALID_FUNCTION (bytes differ) or a Win32 error.
 // StopGameBackend restores the original bytes.
-uint32_t BackendServerOwned(bool enable) noexcept;
+uint32_t BackendServerOwned(uint32_t mode) noexcept;
 // Cancels pending work and restores our table slot; module remains pinned so
 // a callback already fetched by another thread still has a valid target.
 uint32_t StopGameBackend() noexcept;

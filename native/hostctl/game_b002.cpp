@@ -115,7 +115,7 @@ SRWLOCK probe_lock=SRWLOCK_INIT;
 LobbyProbe probe={};
 std::atomic<uint64_t> start_request{0},start_completed{0},start_sequence{0};
 std::atomic<uint16_t> start_code{CodePending};
-std::atomic<bool> start_sent{false},server_owned{false};
+std::atomic<bool> start_sent{false},server_owned{false},owner_patched{false};
 
 // Player request filter (server-owned lobby). Requests from clients reach the
 // server through the component tables' +0x78 apply; the server's own writes use
@@ -170,6 +170,7 @@ LobbyProbe ReadLobby(uintptr_t base,uintptr_t session,uintptr_t simulation) noex
     p.blocked_start=uint8_t(blocked_start.load()>255 ? 255 : blocked_start.load());
     p.blocked_end=uint8_t(blocked_end.load()>255 ? 255 : blocked_end.load());
     if(server_owned.load(std::memory_order_acquire)) p.flags|=LobbyServerOwned;
+    if(owner_patched.load(std::memory_order_acquire)) p.flags|=LobbyNoOwner;
     if(start_sent.load(std::memory_order_acquire)) p.flags|=LobbyStartSent;
     return p;
 }
@@ -383,10 +384,12 @@ uint32_t StopGameBackend() noexcept {
         if(result==ERROR_SUCCESS) result=apply;
         if(result==ERROR_SUCCESS) result=request;
         if(result==ERROR_SUCCESS) result=set;
-        if(server_owned.exchange(false)) {
+        if(owner_patched.exchange(false)) {
             const auto owner_site=SwapOwnerSite(base,kOwnerPatched,kOwnerNative);
-            const auto filter=SetRequestFilter(base,false);
             if(result==ERROR_SUCCESS) result=owner_site;
+        }
+        if(server_owned.exchange(false)) {
+            const auto filter=SetRequestFilter(base,false);
             if(result==ERROR_SUCCESS) result=filter;
         }
     }
@@ -420,22 +423,21 @@ BackendReport BackendStart(uint32_t wait_ms) noexcept {
     report.code=start_completed.load(std::memory_order_acquire)==ticket ? start_code.load(std::memory_order_acquire) : uint16_t(CodePending);
     return WithLockGates(report);
 }
-uint32_t BackendServerOwned(bool enable) noexcept {
+uint32_t BackendServerOwned(uint32_t mode) noexcept {
+    if(mode>ServerOwnedFilterOnly) return ERROR_INVALID_PARAMETER;
     AcquireSRWLockExclusive(&installation);
     const auto base=image.load(); DWORD result=ERROR_NOT_READY;
     if(running.load() && base) {
-        if(enable) {
-            result=SetRequestFilter(base,true);
-            if(result==ERROR_SUCCESS) {
-                result=SwapOwnerSite(base,kOwnerNative,kOwnerPatched);
-                if(result!=ERROR_SUCCESS) SetRequestFilter(base,false);
-            }
-        } else {
-            result=SwapOwnerSite(base,kOwnerPatched,kOwnerNative);
-            const auto filter=SetRequestFilter(base,false);
-            if(result==ERROR_SUCCESS) result=filter;
+        const bool filter=mode!=ServerOwnedOff,no_owner=mode==ServerOwnedNoOwner;
+        result=SetRequestFilter(base,filter);
+        if(result==ERROR_SUCCESS) {
+            result=no_owner ? SwapOwnerSite(base,kOwnerNative,kOwnerPatched) : SwapOwnerSite(base,kOwnerPatched,kOwnerNative);
+            if(result!=ERROR_SUCCESS && filter && !server_owned.load()) SetRequestFilter(base,false);
         }
-        if(result==ERROR_SUCCESS) server_owned.store(enable,std::memory_order_release);
+        if(result==ERROR_SUCCESS) {
+            server_owned.store(filter,std::memory_order_release);
+            owner_patched.store(no_owner,std::memory_order_release);
+        }
     }
     ReleaseSRWLockExclusive(&installation); return result;
 }

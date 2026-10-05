@@ -48,6 +48,10 @@ type config struct {
 	// ServerOwned, with the native backend: no player becomes lobby leader, so
 	// nobody gets Play or the end-game option. Pair it with AutoStart.
 	ServerOwned bool `json:"server_owned,omitempty"`
+	// LobbyOwner, with ServerOwned: "none" (default, no player is lobby owner)
+	// or "first_player" (the game's own owner; only that player sees the inert
+	// Play/End Game, other players see none).
+	LobbyOwner string `json:"lobby_owner,omitempty"`
 	// AutoStart, with the native backend: the server starts each match itself.
 	AutoStart *autoStart `json:"auto_start,omitempty"`
 
@@ -194,7 +198,17 @@ func loadConfig(fs *flag.FlagSet, args []string) (config, error) {
 	if (c.ServerOwned || c.AutoStart != nil) && !c.HostControlNative {
 		return c, errors.New("server_owned and auto_start require hostctl-native")
 	}
+	if c.LobbyOwner != "" && c.LobbyOwner != "none" && c.LobbyOwner != "first_player" {
+		return c, errors.New("lobby_owner must be none or first_player")
+	}
 	return c, nil
+}
+
+func (c config) lobbyOwner() string {
+	if c.LobbyOwner == "" {
+		return "none"
+	}
+	return c.LobbyOwner
 }
 
 // resolve makes a path relative to the config file's folder (or the working directory).

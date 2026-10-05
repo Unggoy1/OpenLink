@@ -17,7 +17,7 @@ type lobbyFake struct {
 	connected []int32
 	polls     int
 	starts    int
-	owned     bool
+	mode      uint32
 	startMode int32
 	done      chan struct{}
 }
@@ -40,8 +40,8 @@ func (f *lobbyFake) Start(context.Context) (hostctl.Reply, error) {
 	f.startMode = 1
 	return hostctl.Reply{Version: 3, Code: hostctl.CodeOK}, nil
 }
-func (f *lobbyFake) ServerOwned(_ context.Context, enable bool) (hostctl.Reply, error) {
-	f.owned = enable
+func (f *lobbyFake) ServerOwned(_ context.Context, mode uint32) (hostctl.Reply, error) {
+	f.mode = mode
 	return hostctl.Reply{Version: 3, Code: hostctl.CodeOK}, nil
 }
 
@@ -54,7 +54,7 @@ func TestAutoStartWaitsForPlayersThenStartsOnce(t *testing.T) {
 	a.runLobby(ctx, f, time.Millisecond)
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if !f.owned || f.starts != 1 || a.lobby == nil || !a.lobby.ServerOwned || a.lobby.Starts != 1 {
-		t.Fatalf("owned=%v starts=%d lobby=%+v", f.owned, f.starts, a.lobby)
+	if f.mode != hostctl.ServerOwnedNoOwner || f.starts != 1 || a.lobby == nil || !a.lobby.ServerOwned || a.lobby.Starts != 1 {
+		t.Fatalf("mode=%v starts=%d lobby=%+v", f.mode, f.starts, a.lobby)
 	}
 }

@@ -95,7 +95,7 @@ func loadConfig(fs *flag.FlagSet, args []string) (config, error) {
 	fs.StringVar(&f.Region, "region", "", "region label, e.g. us-west")
 	fs.StringVar(&f.PublicHost, "public-host", "", "address players connect to; empty = the directory uses this machine's public IP")
 	fs.IntVar(&f.PublicPort, "public-port", c.PublicPort, "external UDP port players connect to (your port forward)")
-	fs.StringVar(&f.Install, "install", "", "game install root (folder with version.txt); empty = search common locations")
+	fs.StringVar(&f.Install, "install", "", "game install root (folder with version.txt); empty = search every Steam library")
 	fs.StringVar(&f.Sandbox, "sandbox", c.Sandbox, "value for -lan_sandbox")
 	fs.BoolVar(&f.Manage, "manage", c.Manage, "start the server and restart it if it exits (required for a real server)")
 	fs.BoolVar(&f.Restart, "restart", c.Restart, "restart a managed server after exit (false for a single scoped test)")

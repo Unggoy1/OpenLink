@@ -5,17 +5,18 @@ import (
 	"path/filepath"
 )
 
-// On Linux the game runs under Proton from a normal Steam library; the
-// install layout (version.txt, game\HaloInfinite.exe) is the same.
-func init() {
+// platformSteamRoots returns the usual Steam folders on Linux. The game runs
+// under Proton from a normal Steam library; the install layout (version.txt,
+// game\HaloInfinite.exe) is the same as on Windows.
+func platformSteamRoots() []string {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return
+		return nil
 	}
-	rel := filepath.Join("steamapps", "common", "Halo Infinite")
-	DefaultInstallDirs = []string{
-		filepath.Join(home, ".local", "share", "Steam", rel),
-		filepath.Join(home, ".steam", "steam", rel),
-		filepath.Join(home, ".var", "app", "com.valvesoftware.Steam", ".local", "share", "Steam", rel), // Flatpak
+	return []string{
+		filepath.Join(home, ".local", "share", "Steam"),
+		filepath.Join(home, ".steam", "steam"),
+		filepath.Join(home, ".var", "app", "com.valvesoftware.Steam", ".local", "share", "Steam"), // Flatpak
+		filepath.Join(home, "snap", "steam", "common", ".local", "share", "Steam"),                // Snap
 	}
 }

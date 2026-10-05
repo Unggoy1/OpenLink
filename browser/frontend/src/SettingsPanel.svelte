@@ -77,7 +77,7 @@
   <label>
     <span>Game folder</span>
     <input bind:value={installDir} placeholder="Found automatically" spellcheck="false" autocomplete="off" />
-    <small>Only needed if your Steam library is in an unusual place (the folder containing version.txt).</small>
+    <small>Found automatically in your Steam libraries. Set it only if the game is installed outside Steam's library list (the folder containing version.txt).</small>
   </label>
 
   <fieldset>

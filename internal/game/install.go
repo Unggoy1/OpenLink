@@ -10,25 +10,20 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
-
-// DefaultInstallDirs are tried when no install directory is given.
-var DefaultInstallDirs = []string{
-	`C:\Program Files (x86)\Steam\steamapps\common\Halo Infinite`,
-	`D:\SteamLibrary\steamapps\common\Halo Infinite`,
-	`C:\SteamLibrary\steamapps\common\Halo Infinite`,
-	`E:\SteamLibrary\steamapps\common\Halo Infinite`,
-}
 
 // Install is a game install root (the directory holding version.txt and steam_appid.txt).
 type Install struct{ Root string }
 
-// FindInstall returns the given directory if valid, else the first default that is.
+// FindInstall returns the given directory if valid. Without one it looks in
+// every Steam library that Steam itself lists (libraryfolders.vdf), so any
+// drive or folder the player chose for their library is found.
 func FindInstall(dir string) (Install, error) {
-	cands := DefaultInstallDirs
-	if dir != "" {
-		cands = []string{dir}
+	cands := []string{dir}
+	if dir == "" {
+		cands = installCandidates()
 	}
 	for _, d := range cands {
 		if _, err := os.Stat(filepath.Join(d, "game", "HaloInfinite.exe")); err == nil {
@@ -38,7 +33,54 @@ func FindInstall(dir string) (Install, error) {
 	if dir != "" {
 		return Install{}, fmt.Errorf("no game/HaloInfinite.exe under %s", dir)
 	}
-	return Install{}, errors.New("game install not found; pass -install <root>")
+	return Install{}, errors.New("game install not found in any Steam library; pass -install <root>")
+}
+
+// steamRoots returns the Steam installation folders to read library lists
+// from (paths_*.go). A variable so tests can point it at a fake Steam.
+var steamRoots = platformSteamRoots
+
+// installCandidates lists where the game would be in each known Steam library.
+func installCandidates() []string {
+	var out []string
+	seen := map[string]bool{}
+	add := func(library string) {
+		p := filepath.Join(library, "steamapps", "common", "Halo Infinite")
+		if k := strings.ToLower(filepath.Clean(p)); !seen[k] {
+			seen[k] = true
+			out = append(out, p)
+		}
+	}
+	readRoots := map[string]bool{}
+	for _, root := range steamRoots() {
+		if k := strings.ToLower(filepath.Clean(root)); readRoots[k] {
+			continue // the registry and the default often name the same folder
+		} else {
+			readRoots[k] = true
+		}
+		add(root) // the Steam folder is itself a library
+		for _, lib := range libraryFolders(filepath.Join(root, "steamapps", "libraryfolders.vdf")) {
+			add(lib)
+		}
+	}
+	return out
+}
+
+// vdfPath matches a library entry in libraryfolders.vdf: "path" "D:\\SteamLibrary".
+var vdfPath = regexp.MustCompile(`"path"\s+"((?:[^"\\]|\\.)*)"`)
+
+// libraryFolders returns the library paths listed in a Steam libraryfolders.vdf.
+func libraryFolders(vdf string) []string {
+	b, err := os.ReadFile(vdf)
+	if err != nil {
+		return nil
+	}
+	unescape := strings.NewReplacer(`\\`, `\`, `\"`, `"`)
+	var out []string
+	for _, m := range vdfPath.FindAllStringSubmatch(string(b), -1) {
+		out = append(out, unescape.Replace(m[1]))
+	}
+	return out
 }
 
 // Build returns the first line of version.txt, e.g. "269225.26.04.08.1618-1.hi_1_13_0".

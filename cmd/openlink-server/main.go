@@ -1,4 +1,4 @@
-// hi-hostagent runs next to a retail LAN server. It starts and watches the
+// openlink-server runs next to a retail LAN server. It starts and watches the
 // server, captures the server's LAN beacons and keeps the directory listing
 // fresh. In proxy mode (the default) it also fronts the server's game port, so
 // it can count players, answer reachability probes, and ban or rate-limit
@@ -34,19 +34,19 @@ var version = "dev"
 // playerWindow: a player counts as connected if they sent traffic this recently.
 const playerWindow = 15 * time.Second
 
-const usage = `hi-hostagent — run a Halo Infinite community server
+const usage = `openlink-server — run a Halo Infinite community server
 
 usage:
-  hi-hostagent [flags]                  run the agent (starts the server, lists it, proxies players)
-  hi-hostagent [flags] init-config      save the given flags to hostagent.json next to the program
-  hi-hostagent autostart enable|disable|status   start the agent at logon (Task Scheduler)
-  hi-hostagent status                   show server, players and reachability (agent must be running)
-  hi-hostagent kick <ip> [minutes]      disconnect a player and keep them out (default 10 min)
-  hi-hostagent ban <ip> [minutes]       ban a player (default: permanent)
-  hi-hostagent unban <ip> | bans        remove a ban | list bans
-  hi-hostagent select <selection.json> select pinned map/mode descriptors (loading/start unverified)
-  hi-hostagent check-playlist [file]    check a playlist (default: the configured one) and exit
-  hi-hostagent version
+  openlink-server [flags]                  run the agent (starts the server, lists it, proxies players)
+  openlink-server [flags] init-config      save the given flags to openlink-server.json next to the program
+  openlink-server autostart enable|disable|status   start the agent at logon (Task Scheduler)
+  openlink-server status                   show server, players and reachability (agent must be running)
+  openlink-server kick <ip> [minutes]      disconnect a player and keep them out (default 10 min)
+  openlink-server ban <ip> [minutes]       ban a player (default: permanent)
+  openlink-server unban <ip> | bans        remove a ban | list bans
+  openlink-server select <selection.json> select pinned map/mode descriptors (loading/start unverified)
+  openlink-server check-playlist [file]    check a playlist (default: the configured one) and exit
+  openlink-server version
 
 flags:
 `
@@ -93,7 +93,7 @@ func (a *agent) getStatus() string {
 }
 
 func main() {
-	fs := flag.NewFlagSet("hi-hostagent", flag.ExitOnError)
+	fs := flag.NewFlagSet("openlink-server", flag.ExitOnError)
 	fs.Usage = func() { fmt.Fprint(os.Stderr, usage); fs.PrintDefaults() }
 	c, err := loadConfig(fs, os.Args[1:])
 	if err != nil {
@@ -110,8 +110,13 @@ func main() {
 
 	a := &agent{cfg: c, log: slog.New(slog.NewTextHandler(os.Stderr, nil))}
 	if !c.Simulate {
-		// Every real server runs from a playlist; refuse to start without a
-		// usable one rather than discover it once the server is up.
+		// Every real server runs from a playlist through the control DLL;
+		// refuse to start without them rather than discover it once the
+		// server is up.
+		if err := checkControlFiles(c.resolve(c.HostControlDLL)); err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(2)
+		}
 		f, report, err := checkPlaylist(c, c.resolve(c.Playlist), c.Vote != nil)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "error:", err)
@@ -121,7 +126,7 @@ func main() {
 		a.log.Info("playlist checked", "file", c.Playlist, "entries", len(f.Entries), "selection", f.Selection,
 			"voting", c.Vote != nil, "largest_ballot_bytes", report.ballot)
 	}
-	a.log.Info("hi-hostagent", "version", version, "config", orDash(c.path))
+	a.log.Info("openlink-server", "version", version, "config", orDash(c.path))
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if err := a.run(ctx); err != nil {
@@ -142,7 +147,7 @@ func runCommand(c config, args []string) error {
 			if err != nil {
 				return err
 			}
-			path = filepath.Join(filepath.Dir(exe), "hostagent.json")
+			path = filepath.Join(filepath.Dir(exe), "openlink-server.json")
 		}
 		if err := c.save(path); err != nil {
 			return err
@@ -272,7 +277,7 @@ func (a *agent) startSimulation(ctx context.Context, wg *sync.WaitGroup) error {
 	if err != nil {
 		return fmt.Errorf("listen address: %w", err)
 	}
-	if os.Getenv("HICOMM_DEV_PORTS") != "" {
+	if api.Getenv("DEV_PORTS") != "" {
 		port = strconv.Itoa(gamePort)
 	}
 	echo, err := net.ListenPacket("udp4", net.JoinHostPort(host, port))

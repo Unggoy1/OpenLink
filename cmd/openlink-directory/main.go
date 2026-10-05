@@ -1,4 +1,4 @@
-// hi-directory is the community server list. Host agents register and send
+// openlink-directory is the community server list. Host agents register and send
 // heartbeats with their latest beacon; connectors list servers and fetch beacons.
 package main
 
@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"halocommunity/internal/api"
 	"halocommunity/internal/directory"
 	"halocommunity/internal/sim"
 )
@@ -30,7 +31,7 @@ func probeHost(ctx context.Context, host string, port int) bool {
 }
 
 func envInt(k string, def int) int {
-	if v, err := strconv.Atoi(os.Getenv(k)); err == nil {
+	if v, err := strconv.Atoi(api.Getenv(k)); err == nil {
 		return v
 	}
 	return def
@@ -45,10 +46,10 @@ func main() {
 		defListen = ":" + p
 	}
 	listen := flag.String("listen", defListen, "HTTP listen address (default :$PORT, else :8080)")
-	key := flag.String("register-key", os.Getenv("HICOMM_REGISTER_KEY"), "if set, hosts must send this key to register (env HICOMM_REGISTER_KEY)")
-	ipHeader := flag.String("client-ip-header", os.Getenv("HICOMM_CLIENT_IP_HEADER"), "header carrying the client IP from a trusted reverse proxy, e.g. X-Forwarded-For (rightmost entry is used) or X-Real-IP (env HICOMM_CLIENT_IP_HEADER)")
+	key := flag.String("register-key", api.Getenv("REGISTER_KEY"), "if set, hosts must send this key to register (env OPENLINK_REGISTER_KEY)")
+	ipHeader := flag.String("client-ip-header", api.Getenv("CLIENT_IP_HEADER"), "header carrying the client IP from a trusted reverse proxy, e.g. X-Forwarded-For (rightmost entry is used) or X-Real-IP (env OPENLINK_CLIENT_IP_HEADER)")
 	trustProxy := flag.Bool("trust-proxy", false, "shorthand for -client-ip-header X-Forwarded-For")
-	hops := flag.Int("client-ip-hops", envInt("HICOMM_CLIENT_IP_HOPS", 1), "with X-Forwarded-For: number of trusted proxies that append to it; the client is that many entries from the right (env HICOMM_CLIENT_IP_HOPS; likely 2 on Railway: check /v1/whoami?debug=1)")
+	hops := flag.Int("client-ip-hops", envInt("CLIENT_IP_HOPS", 1), "with X-Forwarded-For: number of trusted proxies that append to it; the client is that many entries from the right (env OPENLINK_CLIENT_IP_HOPS; likely 2 on Railway: check /v1/whoami?debug=1)")
 	ttl := flag.Duration("ttl", 45*time.Second, "drop a listing after this long without a heartbeat")
 	probeEvery := flag.Duration("probe-interval", time.Minute, "how often to check that proxy-mode servers answer on their game port (0 = never)")
 	flag.Parse()

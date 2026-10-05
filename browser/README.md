@@ -16,8 +16,8 @@ wails build     # writes build/bin/OpenLink.exe
 Testing against a local directory and simulated host, without touching the game's ports:
 
 ```
-set HICOMM_DEV_PORTS=21343,27117
-set HICOMM_DIRECTORY=http://127.0.0.1:8080
+set OPENLINK_DEV_PORTS=21343,27117
+set OPENLINK_DIRECTORY=http://127.0.0.1:8080
 wails dev
 ```
 
@@ -25,7 +25,7 @@ The type check is `npm run check` in `frontend/`.
 
 ## Behaviour
 
-- Settings (directory address, advertise mode, game folder) are stored in `%AppData%\OpenLink\settings.json`. `HICOMM_DIRECTORY` sets the default directory.
+- Settings (directory address, advertise mode, game folder) are stored in `%AppData%\OpenLink\settings.json`. `OPENLINK_DIRECTORY` sets the default directory.
 - Only one copy runs at a time, because two would compete for UDP 1343. Closing the window leaves the server and frees the port.
 - The session bar shows: contacting → ready ("open Custom Games → Server") → playing (traffic flowing). It warns when the server stops advertising or the directory is unreachable.
 - Servers built for another game version are shown but cannot be joined.

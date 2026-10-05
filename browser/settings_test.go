@@ -10,6 +10,7 @@ func TestLoadSettingsDirectory(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("APPDATA", dir)         // os.UserConfigDir on Windows
 	t.Setenv("XDG_CONFIG_HOME", dir) // and on Linux
+	t.Setenv("OPENLINK_DIRECTORY", "")
 	t.Setenv("HICOMM_DIRECTORY", "")
 	p := filepath.Join(dir, "OpenLink", "settings.json")
 	os.MkdirAll(filepath.Dir(p), 0o755)

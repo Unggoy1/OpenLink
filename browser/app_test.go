@@ -17,6 +17,7 @@ import (
 func TestAppListFavoritesSettings(t *testing.T) {
 	t.Setenv("AppData", t.TempDir()) // os.UserConfigDir on Windows
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("OPENLINK_DIRECTORY", "")
 	t.Setenv("HICOMM_DIRECTORY", "")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

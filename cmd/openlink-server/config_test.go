@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,11 +13,12 @@ import (
 )
 
 func TestConfigDirectoryDefault(t *testing.T) {
+	t.Setenv("OPENLINK_DIRECTORY", "")
 	t.Setenv("HICOMM_DIRECTORY", "")
 	dir := t.TempDir()
 	load := func(doc string) config {
 		t.Helper()
-		path := filepath.Join(dir, "hostagent.json")
+		path := filepath.Join(dir, "openlink-server.json")
 		os.WriteFile(path, []byte(doc), 0o600)
 		c, err := loadConfig(flag.NewFlagSet("t", flag.ContinueOnError), []string{"-config", path})
 		if err != nil {
@@ -30,15 +32,34 @@ func TestConfigDirectoryDefault(t *testing.T) {
 	if c := load(`{"directory": ""}`); c.Directory != "" {
 		t.Errorf(`"directory": "" should turn listing off, got %q`, c.Directory)
 	}
-	t.Setenv("HICOMM_DIRECTORY", "http://127.0.0.1:8080")
+	t.Setenv("HICOMM_DIRECTORY", "http://127.0.0.1:8080") // the older name still works
 	if c := load(`{"name": "x"}`); c.Directory != "http://127.0.0.1:8080" {
+		t.Errorf("old env name: got %q", c.Directory)
+	}
+	t.Setenv("OPENLINK_DIRECTORY", "http://127.0.0.1:9090") // and the new one wins
+	if c := load(`{"name": "x"}`); c.Directory != "http://127.0.0.1:9090" {
 		t.Errorf("env: got %q", c.Directory)
+	}
+}
+
+func TestOldConfigNameIsReported(t *testing.T) {
+	dir := exeDir()
+	if fileExists(filepath.Join(dir, "openlink-server.json")) {
+		t.Skip("a config is next to the test binary")
+	}
+	old := filepath.Join(dir, "hostagent.json")
+	if err := os.WriteFile(old, []byte(`{}`), 0o600); err != nil {
+		t.Skip(err)
+	}
+	defer os.Remove(old)
+	if _, err := loadConfig(flag.NewFlagSet("t", flag.ContinueOnError), nil); err == nil {
+		t.Fatal("hostagent.json next to the program was silently ignored")
 	}
 }
 
 func TestConfigPrecedence(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "hostagent.json")
+	path := filepath.Join(dir, "openlink-server.json")
 	os.WriteFile(path, []byte(`{"directory":"https://file.example","name":"From File","public_port":2000,"max_pps":42,"proxy":false}`), 0o600)
 
 	fs := flag.NewFlagSet("t", flag.ContinueOnError)
@@ -69,6 +90,10 @@ func TestConfigPrecedence(t *testing.T) {
 	if err != nil || c2.Name != "From Flag" || c2.PublicPort != 2000 || c2.Simulate {
 		t.Fatalf("round trip: %+v %v", c2, err)
 	}
+	// The default DLL path is not written out, so the folder can move.
+	if b, _ := os.ReadFile(out); strings.Contains(string(b), "control_dll") {
+		t.Fatalf("saved config pins the default DLL path:\n%s", b)
+	}
 }
 
 func TestBans(t *testing.T) {
@@ -98,7 +123,7 @@ func TestBans(t *testing.T) {
 
 // The config shipped in the host release zip must stay loadable.
 func TestPackagedExampleConfig(t *testing.T) {
-	c, err := loadConfig(flag.NewFlagSet("t", flag.ContinueOnError), []string{"-config", "../../packaging/host/hostagent.example.json"})
+	c, err := loadConfig(flag.NewFlagSet("t", flag.ContinueOnError), []string{"-config", "../../packaging/host/openlink-server.example.json"})
 	if err != nil || !c.HostControlNative || c.Playlist != "playlist.json" || c.ServerIP != "127.0.0.2" {
 		t.Fatalf("packaged config example: %+v %v", c, err)
 	}

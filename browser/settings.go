@@ -6,10 +6,11 @@ import (
 	"path/filepath"
 
 	"halocommunity/connect"
+	"halocommunity/internal/api"
 )
 
 // DefaultDirectory is the community directory used until the player changes it.
-// HICOMM_DIRECTORY overrides it.
+// OPENLINK_DIRECTORY (or the older HICOMM_DIRECTORY) overrides it.
 const DefaultDirectory = "https://openlink-dir.unggoy.xyz"
 
 // oldDefaultDirectory was the default before 2026-10-05. Settings saved with
@@ -41,7 +42,7 @@ func settingsPath() (string, error) {
 
 func loadSettings() Settings {
 	s := Settings{Directory: DefaultDirectory, Mode: connect.ModeLoopback}
-	if v := os.Getenv("HICOMM_DIRECTORY"); v != "" {
+	if v := api.Getenv("DIRECTORY"); v != "" {
 		s.Directory = v
 	}
 	if p, err := settingsPath(); err == nil {

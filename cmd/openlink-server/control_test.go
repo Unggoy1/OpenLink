@@ -5,6 +5,8 @@ import (
 	"errors"
 	"flag"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -78,14 +80,37 @@ func (f *fakeControl) Initialize(context.Context, hostctl.AssetPair) (hostctl.Re
 }
 
 func TestHostControlConfiguration(t *testing.T) {
-	for _, args := range [][]string{{"-hostctl-native"}, {"-hostctl-dll", "owned.dll", "-simulate"}, {"-hostctl-dll", "owned.dll", "-manage=false"}} {
-		if _, err := loadConfig(flag.NewFlagSet("t", flag.ContinueOnError), args); err == nil {
-			t.Fatalf("invalid combination %v", args)
-		}
+	load := func(args ...string) (config, error) {
+		return loadConfig(flag.NewFlagSet("t", flag.ContinueOnError), args)
 	}
-	c, err := loadConfig(flag.NewFlagSet("t", flag.ContinueOnError), []string{"-hostctl-dll", "owned.dll", "-hostctl-native"})
-	if err != nil || c.HostControlDLL != "owned.dll" || !c.HostControlNative {
-		t.Fatalf("opt-in %+v %v", c, err)
+	// A real server always uses the control DLL, by default the one next to the program.
+	c, err := load()
+	if err != nil || !c.HostControlNative || c.HostControlDLL != filepath.Join(exeDir(), "openlink-control.dll") {
+		t.Fatalf("default: %+v %v", c, err)
+	}
+	if c, err := load("-control-dll", "owned.dll"); err != nil || c.HostControlDLL != "owned.dll" || !c.HostControlNative {
+		t.Fatalf("override: %+v %v", c, err)
+	}
+	// A simulation has no game, so the DLL and the playlist do not apply.
+	c, err = load("-simulate", "-control-dll", "owned.dll", "-playlist", "playlist.json")
+	if err != nil || c.HostControlDLL != "" || c.HostControlNative || c.Playlist != "" {
+		t.Fatalf("simulate: %+v %v", c, err)
+	}
+	if _, err := load("-manage=false"); err == nil {
+		t.Fatal("a real server the agent does not start was accepted")
+	}
+}
+
+func TestCheckControlFiles(t *testing.T) {
+	dir := t.TempDir()
+	dll := filepath.Join(dir, "openlink-control.dll")
+	os.WriteFile(dll, nil, 0o600)
+	if err := checkControlFiles(dll); err == nil {
+		t.Fatal("missing loader accepted")
+	}
+	os.WriteFile(filepath.Join(dir, "openlink-loader.exe"), nil, 0o600)
+	if err := checkControlFiles(dll); err != nil {
+		t.Fatal(err)
 	}
 }
 

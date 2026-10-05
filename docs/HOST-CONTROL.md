@@ -1,14 +1,14 @@
 # Host control: DLL, server-owned selection and playlist rotation
 
-The DLL/controller, managed hostagent loader/local administration, server-owned map/mode selection and playlist rotation are implemented and were tested live on build B002 (Steam 22709428, 2026-10-04, runs R016–R018). With a stock client as lobby leader, the server loaded the agent's pinned map/mode pairs and rotated them across consecutive matches. Requests carry map/mode asset IDs plus pinned version IDs, using the game's normal CMS flow and login. Not yet tested: natural match end by time or score limit, several or remote players, Forge maps, engine (type 10) modes, long unattended runs.
+The DLL/controller, managed loader/local administration, server-owned map/mode selection and playlist rotation are implemented and were tested live on build B002 (Steam 22709428, 2026-10-04, runs R016–R018). With a stock client as lobby leader, the server loaded the agent's pinned map/mode pairs and rotated them across consecutive matches. Requests carry map/mode asset IDs plus pinned version IDs, using the game's normal CMS flow and login. Not yet tested: natural match end by time or score limit, several or remote players, Forge maps, engine (type 10) modes, long unattended runs.
 
 ## DLL transport
 
-Source: `native/hostctl/`; Go library: `internal/hostctl/{wire,bridge}.go`. Build with Visual Studio 2017 or later C++ x64 tools (`native/hostctl/vcvars.cmd` finds them; set `VCVARSALL` to override). Releases build the same way in GitHub Actions and publish `OpenLink-host-windows-amd64.zip` (agent, DLL, loader, example configs; see `packaging/host/`).
+Source: `native/hostctl/`; Go library: `internal/hostctl/{wire,bridge}.go`. Build with Visual Studio 2017 or later C++ x64 tools (`native/hostctl/vcvars.cmd` finds them; set `VCVARSALL` to override). Releases build the same way in GitHub Actions and publish `OpenLink-Server-windows-amd64.zip` (`openlink-server.exe`, `openlink-control.dll`, `openlink-loader.exe`, example configs; see `packaging/host/`).
 
 ```powershell
 .\native\hostctl\build.cmd 'C:\build\hostctl'
-$env:HOSTCTL_TEST_DLL='C:\build\hostctl\hi-hostctl.dll'
+$env:HOSTCTL_TEST_DLL='C:\build\hostctl\openlink-control.dll'
 $env:HOSTCTL_TEST_HARNESS='C:\build\hostctl\hostctl-harness.exe'
 go test ./internal/hostctl -count=1
 ```
@@ -17,9 +17,9 @@ Tests load only our own DLL in our own harness. Config supplies controller PID, 
 
 Native tests are skipped unless both artifact paths are configured. Enabled tests check idle connection, pending requests, controller EOF, wrong controller PID, malformed length, wrong secret, replay ID and idle Stop. Go also rejects stale/mismatched/unverified Selected/Applied responses. Managed tests invoke the real loader into an owned target and cover shutdown/duplicate/wrong-executable/original-handle binding. Transport success is not operational readiness.
 
-## Managed hostagent control
+## Managed control
 
-`hostctl_dll` in hostagent.json (or `-hostctl-dll <absolute-path>`) explicitly enables loading for servers this agent launches, after PID-specific setupComplete. Place `hostctl-loader.exe` alongside the DLL. `hostctl_native: true` (or `-hostctl-native`) separately enables the build-pinned native backend. Defaults load nothing; existing servers are never adopted. Native/simulation/unmanaged combinations reject. Windows access rejection remains a boundary; the loader never adjusts privileges or bypasses protections. An actual Halo test requires separate scoped coordination under the parent workspace's AGENTS.md.
+A real server always loads `openlink-control.dll` with the build-pinned native backend, after PID-specific setupComplete, into servers openlink-server launches itself. By default the DLL is the one next to `openlink-server.exe`; `control_dll` in openlink-server.json (or `-control-dll <path>`) overrides it. `openlink-loader.exe` must sit next to the DLL; the program refuses to start if either is missing. Existing servers are never adopted, and `"manage": false` is rejected. `-simulate` loads nothing and ignores the playlist and match settings. Windows access rejection remains a boundary; the loader never adjusts privileges or bypasses protections. An actual Halo test requires separate scoped coordination under the parent workspace's AGENTS.md.
 
 The helper inherits the original managed process handle, verifies its identity and requests Start/Stop outside DllMain. Configuration secret passes over stdin. Agent cancellation/controller EOF requests cleanup; failed cleanup is reported. Module remains pinned until server exit. No automatic reattachment to a partially loaded process. `-restart=false` permits a single managed launch for a scoped test; default managed supervision still restarts exited servers.
 
@@ -29,16 +29,16 @@ The loopback API retains the required `X-OpenLink-Admin: 1` header. `GET /host-c
 {"map":{"asset_id":"00112233-4455-6677-8899-aabbccddeeff","version_id":"10112233-4455-6677-8899-aabbccddeeff"},"mode":{"asset_id":"20112233-4455-6677-8899-aabbccddeeff","version_id":"30112233-4455-6677-8899-aabbccddeeff"},"mode_kind":"custom"}
 ```
 
-Mode kind is `custom` (published UGC variant, native6) or `engine` (base EngineGameVariants resource, native10). An officially published playlist mode can use the UGC path; publication alone does not determine this type. IDs must be canonical/nonzero and versions pinned; map type is preserved from initialized current content. JSON is strict/bounded4096bytes. `hi-hostagent select <selection.json>` submits the same request locally. A `selected` response establishes descriptor readback only. It does not mean a map was downloaded, a mode's saved settings were applied or a match started. Random playlists require verified loading/start/end and two actual fixed-pair tests first. Parent notes FN013/FN014 and test-card R004 record the next gates.
+Mode kind is `custom` (published UGC variant, native6) or `engine` (base EngineGameVariants resource, native10). An officially published playlist mode can use the UGC path; publication alone does not determine this type. IDs must be canonical/nonzero and versions pinned; map type is preserved from initialized current content. JSON is strict/bounded4096bytes. `openlink-server select <selection.json>` submits the same request locally. A `selected` response establishes descriptor readback only. It does not mean a map was downloaded, a mode's saved settings were applied or a match started. Random playlists require verified loading/start/end and two actual fixed-pair tests first. Parent notes FN013/FN014 and test-card R004 record the next gates.
 
 ## Server-owned selection and playlist rotation
 
-A lobby leader's client pushes its own lobby default (for example Bazaar/Slayer) into the server's selection. After a successful selection, the DLL locks entry 0 of the server's selection: any later write from game code keeps its other entries but gets the hostagent's map/mode. `GET /host-control` reports `gates` with Locked (64) and Intercepted (128, the lock rewrote another writer). With a v2 DLL it also reports `state` (8 lobby, 11 starting, 9 in game, 10 end of game) and `matches` (matches started). The leader's lobby screen may still show its own map name. The server loads the selected content.
+A lobby leader's client pushes its own lobby default (for example Bazaar/Slayer) into the server's selection. After a successful selection, the DLL locks entry 0 of the server's selection: any later write from game code keeps its other entries but gets the playlist's map/mode. `GET /host-control` reports `gates` with Locked (64) and Intercepted (128, the lock rewrote another writer). With a v2 DLL it also reports `state` (8 lobby, 11 starting, 9 in game, 10 end of game) and `matches` (matches started). The leader's lobby screen may still show its own map name. The server loads the selected content.
 
-Every server needs a playlist in hostagent.json (requires `hostctl_native`); the agent refuses to start without one:
+Every server needs a playlist in openlink-server.json; the program refuses to start without one:
 
 ```json
-{"hostctl_dll": "C:/path/hi-hostctl.dll", "hostctl_native": true, "playlist": "playlist.json"}
+{"playlist": "playlist.json"}
 ```
 
 ```json
@@ -58,7 +58,7 @@ Every server needs a playlist in hostagent.json (requires `hostctl_native`); the
 
 - `selection`: `shuffle_bag` (default) plays every entry once per cycle in random order, never repeating across a cycle boundary. `sequential` uses file order.
 - Each entry has `mode_kind` `custom` (default, UGC game variant) or `engine`, and `enabled` (default true). The first match must use a `custom` entry, because it initializes the server's selection.
-- Limits, checked when the agent starts (it refuses to start on any error) and by `hi-hostagent check-playlist [file]`:
+- Limits, checked when the agent starts (it refuses to start on any error) and by `openlink-server check-playlist [file]`:
   - `id`: required and unique; at most 80 bytes. A short readable slug such as `fiesta-slayer-interference` is best.
   - `name`: optional (players see the `id` without it); at most 80 UTF-8 bytes, not characters (é is 2 bytes, most other scripts 2–3, emoji 4). No control characters in either.
   - Map and mode `asset_id`/`version_id`: canonical, nonzero UUIDs.
@@ -72,7 +72,7 @@ Every server needs a playlist in hostagent.json (requires `hostctl_native`); the
 
 ## Server-owned lobby and automatic start
 
-By default the first player to join becomes lobby leader, and any player's Play or pause-menu End Game is applied by the server, whether or not that player leads. With a v3 DLL (`hostctl_native`), two options hand the lobby to the server:
+By default the first player to join becomes lobby leader, and any player's Play or pause-menu End Game is applied by the server, whether or not that player leads. With a v3 DLL, two options hand the lobby to the server:
 
 ```json
 {"server_owned": true, "auto_start": {"min_players": 1, "delay_seconds": 30}}

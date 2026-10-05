@@ -9,7 +9,10 @@ import (
 	"strings"
 )
 
-const taskName = "OpenLink Host Agent"
+const (
+	taskName    = "OpenLink Server"
+	oldTaskName = "OpenLink Host Agent" // before the rename; removed by enable and disable
+)
 
 // runAutostart manages a Task Scheduler task that starts the agent when the
 // user logs on. A logon task runs in the user's own session, with their Steam
@@ -24,7 +27,7 @@ func runAutostart(c config, args []string) error {
 	case "enable":
 		if c.path == "" {
 			return errors.New("autostart needs a config file so the agent starts with your settings:\n" +
-				"  1. hi-hostagent [your flags] init-config\n  2. hi-hostagent autostart enable")
+				"  1. openlink-server [your flags] init-config\n  2. openlink-server autostart enable")
 		}
 		exe, err := os.Executable()
 		if err != nil {
@@ -37,11 +40,13 @@ func runAutostart(c config, args []string) error {
 		if err != nil {
 			return fmt.Errorf("schtasks: %v: %s", err, strings.TrimSpace(string(out)))
 		}
-		fmt.Printf("The host agent will start when you log on, using %s.\n", c.path)
+		exec.Command("schtasks", "/Delete", "/TN", oldTaskName, "/F").Run() // it would start the old program
+		fmt.Printf("OpenLink Server will start when you log on, using %s.\n", c.path)
 		return nil
 	case "disable":
 		out, err := exec.Command("schtasks", "/Delete", "/TN", taskName, "/F").CombinedOutput()
-		if err != nil {
+		oldErr := exec.Command("schtasks", "/Delete", "/TN", oldTaskName, "/F").Run()
+		if err != nil && oldErr != nil {
 			return fmt.Errorf("schtasks: %v: %s", err, strings.TrimSpace(string(out)))
 		}
 		fmt.Println("Autostart removed.")

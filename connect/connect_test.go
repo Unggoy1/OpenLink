@@ -28,7 +28,7 @@ func freePort(t *testing.T) int {
 // The "game" listens on the discovery port and sends to the session's local address.
 func TestSessionEndToEnd(t *testing.T) {
 	gamePort, discPort := freePort(t), freePort(t)
-	t.Setenv("HICOMM_DEV_PORTS", fmt.Sprintf("%d,%d", gamePort, discPort))
+	t.Setenv("OPENLINK_DEV_PORTS", fmt.Sprintf("%d,%d", gamePort, discPort))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

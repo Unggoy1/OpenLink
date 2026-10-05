@@ -1,8 +1,12 @@
 # OpenLink
 
-**Community dedicated servers for Halo Infinite.** Run your own Halo Infinite server, list it in a community directory, and let players anywhere join it, using the game's own LAN server mode. Nothing in the game is modified.
+**Community dedicated servers for Halo Infinite.** Run your own Halo Infinite server, list it in a community directory, and let players anywhere join it, using the game's own LAN server mode. Players' games are never modified.
 
-> Working name. The programs (`hi-hostagent`, `hi-directory`) keep their current names until the project name is final.
+Three parts:
+
+- **OpenLink** (the app, `browser/`): players browse servers and join.
+- **OpenLink Server** (`openlink-server.exe`, `openlink-control.dll`, `openlink-loader.exe`): hosts run a server from a playlist.
+- **OpenLink Directory** (`openlink-directory`): the public server list.
 
 > Unofficial fan project. Not affiliated with or endorsed by Microsoft, Xbox or Halo Studios. Halo is a trademark of Microsoft.
 
@@ -13,20 +17,20 @@ Halo Infinite ships with a LAN server mode. A LAN server announces itself with a
 ```
  server host                         directory                        player PC
 ┌───────────────────────┐   beacons  ┌──────────┐   beacons   ┌──────────────────────────┐
-│ Halo Infinite         │──────────▶ │ hi-      │ ──────────▶ │ OpenLink app             │
-│ LAN server  (UDP 1343)│  (agent)   │ directory│             │  replays beacon locally  │
-│ hi-hostagent          │            └──────────┘             │  forwards UDP 1343 ──┐   │
+│ Halo Infinite         │──────────▶ │ OpenLink │ ──────────▶ │ OpenLink app             │
+│ LAN server  (UDP 1343)│            │ Directory│             │  replays beacon locally  │
+│ OpenLink Server       │            └──────────┘             │  forwards UDP 1343 ──┐   │
 └──────────▲────────────┘                                     │ Halo Infinite ◀──────┘   │
            └───────────── game traffic, UDP 1343 (port-forwarded) ──────────────────────┘
 ```
 
-- **`hi-hostagent`** runs on the server machine. It starts the LAN server, restarts it if it exits, picks up the server's beacon and keeps the directory listing fresh.
-- **`hi-directory`** is the public server list. Hosts register and send heartbeats; players list servers and fetch beacons.
+- **OpenLink Server** (`openlink-server.exe`) runs on the server machine. It starts the LAN server with the control DLL, picks each match from the playlist (or the players' vote), restarts the server if it exits, picks up the server's beacon and keeps the directory listing fresh.
+- **OpenLink Directory** (`openlink-directory`) is the public server list. Hosts register and send heartbeats; players list servers and fetch beacons.
 - **The OpenLink app** (`browser/`) runs on each player's PC: a desktop server list with a Join button. For the chosen server it replays that server's own beacon to the local game and forwards the game's traffic to the server. To the game, it looks like an ordinary LAN game.
 
 The app forwards game packets unchanged. They are encrypted by the game, and this project never reads, decrypts or alters them.
 
-**What this project does not do:** it does not modify game files, touch game memory or interact with anti-cheat. It does not handle Xbox/Microsoft credentials: players sign in inside the game as usual, and the directory stores only what hosts send it (name, address, build, status, beacon).
+**What this project does not do:** it never modifies players' games: the app only relays network traffic. On the host, OpenLink Server loads its control DLL into the host's own game server process (to pick maps and modes and run the lobby); it does not modify game files. Hosting this way is at the host's own risk with respect to the game's terms. It does not handle Xbox/Microsoft credentials: players sign in inside the game as usual, and the directory stores only what hosts send it (name, address, build, status, beacon).
 
 ## Requirements
 
@@ -38,11 +42,11 @@ The app forwards game packets unchanged. They are encrypted by the game, and thi
 
 Full guide: **[docs/HOSTING.md](docs/HOSTING.md)**. In short:
 
-1. Forward **UDP 1343** to the server PC and allow `hi-hostagent.exe` in the Windows firewall.
-2. Check reachability with `hi-hostagent -simulate -directory https://DIRECTORY -name "My Server"`. The agent logs whether the directory could reach your port.
-3. Copy `hostagent.example.json` and `playlist.example.json` from the host package to `hostagent.json` and `playlist.json` and fill them in. **A playlist is required**: the agent refuses to start without a valid one (`hi-hostagent check-playlist` checks it). After that, `hi-hostagent` with no flags runs the server. `hi-hostagent autostart enable` starts it at logon.
+1. Forward **UDP 1343** to the server PC and allow `openlink-server.exe` in the Windows firewall.
+2. Check reachability with `openlink-server -simulate -directory https://DIRECTORY -name "My Server"`. The agent logs whether the directory could reach your port.
+3. Copy `openlink-server.example.json` and `playlist.example.json` from the OpenLink Server zip to `openlink-server.json` and `playlist.json` and fill them in. **A playlist is required**: OpenLink Server refuses to start without a valid one (`openlink-server check-playlist` checks it). After that, `openlink-server` with no flags runs the server. `openlink-server autostart enable` starts it at logon.
 
-By default the agent runs in **proxy mode**: the game server listens only on 127.0.0.1 and the agent fronts the public port. That gives player counts, ping and reachability checks, and `status` / `kick` / `ban` commands, with per-player rate limits.
+By default OpenLink Server runs in **proxy mode**: the game server listens only on 127.0.0.1 and OpenLink Server fronts the public port. That gives player counts, ping and reachability checks, and `status` / `kick` / `ban` commands, with per-player rate limits.
 
 ## Playing
 
@@ -53,21 +57,23 @@ Open the OpenLink app, click **Join** on a server, then in Halo Infinite go to *
 
 ## Running a directory
 
-The directory is a single small HTTP service. It carries no game traffic: players reach servers directly over UDP. It keeps everything in memory. A restart or redeploy clears the list, and host agents register again within seconds. **Run exactly one instance.**
+The directory is a single small HTTP service. It carries no game traffic: players reach servers directly over UDP. It keeps everything in memory. A restart or redeploy clears the list, and servers register again within seconds. **Run exactly one instance.**
 
 **Container (e.g. Railway).** The repo's `Dockerfile` builds a minimal image. The service listens on `$PORT` when that is set. Configure it with environment variables:
 
 | Variable | Value |
 |---|---|
-| `HICOMM_CLIENT_IP_HEADER` | the header your platform's proxy uses for the client address, e.g. `X-Forwarded-For` (the rightmost entry is used, because entries to its left can be forged by clients) |
-| `HICOMM_CLIENT_IP_HOPS` | with `X-Forwarded-For`: how many trusted proxies append to it (default 1). On Railway it is likely `2` (its edge has an outer layer whose address is appended last). Confirm with `/v1/whoami?debug=1` |
-| `HICOMM_REGISTER_KEY` | optional. When set, hosts need it to register, and only key holders may list an address other than their own IP |
+| `OPENLINK_CLIENT_IP_HEADER` | the header your platform's proxy uses for the client address, e.g. `X-Forwarded-For` (the rightmost entry is used, because entries to its left can be forged by clients) |
+| `OPENLINK_CLIENT_IP_HOPS` | with `X-Forwarded-For`: how many trusted proxies append to it (default 1). On Railway it is likely `2` (its edge has an outer layer whose address is appended last). Confirm with `/v1/whoami?debug=1` |
+| `OPENLINK_REGISTER_KEY` | optional. When set, hosts need it to register, and only key holders may list an address other than their own IP |
+
+The older `HICOMM_…` names of these variables still work, so an existing deployment keeps running; switch to the `OPENLINK_…` names when convenient.
 
 After deploying, open `https://YOUR-DIRECTORY/v1/whoami` from home. It must show **your public IP**. `/v1/whoami?debug=1` also shows the forwarding headers that arrived, to work out the right header and hop count. If it shows a private or proxy address, the client-IP header is wrong, and hosts would be listed under the wrong address.
 
 **Own server.** Run it behind an HTTPS reverse proxy (Caddy, nginx and so on):
 ```
-hi-directory -listen 127.0.0.1:8080 -client-ip-header X-Forwarded-For
+openlink-directory -listen 127.0.0.1:8080 -client-ip-header X-Forwarded-For
 ```
 
 Listings expire 45 s after the last heartbeat. The directory also probes proxy-mode hosts about once a minute and lists them as reachable or unreachable. It only probes listed endpoints, never addresses a caller supplies. Without the register key, a host can only list its own public IP; this stops the directory being used to point players' traffic at third parties.
@@ -90,7 +96,7 @@ Requires Go 1.27+. On Windows:
 .\build.ps1
 ```
 
-This runs the tests and writes `bin\hi-hostagent.exe`, `bin\hi-directory.exe` and `bin\linux-amd64\hi-directory`. These use only the Go standard library. The player app is built separately in `browser/` (see its README).
+This runs the tests and writes `bin\openlink-server.exe`, `bin\openlink-directory.exe` and `bin\linux-amd64\openlink-directory`. These use only the Go standard library. The player app is built separately in `browser/` (see its README).
 
 ## Status and known limitations
 
@@ -104,5 +110,5 @@ This runs the tests and writes `bin\hi-hostagent.exe`, `bin\hi-directory.exe` an
 ## Development
 
 - `go test ./...` runs the unit tests: directory (auth, validation, expiry, limits), UDP forwarder, beacon relay, BootstrapLog parsing, UDP port-owner lookup and the simulator.
-- `hi-hostagent -simulate -loopback` keeps simulated beacons on 127.0.0.1.
-- `HICOMM_DEV_PORTS=21343,27117` moves only the simulator and the connector to other ports, so they can be tested on a machine already running a server. The game itself always uses 1343 and 7117.
+- `openlink-server -simulate -loopback` keeps simulated beacons on 127.0.0.1.
+- `OPENLINK_DEV_PORTS=21343,27117` moves only the simulator and the app to other ports, so they can be tested on a machine already running a server. The game itself always uses 1343 and 7117.

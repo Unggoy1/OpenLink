@@ -83,7 +83,7 @@ func (a *agent) rotate(ctx context.Context, controller hostController, bag *play
 		}
 		if st.Version < 2 {
 			a.setRotation(func(r *rotationInfo) {
-				r.Error = "hi-hostctl.dll does not report the match lifecycle; rotation needs the lock DLL"
+				r.Error = "openlink-control.dll does not report the match lifecycle; rotation needs the lock DLL"
 			})
 			a.log.Error("host control reply has no lifecycle state; rotation off")
 			return

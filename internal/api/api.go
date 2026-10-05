@@ -14,7 +14,7 @@ import (
 
 const (
 	// DefaultDirectory is the community directory the tools use unless
-	// HICOMM_DIRECTORY or a flag/config says otherwise. The OpenLink app
+	// OPENLINK_DIRECTORY or a flag/config says otherwise. The OpenLink app
 	// has its own copy (browser/settings.go).
 	DefaultDirectory = "https://openlink-dir.unggoy.xyz"
 	// GamePort is the UDP port a LAN client always dials on the host.
@@ -127,12 +127,21 @@ type BeaconResponse struct {
 	AgeMS  int64  `json:"age_ms"`
 }
 
+// Getenv reads the environment variable OPENLINK_<name>, falling back to the
+// project's older HICOMM_<name> so existing deployments keep working.
+func Getenv(name string) string {
+	if v := os.Getenv("OPENLINK_" + name); v != "" {
+		return v
+	}
+	return os.Getenv("HICOMM_" + name)
+}
+
 // Ports returns the game and discovery ports used by simulate mode and the
-// connector. The retail game always uses 1343/7117; HICOMM_DEV_PORTS="g,d"
+// player app. The retail game always uses 1343/7117; OPENLINK_DEV_PORTS="g,d"
 // moves only our tools, so they can be tested next to a running server.
 func Ports() (game, discovery int) {
 	game, discovery = GamePort, DiscoveryPort
-	if v := os.Getenv("HICOMM_DEV_PORTS"); v != "" {
+	if v := Getenv("DEV_PORTS"); v != "" {
 		var g, d int
 		if _, err := fmt.Sscanf(v, "%d,%d", &g, &d); err == nil && g > 0 && g < 65536 && d > 0 && d < 65536 {
 			game, discovery = g, d

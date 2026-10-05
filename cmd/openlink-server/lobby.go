@@ -92,7 +92,7 @@ func (a *agent) runLobby(ctx context.Context, controller lobbyController, poll t
 			continue
 		}
 		if st.Version < 3 {
-			a.log.Error("hi-hostctl.dll does not report the lobby; lobby control off")
+			a.log.Error("openlink-control.dll does not report the lobby; lobby control off")
 			a.setLobby(func(l *lobbyInfo) { l.Error = "DLL has no lobby report (needs v3)" })
 			return
 		}

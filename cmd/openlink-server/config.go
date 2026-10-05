@@ -12,7 +12,7 @@ import (
 	"halocommunity/internal/api"
 )
 
-// config is the agent's settings. Every field can be set in hostagent.json;
+// config is the agent's settings. Every field can be set in openlink-server.json;
 // flags given on the command line override the file.
 type config struct {
 	Directory   string `json:"directory"`
@@ -39,20 +39,23 @@ type config struct {
 
 	BindIP string `json:"bind_ip,omitempty"` // without proxy mode: the server's -bindip
 
-	Admin             string `json:"admin"`     // local admin API address ("" = off)
-	BansFile          string `json:"bans_file"` // relative paths are next to the config file
-	HostControlDLL    string `json:"hostctl_dll,omitempty"`
-	HostControlNative bool   `json:"hostctl_native,omitempty"`
-	// Playlist, with the native backend: map/mode rotation file (internal/playlist).
+	Admin    string `json:"admin"`     // local admin API address ("" = off)
+	BansFile string `json:"bans_file"` // relative paths are next to the config file
+	// HostControlDLL is openlink-control.dll, which a real server always
+	// loads; empty in the file = the one next to the program. openlink-loader.exe
+	// must sit next to the DLL.
+	HostControlDLL    string `json:"control_dll,omitempty"`
+	HostControlNative bool   `json:"-"` // always on for a real server
+	// Playlist: map/mode rotation file (internal/playlist), required for a real server.
 	Playlist string `json:"playlist,omitempty"`
-	// ServerOwned, with the native backend: no player becomes lobby leader, so
-	// nobody gets Play or the end-game option. Pair it with AutoStart.
+	// ServerOwned: no player becomes lobby leader, so nobody gets Play or the
+	// end-game option. Pair it with AutoStart or Vote.
 	ServerOwned bool `json:"server_owned,omitempty"`
 	// LobbyOwner, with ServerOwned: "none" (default, no player is lobby owner)
 	// or "first_player" (the game's own owner; only that player sees the inert
 	// Play/End Game, other players see none).
 	LobbyOwner string `json:"lobby_owner,omitempty"`
-	// AutoStart, with the native backend: the server starts each match itself.
+	// AutoStart: the server starts each match itself.
 	AutoStart *autoStart `json:"auto_start,omitempty"`
 	// Vote, with a playlist and proxy mode: players vote in the OpenLink app
 	// for the next match, which then starts by itself. Replaces AutoStart.
@@ -67,7 +70,7 @@ type config struct {
 
 func defaults() config {
 	host, _ := os.Hostname()
-	dir := os.Getenv("HICOMM_DIRECTORY")
+	dir := api.Getenv("DIRECTORY")
 	if dir == "" {
 		dir = api.DefaultDirectory
 	}
@@ -80,21 +83,21 @@ func defaults() config {
 }
 
 // loadConfig builds the configuration: defaults, then the config file
-// (-config, or hostagent.json next to the executable if present), then flags
+// (-config, or openlink-server.json next to the executable if present), then flags
 // that were set explicitly.
 func loadConfig(fs *flag.FlagSet, args []string) (config, error) {
 	c := defaults()
 	f := c // flag targets; copied over the file values only when set
-	cfgPath := fs.String("config", "", "config file (default: hostagent.json next to the program, if present)")
-	fs.StringVar(&f.Directory, "directory", c.Directory, "directory URL (env HICOMM_DIRECTORY); empty = do not list")
-	fs.StringVar(&f.RegisterKey, "register-key", os.Getenv("HICOMM_REGISTER_KEY"), "directory registration key, if the directory requires one")
+	cfgPath := fs.String("config", "", "config file (default: openlink-server.json next to the program, if present)")
+	fs.StringVar(&f.Directory, "directory", c.Directory, "directory URL (env OPENLINK_DIRECTORY); empty = do not list")
+	fs.StringVar(&f.RegisterKey, "register-key", api.Getenv("REGISTER_KEY"), "directory registration key, if the directory requires one (env OPENLINK_REGISTER_KEY)")
 	fs.StringVar(&f.Name, "name", c.Name, "server name shown in the browser")
 	fs.StringVar(&f.Region, "region", "", "region label, e.g. us-west")
 	fs.StringVar(&f.PublicHost, "public-host", "", "address players connect to; empty = the directory uses this machine's public IP")
 	fs.IntVar(&f.PublicPort, "public-port", c.PublicPort, "external UDP port players connect to (your port forward)")
 	fs.StringVar(&f.Install, "install", "", "game install root (folder with version.txt); empty = search common locations")
 	fs.StringVar(&f.Sandbox, "sandbox", c.Sandbox, "value for -lan_sandbox")
-	fs.BoolVar(&f.Manage, "manage", c.Manage, "start the server and restart it if it exits")
+	fs.BoolVar(&f.Manage, "manage", c.Manage, "start the server and restart it if it exits (required for a real server)")
 	fs.BoolVar(&f.Restart, "restart", c.Restart, "restart a managed server after exit (false for a single scoped test)")
 	fs.BoolVar(&f.StopServer, "stop-server", false, "stop the managed server when the agent exits")
 	fs.BoolVar(&f.Proxy, "proxy", c.Proxy, "proxy mode: front the server for player counts, probes, bans and rate limits")
@@ -105,9 +108,8 @@ func loadConfig(fs *flag.FlagSet, args []string) (config, error) {
 	fs.StringVar(&f.BindIP, "bind-ip", "", "without proxy mode: pass -bindip to the server")
 	fs.StringVar(&f.Admin, "admin", c.Admin, "local admin API address for status/kick/ban commands (empty = off)")
 	fs.StringVar(&f.BansFile, "bans", c.BansFile, "ban list file")
-	fs.StringVar(&f.HostControlDLL, "hostctl-dll", "", "explicit DLL loading for servers launched by this agent (off by default)")
-	fs.BoolVar(&f.HostControlNative, "hostctl-native", false, "with hostctl-dll: opt into the B002 native LAN selection backend")
-	fs.StringVar(&f.Playlist, "playlist", "", "map/mode playlist file (required to run a server; needs hostctl-native); the server picks every match from it")
+	fs.StringVar(&f.HostControlDLL, "control-dll", "", "path to openlink-control.dll (default: next to the program)")
+	fs.StringVar(&f.Playlist, "playlist", "", "map/mode playlist file (required to run a server); the server picks every match from it")
 	fs.BoolVar(&f.Simulate, "simulate", false, "no game: send simulated beacons and answer probes on the game port")
 	fs.BoolVar(&f.Loopback, "loopback", false, "with -simulate: keep simulated beacons on 127.0.0.1")
 	fs.DurationVar(&f.CaptureDelay, "capture-delay", c.CaptureDelay, "wait after setupComplete before listening for beacons")
@@ -117,9 +119,11 @@ func loadConfig(fs *flag.FlagSet, args []string) (config, error) {
 
 	path := *cfgPath
 	if path == "" {
-		if exe, err := os.Executable(); err == nil {
-			if p := filepath.Join(filepath.Dir(exe), "hostagent.json"); fileExists(p) {
+		if dir := exeDir(); dir != "" {
+			if p := filepath.Join(dir, "openlink-server.json"); fileExists(p) {
 				path = p
+			} else if fileExists(filepath.Join(dir, "hostagent.json")) {
+				return c, errors.New("found hostagent.json next to the program: rename it to openlink-server.json")
 			}
 		}
 	}
@@ -174,10 +178,8 @@ func loadConfig(fs *flag.FlagSet, args []string) (config, error) {
 			c.Admin = f.Admin
 		case "bans":
 			c.BansFile = f.BansFile
-		case "hostctl-dll":
+		case "control-dll":
 			c.HostControlDLL = f.HostControlDLL
-		case "hostctl-native":
-			c.HostControlNative = f.HostControlNative
 		case "playlist":
 			c.Playlist = f.Playlist
 		}
@@ -192,20 +194,23 @@ func loadConfig(fs *flag.FlagSet, args []string) (config, error) {
 	if c.PublicPort < 1 || c.PublicPort > 65535 {
 		return c, errors.New("public port must be 1-65535")
 	}
-	if c.HostControlNative && c.HostControlDLL == "" {
-		return c, errors.New("hostctl-native requires hostctl-dll")
+	if c.Simulate {
+		// No game: the control DLL, playlist and match settings do not apply,
+		// so a full config file can still be used for the reachability check.
+		c.HostControlDLL, c.HostControlNative = "", false
+		c.Playlist, c.ServerOwned, c.AutoStart, c.Vote = "", false, nil, nil
+	} else {
+		// A real server always runs from a playlist through the control DLL.
+		if !c.Manage {
+			return c, errors.New(`openlink-server must start the game server itself: remove "manage": false`)
+		}
+		c.HostControlNative = true
+		if c.HostControlDLL == "" {
+			c.HostControlDLL = filepath.Join(exeDir(), "openlink-control.dll")
+		}
 	}
-	if c.HostControlDLL != "" && (!c.Manage || c.Simulate) {
-		return c, errors.New("hostctl-dll requires a managed real server")
-	}
-	if c.Playlist != "" && !c.HostControlNative {
-		return c, errors.New("playlist requires hostctl-native")
-	}
-	if (c.ServerOwned || c.AutoStart != nil) && !c.HostControlNative {
-		return c, errors.New("server_owned and auto_start require hostctl-native")
-	}
-	if c.Vote != nil && (c.Playlist == "" || !c.Proxy) {
-		return c, errors.New("vote requires a playlist and proxy mode")
+	if c.Vote != nil && !c.Proxy {
+		return c, errors.New("vote requires proxy mode")
 	}
 	if c.Vote != nil && c.AutoStart != nil {
 		return c, errors.New("use vote or auto_start, not both: vote starts each match after the vote")
@@ -233,11 +238,23 @@ func (c config) resolve(p string) string {
 
 // save writes the configuration as JSON.
 func (c config) save(path string) error {
+	if c.HostControlDLL == filepath.Join(exeDir(), "openlink-control.dll") {
+		c.HostControlDLL = "" // the default; keeps the file valid if the folder moves
+	}
 	b, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
 		return err
 	}
 	return os.WriteFile(path, append(b, '\n'), 0o600) // may contain the register key
+}
+
+// exeDir is the folder of the running program, or "" if unknown.
+func exeDir() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	return filepath.Dir(exe)
 }
 
 func fileExists(p string) bool {

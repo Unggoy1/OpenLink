@@ -9,13 +9,13 @@ $ldflags = "-s -w -X main.version=$version"
 go vet ./...
 go test ./...
 New-Item -ItemType Directory -Force bin | Out-Null
-foreach ($c in 'hi-directory', 'hi-hostagent') {
+foreach ($c in 'openlink-directory', 'openlink-server') {
     go build -trimpath -ldflags $ldflags -o "bin\$c.exe" "./cmd/$c"
 }
 # Linux build of the directory, for a Linux host.
 $env:GOOS = 'linux'; $env:GOARCH = 'amd64'; $env:CGO_ENABLED = '0'
 try {
-    go build -trimpath -ldflags $ldflags -o "bin\linux-amd64\hi-directory" ./cmd/hi-directory
+    go build -trimpath -ldflags $ldflags -o "bin\linux-amd64\openlink-directory" ./cmd/openlink-directory
 } finally {
     Remove-Item Env:GOOS, Env:GOARCH, Env:CGO_ENABLED
 }

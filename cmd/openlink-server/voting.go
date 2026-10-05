@@ -366,7 +366,7 @@ func (v *voter) run(ctx context.Context) {
 			continue
 		}
 		if st.Version < 3 {
-			v.log.Error("hi-hostctl.dll does not report the lobby; voting off")
+			v.log.Error("openlink-control.dll does not report the lobby; voting off")
 			v.setPhase(phaseWaiting, "DLL has no lobby report (needs v3)")
 			return
 		}

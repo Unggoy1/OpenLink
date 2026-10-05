@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"slices"
 
 	"halocommunity/internal/playlist"
@@ -12,8 +13,19 @@ import (
 
 // errNoPlaylist: every dedicated server runs from a playlist. Hosts who want
 // to pick maps by hand can host an ordinary custom game without this tool.
-var errNoPlaylist = errors.New(`a playlist is required: set "playlist" (with "hostctl_dll" and "hostctl_native") in hostagent.json; ` +
-	`see packaging/host/hostagent.example.json. To host without a playlist, host an ordinary custom game instead`)
+var errNoPlaylist = errors.New(`a playlist is required: set "playlist" in openlink-server.json ` +
+	`(see openlink-server.example.json). To host without a playlist, host an ordinary custom game instead`)
+
+// checkControlFiles makes sure the control DLL and its loader are in place.
+func checkControlFiles(dll string) error {
+	loader := filepath.Join(filepath.Dir(dll), "openlink-loader.exe")
+	for _, p := range []string{dll, loader} {
+		if !fileExists(p) {
+			return fmt.Errorf("%s not found: keep all files from the OpenLink Server zip in one folder", p)
+		}
+	}
+	return nil
+}
 
 type playlistReport struct {
 	ballot int // largest possible ballot in bytes, with thumbnails; 0 when not voting
@@ -86,7 +98,7 @@ func worstBallot(entries []playlist.Entry, vc voteConfig, maxPlayers int) vote.B
 	}
 }
 
-// checkPlaylistCommand: hi-hostagent check-playlist [file]. Always applies the
+// checkPlaylistCommand: openlink-server check-playlist [file]. Always applies the
 // voting checks (with the config's vote settings, or the defaults), so a
 // playlist that passes works on any server.
 func checkPlaylistCommand(c config, args []string) error {

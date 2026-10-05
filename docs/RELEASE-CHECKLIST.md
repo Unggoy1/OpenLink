@@ -50,7 +50,7 @@ Status as of 2026-10-05. Tick items as they are done and note the date and how i
 ## 2. Work still to do
 
 - [ ] **Merge** the `host-lobby-control` and `vote-overlay` work into `master`.
-- [ ] **CI release run**: tag a pre-release (for example `v0.1.0-alpha.1`). Smoke-test every artifact on a clean PC: the host zip (agent and DLL), the Windows app and the Linux app.
+- [ ] **CI release run**: tag a pre-release (for example `v0.1.0-alpha.1`). Smoke-test every artifact on a clean PC: the OpenLink Server zip (openlink-server.exe, openlink-control.dll, openlink-loader.exe), the Windows app and the Linux app.
 - [ ] **App update path**: make sure the 4 current testers update before testing on voting servers. The first public release ships with voting, so no compatibility work is needed.
 - [ ] **Docs pass**:
   - [ ] HOSTING.md: port forwarding, proxy mode, playlist, voting, `server_owned` / `first_player`, same-PC testing needs Broadcast mode, ToS-risk note.
@@ -58,7 +58,7 @@ Status as of 2026-10-05. Tick items as they are done and note the date and how i
   - [ ] A playlist.json reference (limits below).
   - [ ] Player-facing: install, join, voting, the overlay as an experimental option, and that the app does not modify the game.
 - [ ] **Unggoy playlist generator** follows the limits below.
-- [x] **Required, validated playlist** (built 2026-10-05, unit-tested; not yet run against the real game). Every real server needs a playlist; the agent checks it before starting anything and refuses to start on any error. `hi-hostagent check-playlist [file]` runs the same checks. Errors: IDs or names over 80 bytes, control characters, voting with fewer than 2 entries or no custom mode, and any possible ballot over 1200 bytes with thumbnails. The playlist is read once at start.
+- [x] **Required, validated playlist** (built 2026-10-05, unit-tested; not yet run against the real game). Every real server needs a playlist; the agent checks it before starting anything and refuses to start on any error. `openlink-server check-playlist [file]` runs the same checks. Errors: IDs or names over 80 bytes, control characters, voting with fewer than 2 entries or no custom mode, and any possible ballot over 1200 bytes with thumbnails. The playlist is read once at start.
   - [ ] Live check: the agent starts the server with a valid playlist and refuses a broken one.
 - [ ] **Dockerized host with Wine/Proton** (Linux servers). Not attempted yet; every step is unproven:
   - [ ] Halo Infinite starts in a container under Wine/Proton with no monitor (a virtual display; DX12 through vkd3d-proton needs a Vulkan GPU passed into the container)
@@ -76,7 +76,7 @@ Status as of 2026-10-05. Tick items as they are done and note the date and how i
 ## playlist.json limits (for the generator)
 
 - `schema_version` 1; `selection` `shuffle_bag` (default) or `sequential`; at least one enabled entry.
-- The host agent enforces these: it will not start with a playlist that breaks them. Run `hi-hostagent check-playlist playlist.json` on generated files.
+- The host agent enforces these: it will not start with a playlist that breaks them. Run `openlink-server check-playlist playlist.json` on generated files.
 - `id`: unique and case-sensitive. Use a readable slug such as `fiesta-slayer-interference`, at most about 32 bytes, from `a-z 0-9 -`. Over 80 bytes is an error. Build it from the mode and map so a regenerated playlist keeps the same IDs.
 - `name`: at most **80 UTF-8 bytes** (not characters); more is an error, so trim it yourself: shorten the longer of mode and map with "…" (3 bytes). Players see the `id` if `name` is empty. No control characters (such as newlines). Avoid `&`, `<`, `>`: each costs 6 bytes on the wire.
 - The overlay shows about 30 characters of a name on one line; the app panel shows the whole name.

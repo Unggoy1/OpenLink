@@ -1,24 +1,24 @@
-OpenLink host package (Windows)
+OpenLink Server (Windows)
 
 Files
-  hi-hostagent.exe     runs and supervises the Halo Infinite LAN dedicated server
-  hi-hostctl.dll       server-side control (loaded into the server only)
-  hostctl-loader.exe   loads the DLL into the server the agent starts
-  hostagent.example.json, playlist.example.json
+  openlink-server.exe    runs and supervises the Halo Infinite LAN dedicated server
+  openlink-control.dll   server-side control (loaded into the game server only)
+  openlink-loader.exe    loads the DLL into the game server openlink-server.exe starts
+  openlink-server.example.json, playlist.example.json
 
 Setup
   1. Keep all files in one folder.
-  2. Copy hostagent.example.json to hostagent.json and fill in name,
+  2. Copy openlink-server.example.json to openlink-server.json and fill in name,
      register_key and public_host/public_port (your port forward or tunnel).
   3. Copy playlist.example.json to playlist.json and list your map/mode pairs
      (asset and version IDs from the game's content browser; "name" is what
-     players see when they vote). A playlist is required: the agent will not
+     players see when they vote). A playlist is required: openlink-server will not
      start without a valid one. Limits: "id" and "name" at most 80 bytes
      (UTF-8 bytes, not characters).
-  4. Check it: hi-hostagent.exe check-playlist
-  5. Run hi-hostagent.exe from a normal (not administrator) terminal.
-     Ctrl+C stops the agent and the server. The playlist is read once at
-     start: restart the agent after editing it.
+  4. Check it: openlink-server.exe check-playlist
+  5. Run openlink-server.exe from a normal (not administrator) terminal.
+     Ctrl+C stops it and the game server. The playlist is read once at
+     start: restart openlink-server after editing it.
 
 What the example config does
   - "playlist": the server decides the map and mode of every match.
@@ -42,5 +42,5 @@ Notes
   - With a tunnel pointed at 127.0.0.1:1343, keep "server_ip": "127.0.0.2".
   - Playing on the hosting PC: set the OpenLink app to "LAN broadcast" in
     Settings, or your game will not see the server through the app.
-  - Check status: hi-hostagent.exe status
+  - Check status: openlink-server.exe status
 Full documentation: docs/HOST-CONTROL.md in the repository.

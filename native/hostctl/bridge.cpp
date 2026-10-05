@@ -73,14 +73,21 @@ int read_frame(SOCKET s,uint8_t* p,unsigned capacity,unsigned& size,bool allow_i
     return read_all(s,p,size);
 }
 bool reply(SOCKET s,uint16_t code,uint64_t id,const hostctl::BackendReport* report=nullptr) {
-    // v2: v1 layout plus lifecycle state, match count and backend flags.
-    uint8_t b[112]={}; std::memcpy(b,"HICR",4); p16(b+4,2); p16(b+6,code);
+    // v3: v2 layout (lifecycle state, match count, backend flags) plus the lobby probe at 112.
+    uint8_t b[176]={}; std::memcpy(b,"HICR",4); p16(b+4,3); p16(b+6,code);
     p64(b+8,id); p32(b+16,GetCurrentProcessId());
     if(report) {
         p32(b+20,report->gates); p64(b+24,report->generation);
         const uint8_t* ids[]={report->observed.map.asset,report->observed.map.version,report->observed.mode.asset,report->observed.mode.version};
         for(unsigned i=0;i<4;++i) hostctl::ConvertUuidLayout(ids[i],b+32+16*i);
         p32(b+96,uint32_t(report->state)); p32(b+100,report->matches); p32(b+104,report->flags);
+        const auto& l=report->lobby;
+        p32(b+112,l.flags); p32(b+116,uint32_t(l.connected)); p32(b+120,uint32_t(l.peers)); p32(b+124,l.peer_mask);
+        p32(b+128,uint32_t(l.owner)); p32(b+132,uint32_t(l.host_peer)); p32(b+136,uint32_t(l.players)); p32(b+140,uint32_t(l.start_mode));
+        b[144]=l.allowed; b[145]=l.content_prepared; b[146]=l.prep_started; b[147]=l.prep_done; b[148]=l.loading; b[149]=l.start;
+        b[150]=l.blocked_start; b[151]=l.blocked_end;
+        p32(b+152,uint32_t(l.users_required)); p32(b+156,uint32_t(l.game_type)); p32(b+160,uint32_t(l.session_kind));
+        p32(b+164,uint32_t(l.end_game_table)); p32(b+168,uint32_t(l.end_game));
     }
     return send_frame(s,b,sizeof(b));
 }
@@ -144,6 +151,23 @@ DWORD session(SOCKET s) {
             if(launch.version==2) {
                 if(backend_result!=ERROR_SUCCESS) code=1;
                 else { report=hostctl::BackendStatus(); code=report.code; have_report=true; }
+            }
+        }
+        // 6 Start: set start mode 1 on the next lobby tick. 7 ServerOwned(u32 enable).
+        if((op==6 && size==48) || (op==7 && size==52)) {
+            code=2;
+            if(launch.version==2) {
+                if(backend_result!=ERROR_SUCCESS) code=1;
+                else if(op==6) { report=hostctl::BackendStart(2000); code=report.code; have_report=true; }
+                else {
+                    const uint32_t enable=u32(request+48);
+                    if(enable>1) code=4;
+                    else {
+                        const DWORD changed=hostctl::BackendServerOwned(enable==1);
+                        report=hostctl::BackendStatus(); have_report=true;
+                        code=changed==ERROR_SUCCESS ? 0 : changed==ERROR_INVALID_FUNCTION ? 1 : 5;
+                    }
+                }
             }
         }
         if((op==3 || op==4 || op==5) && size==112) {

@@ -28,6 +28,7 @@ type controlInfo struct {
 	Connected bool          `json:"connected"`
 	Error     string        `json:"error,omitempty"`
 	Rotation  *rotationInfo `json:"rotation,omitempty"`
+	Lobby     *lobbyInfo    `json:"lobby,omitempty"`
 }
 type contentID struct {
 	AssetID   string `json:"asset_id"`
@@ -182,6 +183,9 @@ func (a *agent) manageHostControl(ctx context.Context, cmd *exec.Cmd) {
 		}
 	}()
 	a.log.Info("host control transport connected", "pid", cmd.Process.Pid)
+	if a.cfg.HostControlNative {
+		go a.runLobby(ctx, session.Bridge, lobbyPoll)
+	}
 	if a.cfg.Playlist != "" {
 		go a.runRotation(ctx, session.Bridge)
 	}

@@ -62,6 +62,19 @@ To rotate automatically, add a playlist to hostagent.json (requires `hostctl_nat
 - `GET /status` shows `host_control.rotation` with `current`, `pending`, `matches`, `selections` and `error`.
 - With a tunnel (for example playit) pointed at 127.0.0.1:1343 in proxy mode, set `"server_ip": "127.0.0.2"`. Otherwise the game server receives the tunnel traffic, the directory marks the host unreachable, and the OpenLink app blocks Join. With this setup, five players (four remote) played three matches that cycled a three-entry playlist (2026-10-04).
 
+## Server-owned lobby and automatic start
+
+By default the first player to join becomes lobby leader, and any player's Play or pause-menu End Game is applied by the server, whether or not that player leads. With a v3 DLL (`hostctl_native`), two options hand the lobby to the server:
+
+```json
+{"server_owned": true, "auto_start": {"min_players": 1, "delay_seconds": 30}}
+```
+
+- `server_owned`: no player becomes lobby leader, and the server drops players' start and end-game requests. Players still see Play and End Game, but they do nothing (Play shows a local 3-2-1 countdown, then nothing happens). Matches still end on their own time or score limit.
+- `auto_start`: once at least `min_players` players are connected (default 1) and have stayed for `delay_seconds` (default 10), the agent starts the match, as a leader's Play would. This repeats in the lobby after every match. Without `server_owned`, a player's Play can still start the match earlier.
+- `GET /status` shows `host_control.lobby`: `lobby.connected` (connected players), `lobby.owner` (leader peer, -1 none), `lobby.start_mode` (1 once a start was requested), `blocked_start` and `blocked_end` (dropped player requests), `starts` and `error`. The agent log line `lobby` records each change.
+- Like selection, this changes the running server process (a code patch and two table hooks, removed when control stops). Operators carry the terms-of-service risk of modifying their server. Clients are not modified.
+
 ## Internal selected-option component
 
 The DLL includes choice_adapter.cpp, a bounded conversion/set/cleanup helper for a future engine-thread backend. It currently has no transport binding and is exercised only by owned native fixtures. It borrows validated native choices and a private prepared variant; the real setter also mutates selector-specific native context. Build/role/context/ownership checks and CMS selection enumeration remain backend prerequisites. Run native/hostctl/test-choice.cmd with a private output directory to test control flow; these tests do not prove game application.

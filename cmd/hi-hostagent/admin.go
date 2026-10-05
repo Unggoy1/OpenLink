@@ -55,6 +55,10 @@ func (a *agent) adminSnapshot() adminStatus {
 			r := *a.rotation
 			st.HostControl.Rotation = &r
 		}
+		if a.lobby != nil {
+			l := *a.lobby
+			st.HostControl.Lobby = &l
+		}
 	}
 	a.mu.Unlock()
 	_, at, n := a.beacons.Latest()

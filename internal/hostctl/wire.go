@@ -13,6 +13,8 @@ const (
 	OpPrepare              uint16 = 3
 	OpPrepareEngine        uint16 = 4
 	OpInitialize           uint16 = 5
+	OpStart                uint16 = 6 // start the lobby's match (start mode 1), HostPreGame only
+	OpServerOwned          uint16 = 7 // disable (1) or restore (0) join-time lobby-owner assignment
 	CodeOK                 uint16 = 0
 	CodeUnsupported        uint16 = 1
 	CodeNativePending      uint16 = 2
@@ -52,11 +54,46 @@ func (p AssetPair) Valid() bool {
 }
 
 type Request struct {
-	Op    uint16
-	ID    uint64
-	Token [32]byte
-	PID   uint32
-	Pair  AssetPair
+	Op     uint16
+	ID     uint64
+	Token  [32]byte
+	PID    uint32
+	Pair   AssetPair
+	Enable bool // OpServerOwned
+}
+
+// Lobby flags (Reply.Lobby.Flags).
+const (
+	LobbyValid       uint32 = 1  // session membership was readable
+	LobbyStartMode   uint32 = 2  // StartMode holds the validated start-mode value
+	LobbyHandler     uint32 = 4  // pregame handler bytes are live
+	LobbyServerOwned uint32 = 8  // join-time lobby-owner assignment is disabled
+	LobbyStartSent   uint32 = 16 // a Start succeeded since the last match began
+)
+
+// Lobby is the DLL's per-tick lobby observation (version 3 replies).
+type Lobby struct {
+	Flags         uint32 `json:"flags"`
+	Connected     int32  `json:"connected"`      // peers in the connected state
+	Peers         int32  `json:"peers"`          // membership peer count
+	PeerMask      uint32 `json:"peer_mask"`      // membership peer bits
+	Owner         int32  `json:"owner"`          // lobby owner (leader) peer, -1 none
+	HostPeer      int32  `json:"host_peer"`      // membership host peer
+	Players       int32  `json:"players"`        // session player count
+	StartMode     int32  `json:"start_mode"`     // 0 none, 1 custom start requested; -1 unknown
+	Allowed       uint8  `json:"allowed"`        // allowed-to-start byte
+	Prepared      uint8  `json:"prepared"`       // pregame handler one-shot bytes
+	PrepStarted   uint8  `json:"prep_started"`   //
+	PrepDone      uint8  `json:"prep_done"`      //
+	Loading       uint8  `json:"loading"`        //
+	Start         uint8  `json:"start"`          // set when the engine decided to start
+	BlockedStart  uint8  `json:"blocked_start"`  // player start requests dropped (server-owned)
+	BlockedEnd    uint8  `json:"blocked_end"`    // player end-game requests dropped (server-owned)
+	UsersRequired int32  `json:"users_required"` // host-init users required to start
+	GameType      int32  `json:"game_type"`      // host-init game type
+	SessionKind   int32  `json:"session_kind"`
+	EndGameTable  int32  `json:"end_game_table"` // RVA of the end-game component table
+	EndGame       int32  `json:"end_game"`       // end-game request value, -1 unknown
 }
 
 type Reply struct {
@@ -73,6 +110,8 @@ type Reply struct {
 	Matches uint32
 	Flags   uint32
 	Pair    AssetPair
+	// Version 3 replies add the lobby observation.
+	Lobby Lobby
 }
 
 func requestSize(r Request) (int, error) {
@@ -85,8 +124,10 @@ func requestSize(r Request) (int, error) {
 			return 0, errors.New("zero server PID")
 		}
 		return 52, nil
-	case OpStatus:
+	case OpStatus, OpStart:
 		return 48, nil
+	case OpServerOwned:
+		return 52, nil
 	case OpPrepare, OpPrepareEngine, OpInitialize:
 		if !r.Pair.Valid() {
 			return 0, errors.New("map and mode require nonzero asset and version IDs")
@@ -114,6 +155,9 @@ func EncodeRequest(w io.Writer, r Request) error {
 	if r.Op == OpPrepare || r.Op == OpPrepareEngine || r.Op == OpInitialize {
 		copy(b[48:], r.Pair[:])
 	}
+	if r.Op == OpServerOwned && r.Enable {
+		binary.LittleEndian.PutUint32(b[48:], 1)
+	}
 	return writeFrame(w, b)
 }
 
@@ -135,9 +179,20 @@ func DecodeRequest(rd io.Reader) (Request, error) {
 			return r, errors.New("invalid hello size")
 		}
 		r.PID = binary.LittleEndian.Uint32(b[48:])
-	case OpStatus:
+	case OpStatus, OpStart:
 		if len(b) != 48 {
 			return r, errors.New("invalid status size")
+		}
+	case OpServerOwned:
+		if len(b) != 52 {
+			return r, errors.New("invalid server-owned size")
+		}
+		switch binary.LittleEndian.Uint32(b[48:]) {
+		case 0:
+		case 1:
+			r.Enable = true
+		default:
+			return r, errors.New("invalid server-owned value")
 		}
 	case OpPrepare, OpPrepareEngine, OpInitialize:
 		if len(b) != 112 {
@@ -169,7 +224,7 @@ func EncodeReply(w io.Writer, r Reply) error {
 
 func DecodeReply(rd io.Reader) (Reply, error) {
 	var r Reply
-	b, err := readFrame(rd, 112)
+	b, err := readFrame(rd, 176)
 	if err != nil {
 		return r, err
 	}
@@ -179,10 +234,13 @@ func DecodeReply(rd io.Reader) (Reply, error) {
 	r.Version = binary.LittleEndian.Uint16(b[4:])
 	switch {
 	case r.Version == 1 && len(b) == 96:
-	case r.Version == 2 && len(b) == 112:
+	case r.Version == 2 && len(b) == 112, r.Version == 3 && len(b) == 176:
 		r.State = int32(binary.LittleEndian.Uint32(b[96:]))
 		r.Matches = binary.LittleEndian.Uint32(b[100:])
 		r.Flags = binary.LittleEndian.Uint32(b[104:])
+		if r.Version == 3 {
+			r.Lobby = decodeLobby(b[112:])
+		}
 	default:
 		return r, errors.New("invalid bridge reply header")
 	}
@@ -196,6 +254,18 @@ func DecodeReply(rd io.Reader) (Reply, error) {
 		return r, errors.New("invalid bridge reply fields")
 	}
 	return r, nil
+}
+
+func decodeLobby(b []byte) Lobby {
+	i32 := func(at int) int32 { return int32(binary.LittleEndian.Uint32(b[at:])) }
+	return Lobby{
+		Flags: binary.LittleEndian.Uint32(b[0:]), Connected: i32(4), Peers: i32(8),
+		PeerMask: binary.LittleEndian.Uint32(b[12:]), Owner: i32(16), HostPeer: i32(20),
+		Players: i32(24), StartMode: i32(28), Allowed: b[32], Prepared: b[33], PrepStarted: b[34],
+		PrepDone: b[35], Loading: b[36], Start: b[37], BlockedStart: b[38], BlockedEnd: b[39],
+		UsersRequired: i32(40), GameType: i32(44), EndGameTable: i32(52), EndGame: i32(56),
+		SessionKind: i32(48),
+	}
 }
 
 func readFrame(rd io.Reader, max uint32) ([]byte, error) {

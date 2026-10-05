@@ -68,6 +68,7 @@ type agent struct {
 	control      hostController
 	controlError string
 	rotation     *rotationInfo // nil without a playlist
+	lobby        *lobbyInfo    // nil until the native backend connects
 }
 
 func (a *agent) setStatus(s string) {

@@ -45,6 +45,11 @@ type config struct {
 	HostControlNative bool   `json:"hostctl_native,omitempty"`
 	// Playlist, with the native backend: map/mode rotation file (internal/playlist).
 	Playlist string `json:"playlist,omitempty"`
+	// ServerOwned, with the native backend: no player becomes lobby leader, so
+	// nobody gets Play or the end-game option. Pair it with AutoStart.
+	ServerOwned bool `json:"server_owned,omitempty"`
+	// AutoStart, with the native backend: the server starts each match itself.
+	AutoStart *autoStart `json:"auto_start,omitempty"`
 
 	Simulate     bool          `json:"-"`
 	Loopback     bool          `json:"-"`
@@ -185,6 +190,9 @@ func loadConfig(fs *flag.FlagSet, args []string) (config, error) {
 	}
 	if c.Playlist != "" && !c.HostControlNative {
 		return c, errors.New("playlist requires hostctl-native")
+	}
+	if (c.ServerOwned || c.AutoStart != nil) && !c.HostControlNative {
+		return c, errors.New("server_owned and auto_start require hostctl-native")
 	}
 	return c, nil
 }

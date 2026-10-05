@@ -23,6 +23,7 @@ import (
 // it exits. If one is already running (existing), it is watched instead.
 func (a *agent) superviseServer(ctx context.Context, in game.Install, serverBind string, existing *game.Owner) {
 	if existing != nil || !a.cfg.Manage {
+		a.markUnmanagedControl()
 		pid := 0
 		if existing != nil {
 			pid = existing.PID
@@ -48,6 +49,9 @@ func (a *agent) superviseServer(ctx context.Context, in game.Install, serverBind
 			a.mu.Unlock()
 			a.setStatus("starting")
 			a.log.Info("server started", "pid", cmd.Process.Pid, "args", cmd.Args[1:])
+			if a.onLaunch != nil {
+				a.onLaunch(cmd.Process)
+			}
 			started := time.Now()
 			a.waitServer(ctx, in, cmd, serverBind)
 			if time.Since(started) > 10*time.Minute {
@@ -55,6 +59,10 @@ func (a *agent) superviseServer(ctx context.Context, in game.Install, serverBind
 			}
 		}
 		if ctx.Err() != nil {
+			return
+		}
+		if !a.cfg.Restart {
+			a.log.Info("single managed launch finished; restart disabled")
 			return
 		}
 		a.log.Info("restarting server", "in", backoff)
@@ -65,7 +73,10 @@ func (a *agent) superviseServer(ctx context.Context, in game.Install, serverBind
 
 func (a *agent) waitServer(ctx context.Context, in game.Install, cmd *exec.Cmd, serverBind string) {
 	logCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
+	controlDone := make(chan struct{})
+	go func() { defer close(controlDone); a.manageHostControl(logCtx, cmd) }()
+	stopControl := func() { cancel(); <-controlDone }
+	defer stopControl()
 	go a.followLog(logCtx, in, cmd.Process.Pid)
 	go a.checkGamePort(logCtx, cmd, serverBind)
 	done := make(chan error, 1)
@@ -75,6 +86,8 @@ func (a *agent) waitServer(ctx context.Context, in game.Install, cmd *exec.Cmd, 
 		a.setStatus("exited")
 		a.log.Warn("server exited", "pid", cmd.Process.Pid, "err", err)
 	case <-ctx.Done():
+		// Complete bounded native cleanup while the owned target still exists.
+		stopControl()
 		if a.cfg.StopServer {
 			a.log.Info("stopping server", "pid", cmd.Process.Pid)
 			cmd.Process.Kill()
@@ -154,6 +167,9 @@ func (a *agent) captureLoop(ctx context.Context) {
 			continue
 		}
 		sleep(ctx, a.cfg.CaptureDelay)
+		if ctx.Err() != nil {
+			return
+		}
 		conn, err := udpx.ListenShared("udp4", fmt.Sprintf("0.0.0.0:%d", api.DiscoveryPort))
 		if err != nil {
 			a.log.Warn("cannot listen for beacons; retrying", "err", err)

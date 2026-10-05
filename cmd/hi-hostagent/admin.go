@@ -37,6 +37,7 @@ type adminStatus struct {
 	LastBeaconAgeS  float64             `json:"last_beacon_age_s"` // -1 = none yet
 	ListingID       string              `json:"listing_id,omitempty"`
 	Reachability    string              `json:"reachability,omitempty"`
+	HostControl     *controlInfo        `json:"host_control,omitempty"`
 }
 
 type banRequest struct {
@@ -48,6 +49,13 @@ func (a *agent) adminSnapshot() adminStatus {
 	a.mu.Lock()
 	st := adminStatus{Version: version, Status: a.status, PID: a.pid, Build: a.build,
 		ListingID: a.listingID, Reachability: a.reachability, Players: -1}
+	if a.cfg.HostControlDLL != "" {
+		st.HostControl = &controlInfo{Native: a.cfg.HostControlNative, Connected: a.control != nil, Error: a.controlError}
+		if a.rotation != nil {
+			r := *a.rotation
+			st.HostControl.Rotation = &r
+		}
+	}
 	a.mu.Unlock()
 	_, at, n := a.beacons.Latest()
 	st.BeaconsCaptured, st.LastBeaconAgeS = n, -1
@@ -72,6 +80,8 @@ func (a *agent) serveAdmin(ctx context.Context) {
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /status", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, 200, a.adminSnapshot()) })
+	mux.HandleFunc("GET /host-control", a.handleControlStatus)
+	mux.HandleFunc("POST /host-control/select", a.handleControlSelect)
 	mux.HandleFunc("GET /bans", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, 200, a.bans.List()) })
 	mux.HandleFunc("POST /kick", func(w http.ResponseWriter, r *http.Request) { a.handleBan(w, r, true) })
 	mux.HandleFunc("POST /ban", func(w http.ResponseWriter, r *http.Request) { a.handleBan(w, r, false) })

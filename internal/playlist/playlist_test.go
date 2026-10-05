@@ -111,3 +111,12 @@ func TestPackagedExample(t *testing.T) {
 		t.Fatalf("packaged playlist example: %v", err)
 	}
 }
+
+func TestThumbRef(t *testing.T) {
+	const asset, version = "70f884d7-6869-469d-b4d2-4219627e2d83", "cc791b4b-054a-4653-9034-5dc13c809c54"
+	f, err := Parse([]byte(`{"schema_version":1,"entries":[{"id":"a","map":{"asset_id":"` + asset + `","version_id":"` + version +
+		`"},"mode":{"asset_id":"` + asset + `","version_id":"` + version + `"}}]}`))
+	if err != nil || f.Entries[0].ThumbRef() != asset+"/"+version {
+		t.Fatalf("ref %q %v", f.Entries[0].ThumbRef(), err)
+	}
+}

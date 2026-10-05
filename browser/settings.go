@@ -18,6 +18,8 @@ type Settings struct {
 	Mode       string   `json:"mode"`       // loopback or broadcast
 	InstallDir string   `json:"installDir"` // empty = search the usual Steam libraries
 	Favorites  []string `json:"favorites"`  // server keys (host:port), stable across re-registration
+	// MuteVoteSound turns off the chime played when a playlist vote opens.
+	MuteVoteSound bool `json:"muteVoteSound"`
 }
 
 func settingsPath() (string, error) {

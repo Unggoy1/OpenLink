@@ -165,3 +165,87 @@ func TestRateLimit(t *testing.T) {
 		t.Fatalf("burst not limited: forwarded %d dropped %d", s.UpPackets, s.Dropped)
 	}
 }
+
+// A player-side forwarder chained to a host-side forwarder, as in the real
+// setup: a message the player side sends upstream reaches the host's
+// InterceptFrom from the same address as the player's game traffic, and a
+// message the host sends to that client is consumed by InterceptDown instead
+// of reaching the game.
+func TestSideChannelThroughSessions(t *testing.T) {
+	server := echoServer(t)
+	defer server.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	type msg struct {
+		b    []byte
+		from string
+	}
+	got := make(chan msg, 4)
+	host := &Forwarder{Listen: loop(t), Upstream: server.LocalAddr().(*net.UDPAddr)}
+	host.InterceptFrom = func(b []byte, client *net.UDPAddr) ([]byte, bool) {
+		if !bytes.HasPrefix(b, []byte("VOTE ")) {
+			return nil, false
+		}
+		got <- msg{append([]byte(nil), b...), client.String()}
+		return nil, true
+	}
+	go host.Run(ctx)
+	downs := make(chan []byte, 4)
+	player := &Forwarder{Listen: loop(t), Upstream: host.Listen.LocalAddr().(*net.UDPAddr)}
+	player.InterceptDown = func(b []byte) bool {
+		if !bytes.HasPrefix(b, []byte("BALLOT ")) {
+			return false
+		}
+		downs <- append([]byte(nil), b...)
+		return true
+	}
+	go player.Run(ctx)
+
+	game := loop(t)
+	defer game.Close()
+	game.WriteToUDP([]byte("game"), player.Listen.LocalAddr().(*net.UDPAddr))
+	game.SetReadDeadline(time.Now().Add(2 * time.Second))
+	buf := make([]byte, 2048)
+	if n, _, err := game.ReadFromUDP(buf); err != nil || string(buf[:n]) != "echo:game" {
+		t.Fatalf("game round trip: %q %v", buf[:n], err)
+	}
+	clients := host.Clients(time.Minute)
+	if len(clients) != 1 || !host.HasSession(clients[0], time.Minute) {
+		t.Fatalf("host sessions %v", clients)
+	}
+	if n := player.SendUpstream([]byte("VOTE 1")); n != 1 {
+		t.Fatalf("sent through %d sessions", n)
+	}
+	select {
+	case m := <-got:
+		if string(m.b) != "VOTE 1" || m.from != clients[0].String() {
+			t.Fatalf("vote %q from %s, session %s", m.b, m.from, clients[0])
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("vote not intercepted")
+	}
+	if err := host.SendTo(clients[0], []byte("BALLOT 1")); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case b := <-downs:
+		if string(b) != "BALLOT 1" {
+			t.Fatalf("ballot %q", b)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("ballot not intercepted")
+	}
+	game.SetReadDeadline(time.Now().Add(300 * time.Millisecond))
+	if n, _, err := game.ReadFromUDP(buf); err == nil {
+		t.Fatalf("ballot leaked to the game: %q", buf[:n])
+	}
+	if s := host.Stats.Snapshot(); s.UpPackets != 1 {
+		t.Fatalf("vote was forwarded to the server: %d up packets", s.UpPackets)
+	}
+	stranger := loop(t)
+	defer stranger.Close()
+	if host.HasSession(stranger.LocalAddr().(*net.UDPAddr), time.Minute) {
+		t.Fatal("stranger has a session")
+	}
+}

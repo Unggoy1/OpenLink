@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import {
+    Ballot,
     CheckUpdate,
     GetSettings,
     Join,
@@ -11,10 +12,12 @@
     SetFavorite,
     Status,
     Version,
+    Vote,
   } from '../wailsjs/go/main/App.js';
   import { BrowserOpenURL } from '../wailsjs/runtime/runtime.js';
   import type { main } from '../wailsjs/go/models';
   import SessionBar from './SessionBar.svelte';
+  import VotePanel from './VotePanel.svelte';
   import SettingsPanel from './SettingsPanel.svelte';
   import logo from './assets/logo-full.png';
 
@@ -24,6 +27,7 @@
   let appVersion = $state('');
   let update = $state<main.UpdateInfo | null>(null);
   let status = $state<main.StatusView | null>(null);
+  let ballot = $state<main.BallotView | null>(null);
   let listError = $state('');
   let actionError = $state('');
   let loading = $state(false);
@@ -95,6 +99,12 @@
   async function leave() {
     await Leave();
     status = null;
+    ballot = null;
+  }
+
+  async function castVote(round: number, choice: number) {
+    await Vote(round, choice);
+    ballot = await Ballot();
   }
 
   async function toggleFavorite(s: main.ServerView) {
@@ -142,10 +152,16 @@
     const listTimer = setInterval(refresh, 15000);
     const statusTimer = setInterval(async () => {
       status = await Status();
+      ballot = status ? await Ballot() : null;
     }, 1000);
+    // Faster while a vote is on screen, so the countdown and tallies stay live.
+    const ballotTimer = setInterval(async () => {
+      if (ballot) ballot = await Ballot();
+    }, 250);
     return () => {
       clearInterval(listTimer);
       clearInterval(statusTimer);
+      clearInterval(ballotTimer);
     };
   });
 </script>
@@ -260,6 +276,9 @@
     {/if}
   </main>
 
+  {#if status && ballot}
+    <VotePanel {ballot} onvote={castVote} />
+  {/if}
   {#if status}
     <SessionBar {status} onleave={leave} />
   {/if}

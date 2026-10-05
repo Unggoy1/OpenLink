@@ -20,6 +20,7 @@ import (
 	"halocommunity/internal/relay"
 	"halocommunity/internal/sim"
 	"halocommunity/internal/udpx"
+	"halocommunity/vote"
 )
 
 // Server is a directory listing.
@@ -85,8 +86,10 @@ type Session struct {
 	fwd     *relay.Forwarder
 	adverts atomic.Int64
 
-	mu      sync.Mutex
-	lastErr string
+	mu       sync.Mutex
+	lastErr  string
+	ballot   vote.Ballot // latest ballot from the host, if any
+	ballotAt time.Time
 }
 
 // Start begins a session. Stop it with Stop.
@@ -133,7 +136,7 @@ func Start(s Server, o Options) (*Session, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	ss := &Session{server: s, local: fmt.Sprintf("%s:%d", local, gamePort), mode: mode,
 		cancel: cancel, done: make(chan struct{})}
-	ss.fwd = &relay.Forwarder{Listen: listen, Upstream: upstream}
+	ss.fwd = &relay.Forwarder{Listen: listen, Upstream: upstream, InterceptDown: ss.takeBallot}
 	dc := directory.NewClient(o.Directory, "")
 
 	var wg sync.WaitGroup
@@ -147,6 +150,41 @@ func Start(s Server, o Options) (*Session, error) {
 	}()
 	go func() { wg.Wait(); close(ss.done) }()
 	return ss, nil
+}
+
+// takeBallot keeps playlist-vote ballots from the host instead of passing
+// them to the game. Any vote-prefixed datagram is consumed.
+func (ss *Session) takeBallot(d []byte) bool {
+	if !vote.Is(d) {
+		return false
+	}
+	if b, ok := vote.DecodeBallot(d); ok {
+		ss.mu.Lock()
+		ss.ballot, ss.ballotAt = b, time.Now()
+		ss.mu.Unlock()
+	}
+	return true
+}
+
+// Ballot returns the latest ballot and when it arrived; ok is false if the
+// host has not sent one. The host repeats ballots about once a second.
+func (ss *Session) Ballot() (b vote.Ballot, at time.Time, ok bool) {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+	return ss.ballot, ss.ballotAt, ss.ballot.Round != 0
+}
+
+// Vote sends the player's choice for a round to the host, through the same
+// socket as the player's game traffic so the host can tell it is a player.
+func (ss *Session) Vote(round uint64, choice int) error {
+	d, err := vote.EncodeCast(vote.Cast{Round: round, Choice: choice})
+	if err != nil {
+		return err
+	}
+	if ss.fwd.SendUpstream(d) == 0 {
+		return errors.New("join the server in Halo Infinite before voting")
+	}
+	return nil
 }
 
 // Stop ends the session and releases its ports.

@@ -76,6 +76,23 @@ By default the first player to join becomes lobby leader, and any player's Play 
 - `GET /status` shows `host_control.lobby`: `lobby.connected` (connected players), `lobby.owner` (leader peer, -1 none), `lobby.start_mode` (1 once a start was requested), `blocked_start` and `blocked_end` (dropped player requests), `starts` and `error`. The agent log line `lobby` records each change.
 - Like selection, this changes the running server process (a code patch and two table hooks, removed when control stops). Operators carry the terms-of-service risk of modifying their server. Clients are not modified.
 
+## Playlist voting
+
+With a playlist, proxy mode (the default) and the native backend, players can vote for the next match in the OpenLink app:
+
+```json
+{"playlist": "playlist.json", "server_owned": true, "vote": {"seconds": 30, "options": 4, "start_delay_seconds": 5}}
+```
+
+- A vote opens when the lobby gets its first player, and again each time a match ends. It offers up to `options` (1-4, default 4) entries drawn at random from the playlist, leaving out the one just played. Give entries a `name`: the app shows it.
+- Players vote in the app; each connected player has one vote and can change it until the vote closes after `seconds` (default 30; players have to switch from the game to the app). Most votes wins; ties and "no votes at all" are decided at random among the leading or offered entries.
+- The winner is selected, and the match starts `start_delay_seconds` later (default 5). `vote` replaces `auto_start` (do not set both).
+- If the lobby empties during a vote, it is cancelled; the next player gets a new one.
+- When a vote opens, the app plays a short chime (players can turn it off in Settings), shows a Windows notification and flashes its taskbar button. Windows may hold notifications back while a game runs full screen (automatic do-not-disturb); the chime still plays.
+- Vote cards show the map's thumbnail, computed from the entry's map asset and version IDs: the app loads `https://blobs-infiniteugc.svc.halowaypoint.com/ugcstorage/map/<asset>/<version>/images/thumbnail.jpg`, then `.png`, and shows no image if neither exists. Nothing to configure; servers send only the map reference and the app loads images from that host only.
+- A player who hosts the server on the same PC must set the app to **LAN broadcast** in Settings: the server owns the discovery port there, so the default loopback announcement never reaches the game.
+- Votes travel as small datagrams on the game port, through the same connection as the player's game traffic, so only players who are in the server can vote. The directory is not involved. `GET /status` shows `host_control.vote` (phase, options, counts, winner).
+
 ## Internal selected-option component
 
 The DLL includes choice_adapter.cpp, a bounded conversion/set/cleanup helper for a future engine-thread backend. It currently has no transport binding and is exercised only by owned native fixtures. It borrows validated native choices and a private prepared variant; the real setter also mutates selector-specific native context. Build/role/context/ownership checks and CMS selection enumeration remain backend prerequisites. Run native/hostctl/test-choice.cmd with a private output directory to test control flow; these tests do not prove game application.

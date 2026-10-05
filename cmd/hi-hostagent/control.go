@@ -29,6 +29,7 @@ type controlInfo struct {
 	Error     string        `json:"error,omitempty"`
 	Rotation  *rotationInfo `json:"rotation,omitempty"`
 	Lobby     *lobbyInfo    `json:"lobby,omitempty"`
+	Vote      *voteInfo     `json:"vote,omitempty"`
 }
 type contentID struct {
 	AssetID   string `json:"asset_id"`
@@ -186,7 +187,10 @@ func (a *agent) manageHostControl(ctx context.Context, cmd *exec.Cmd) {
 	if a.cfg.HostControlNative {
 		go a.runLobby(ctx, session.Bridge, lobbyPoll)
 	}
-	if a.cfg.Playlist != "" {
+	switch {
+	case a.cfg.Vote != nil && a.fwd != nil:
+		go a.runVoting(ctx, session.Bridge)
+	case a.cfg.Playlist != "":
 		go a.runRotation(ctx, session.Bridge)
 	}
 	<-ctx.Done()

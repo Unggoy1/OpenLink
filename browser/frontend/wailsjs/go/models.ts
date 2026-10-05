@@ -1,5 +1,65 @@
 export namespace main {
 	
+	export class VoteOption {
+	    id: string;
+	    name: string;
+	    votes: number;
+	    thumbs: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new VoteOption(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.votes = source["votes"];
+	        this.thumbs = source["thumbs"];
+	    }
+	}
+	export class BallotView {
+	    round: number;
+	    options: VoteOption[];
+	    mine: number;
+	    closed: boolean;
+	    winner: number;
+	    remaining: number;
+	    startsIn: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new BallotView(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.round = source["round"];
+	        this.options = this.convertValues(source["options"], VoteOption);
+	        this.mine = source["mine"];
+	        this.closed = source["closed"];
+	        this.winner = source["winner"];
+	        this.remaining = source["remaining"];
+	        this.startsIn = source["startsIn"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class ServerView {
 	    id: string;
 	    key: string;
@@ -39,6 +99,7 @@ export namespace main {
 	    mode: string;
 	    installDir: string;
 	    favorites: string[];
+	    muteVoteSound: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new Settings(source);
@@ -50,6 +111,7 @@ export namespace main {
 	        this.mode = source["mode"];
 	        this.installDir = source["installDir"];
 	        this.favorites = source["favorites"];
+	        this.muteVoteSound = source["muteVoteSound"];
 	    }
 	}
 	export class StatusView {

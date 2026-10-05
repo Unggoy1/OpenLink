@@ -59,6 +59,10 @@ func (a *agent) adminSnapshot() adminStatus {
 			l := *a.lobby
 			st.HostControl.Lobby = &l
 		}
+		if a.vote != nil {
+			v := *a.vote
+			st.HostControl.Vote = &v
+		}
 	}
 	a.mu.Unlock()
 	_, at, n := a.beacons.Latest()

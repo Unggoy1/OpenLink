@@ -12,6 +12,8 @@ import (
 	"math/rand/v2"
 	"os"
 	"strings"
+
+	"halocommunity/vote"
 )
 
 // Content is one piece of published content: its asset ID and a pinned
@@ -31,6 +33,10 @@ type Entry struct {
 	ModeKind string  `json:"mode_kind,omitempty"` // default "custom"
 	Enabled  *bool   `json:"enabled,omitempty"`   // default true
 }
+
+// ThumbRef is the entry's map thumbnail reference for vote ballots
+// (vote.ThumbURLs builds the URLs from the map's asset and version IDs).
+func (e Entry) ThumbRef() string { return vote.MapThumbRef(e.Map.AssetID, e.Map.VersionID) }
 
 func (e Entry) enabled() bool { return e.Enabled == nil || *e.Enabled }
 

@@ -54,6 +54,9 @@ type config struct {
 	LobbyOwner string `json:"lobby_owner,omitempty"`
 	// AutoStart, with the native backend: the server starts each match itself.
 	AutoStart *autoStart `json:"auto_start,omitempty"`
+	// Vote, with a playlist and proxy mode: players vote in the OpenLink app
+	// for the next match, which then starts by itself. Replaces AutoStart.
+	Vote *voteConfig `json:"vote,omitempty"`
 
 	Simulate     bool          `json:"-"`
 	Loopback     bool          `json:"-"`
@@ -197,6 +200,12 @@ func loadConfig(fs *flag.FlagSet, args []string) (config, error) {
 	}
 	if (c.ServerOwned || c.AutoStart != nil) && !c.HostControlNative {
 		return c, errors.New("server_owned and auto_start require hostctl-native")
+	}
+	if c.Vote != nil && (c.Playlist == "" || !c.Proxy) {
+		return c, errors.New("vote requires a playlist and proxy mode")
+	}
+	if c.Vote != nil && c.AutoStart != nil {
+		return c, errors.New("use vote or auto_start, not both: vote starts each match after the vote")
 	}
 	if c.LobbyOwner != "" && c.LobbyOwner != "none" && c.LobbyOwner != "first_player" {
 		return c, errors.New("lobby_owner must be none or first_player")

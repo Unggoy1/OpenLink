@@ -56,7 +56,15 @@ func TestForwardRoundTripTwoClients(t *testing.T) {
 			t.Fatalf("%s: wrong reply", name)
 		}
 	}
-	s := f.Stats.Snapshot()
+	// The forwarder counts a reply after sending it, so the client can read
+	// the reply before the count is updated: wait briefly for the stats.
+	var s Snapshot
+	for deadline := time.Now().Add(time.Second); ; time.Sleep(5 * time.Millisecond) {
+		s = f.Stats.Snapshot()
+		if s.UpPackets == 2 && s.DownPackets == 2 && s.Sessions == 2 || time.Now().After(deadline) {
+			break
+		}
+	}
 	if s.UpPackets != 2 || s.DownPackets != 2 || s.Sessions != 2 {
 		t.Fatalf("stats %+v", s)
 	}

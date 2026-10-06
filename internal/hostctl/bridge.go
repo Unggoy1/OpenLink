@@ -149,6 +149,12 @@ func (b *Bridge) SetLeader(ctx context.Context, xuid uint64) (Reply, error) {
 	return b.send(ctx, Request{Op: OpSetLeader, XUID: xuid})
 }
 
+// TeamPolicy sets the server's team rules (TeamGuardFFA, TeamBalance). CodeOK
+// once stored; the engine tick applies them. CodeInvalid for unknown flags.
+func (b *Bridge) TeamPolicy(ctx context.Context, flags uint32) (Reply, error) {
+	return b.send(ctx, Request{Op: OpTeamPolicy, Teams: flags})
+}
+
 func (b *Bridge) exchange(ctx context.Context, op uint16, pair AssetPair) (Reply, error) {
 	return b.send(ctx, Request{Op: op, Pair: pair})
 }

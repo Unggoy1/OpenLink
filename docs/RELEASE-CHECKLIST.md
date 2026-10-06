@@ -90,7 +90,8 @@ Run a voting server with the local directory (as in R023) and join it with the O
 
 ## 4. Work still to do
 
-- [ ] **FFA modes: players cannot kill each other** (R024): scoreboard correct, team modes fine on the same build. First test the same FFA mode as an ordinary LAN custom game without OpenLink Server, then fix the mode or the selection path.
+- [ ] **FFA modes: players cannot kill each other** (R024): scoreboard correct, team modes fine on the same build. With bots, FFA damage works on OpenLink (R026), and one player gets their own team (R027). Needs a two-player test with the team diagnostics; the server's FFA team guard now keeps every player on their own team.
+- [ ] **Team balance** (`team_balance`, default on): works for one player (R028: moved to Eagle at match prep, Hades from the previous match did not carry over, in-match changes still work). Still check an even split with two or more players. Later: a per-entry team count for multi-team modes (custom games now allow up to 8 teams).
 - [ ] **Block Restart Match on the server** under `server_owned` (backstop): players no longer see Restart Match since the server holds the lobby leader (R025), but the server still applies a restart request (simulation event 0x58, FN026); only start and end game are dropped today.
 - [x] **Lobby map/mode picker**: fixed by the server-held lobby leader; Map and Mode Editor are greyed for every player (R025).
 - [ ] **Docs pass**:

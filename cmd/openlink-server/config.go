@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"halocommunity/internal/api"
+	"halocommunity/internal/hostctl"
 )
 
 // config is the agent's settings. Every field can be set in openlink-server.json;
@@ -65,6 +66,10 @@ type config struct {
 	// server keeps as LAN lobby leader so that no player is leader (no lobby
 	// options, map/mode menus, Play or End Game). 0 = defaultLobbyLeader.
 	LobbyLeaderXUID uint64 `json:"lobby_leader_xuid,omitempty"`
+	// TeamBalance: in team modes, put players on Eagle and Cobra evenly at the
+	// start of every match (default true; false keeps their own picks). FFA
+	// modes always keep every player on their own team.
+	TeamBalance *bool `json:"team_balance,omitempty"`
 	// AutoStart: the server starts each match itself.
 	AutoStart *autoStart `json:"auto_start,omitempty"`
 	// Vote, with a playlist and proxy mode: players vote in the OpenLink app
@@ -257,6 +262,14 @@ func (c config) lobbyOwner() string {
 		return "none"
 	}
 	return c.LobbyOwner
+}
+
+// teamPolicy is the OpTeamPolicy flags for this config.
+func (c config) teamPolicy() uint32 {
+	if c.TeamBalance != nil && !*c.TeamBalance {
+		return hostctl.TeamGuardFFA
+	}
+	return hostctl.TeamGuardFFA | hostctl.TeamBalance
 }
 
 // defaultLobbyLeader is the placeholder lobby leader XUID: Xbox user format

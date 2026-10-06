@@ -19,6 +19,7 @@ type lobbyFake struct {
 	starts    int
 	mode      uint32
 	leaders   []uint64
+	policies  []uint32
 	startMode int32
 	done      chan struct{}
 }
@@ -44,6 +45,32 @@ func (f *lobbyFake) Start(context.Context) (hostctl.Reply, error) {
 func (f *lobbyFake) ServerOwned(_ context.Context, mode uint32) (hostctl.Reply, error) {
 	f.mode = mode
 	return hostctl.Reply{Version: 3, Code: hostctl.CodeOK}, nil
+}
+
+func (f *lobbyFake) TeamPolicy(_ context.Context, flags uint32) (hostctl.Reply, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.policies = append(f.policies, flags)
+	return hostctl.Reply{Version: 5, Code: hostctl.CodeOK}, nil
+}
+
+func TestTeamPolicySentFromConfig(t *testing.T) {
+	off := false
+	for _, c := range []struct {
+		balance *bool
+		want    uint32
+	}{{nil, hostctl.TeamGuardFFA | hostctl.TeamBalance}, {&off, hostctl.TeamGuardFFA}} {
+		f := &lobbyFake{connected: []int32{0}, done: make(chan struct{})}
+		a := &agent{cfg: config{TeamBalance: c.balance}, log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+		ctx, cancel := context.WithCancel(context.Background())
+		go func() { <-f.done; cancel() }()
+		a.runLobby(ctx, f, time.Millisecond)
+		f.mu.Lock()
+		if len(f.policies) != 1 || f.policies[0] != c.want {
+			t.Errorf("team_balance %v: policies %v, want [%d]", c.balance, f.policies, c.want)
+		}
+		f.mu.Unlock()
+	}
 }
 
 // SetLeader answers Pending once (no tick yet), then OK.

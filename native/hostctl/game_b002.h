@@ -60,6 +60,18 @@ struct LobbyProbe {
     int32_t end_game;       // its value (+0xc8 byte), -1 unknown
     uint64_t leader;        // lobby leader XUID (simulation+0xb4ba60 +0xc8), 0 none/unknown
     uint32_t leader_sets;   // times the tick re-asserted the server's leader (saturating)
+    // Team diagnostics (read-only, FFA/team investigation). Teams-enabled bytes are
+    // variant+0x10bc: -1 when that variant is absent. lobby = simulation+0x542c0
+    // component (+0xd0), game = loaded game globals (*145121d28 + idx*0x1134f0 + 0x28).
+    int8_t lobby_variant_teams,game_variant_teams;
+    uint8_t last_teams_enabled; // 144dcf9ac: teams-enabled the last team assignment used (140c82890)
+    uint8_t team_fixes;         // FFA team guard corrections (TickTeamGuard), saturating
+    int32_t last_team_count;    // 144dcf9b0: team count it used
+    int32_t forced_team_count;  // 144dc340c: >0 forces team = peer % count at start (142fc426c)
+    int32_t game_state;         // loaded game globals +0 (1404f178c tests 3), -1 unknown
+    // Per peer 0-15 (session + i*0x1470): requested team +0x2505, assigned +0x2cf5,
+    // host/selected +0x2cf6 (142ebfcbc). -1 also when the peer is absent.
+    int8_t peer_team[16][3];
 };
 
 struct BackendReport {
@@ -129,6 +141,12 @@ BackendReport BackendSetName(const uint16_t* units,uint32_t wait_ms) noexcept;
 // (it is still applied later), Unsupported if the component differs, Pending
 // if no tick ran within wait_ms (at most 2000).
 BackendReport BackendSetLeader(uint64_t xuid,uint32_t wait_ms) noexcept;
+// Server team rules (team_guard.h TeamPolicyFlag), applied on the engine tick:
+// TeamGuardFfa (on by default) keeps every player on its own team in FFA modes;
+// TeamBalance puts the non-observers of a team mode on Eagle/Cobra alternately
+// once per match before spawn and clears carried-over team requests.
+// ERROR_INVALID_PARAMETER for unknown flags.
+uint32_t BackendTeamPolicy(uint32_t flags) noexcept;
 // Cancels pending work and restores our table slot; module remains pinned so
 // a callback already fetched by another thread still has a valid target.
 uint32_t StopGameBackend() noexcept;

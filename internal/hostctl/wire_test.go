@@ -3,6 +3,7 @@ package hostctl
 import (
 	"bytes"
 	"encoding/binary"
+	"io"
 	"strings"
 	"testing"
 )
@@ -255,5 +256,52 @@ func TestReplyVersion4Leader(t *testing.T) {
 	writeFrame(&short, b[:176])
 	if _, err := DecodeReply(&short); err == nil {
 		t.Fatal("accepted v4 header on a v3-length frame")
+	}
+}
+
+// Version 5 replies add team diagnostics at 192.
+func TestReplyVersion5Teams(t *testing.T) {
+	b := make([]byte, 256)
+	copy(b, "HICR")
+	binary.LittleEndian.PutUint16(b[4:], 5)
+	binary.LittleEndian.PutUint64(b[8:], 9)
+	binary.LittleEndian.PutUint32(b[16:], 70)
+	binary.LittleEndian.PutUint32(b[112:], LobbyValid)
+	binary.LittleEndian.PutUint32(b[124:], 0b101)
+	binary.LittleEndian.PutUint64(b[176:], 7)
+	b[192], b[193], b[194], b[195] = 1, 0xff, 1, 2
+	binary.LittleEndian.PutUint32(b[196:], 8)
+	binary.LittleEndian.PutUint32(b[204:], 3)
+	for i := 208; i < 256; i++ {
+		b[i] = 0xff
+	}
+	b[208], b[209], b[210] = 0xff, 0, 0  // peer 0
+	b[214], b[215], b[216] = 31, 1, 0xff // peer 2
+	var w bytes.Buffer
+	writeFrame(&w, b)
+	got, err := DecodeReply(&w)
+	l := got.Lobby
+	if err != nil || got.Version != 5 || l.Leader != 7 || l.LobbyVariantTeams != 1 || l.GameVariantTeams != -1 ||
+		l.LastTeamsEnabled != 1 || l.TeamFixes != 2 || l.LastTeamCount != 8 || l.GameState != 3 || l.PeerTeams[2] != [3]int8{31, 1, -1} {
+		t.Fatalf("v5 decode: %+v %v", l, err)
+	}
+	if s := l.TeamSummary(); s != "0:-1/0/0 2:31/1/-1" {
+		t.Fatalf("summary %q", s)
+	}
+}
+
+func TestTeamPolicyRequest(t *testing.T) {
+	for _, flags := range []uint32{0, TeamGuardFFA, TeamGuardFFA | TeamBalance} {
+		var w bytes.Buffer
+		if err := EncodeRequest(&w, Request{Op: OpTeamPolicy, ID: 2, Teams: flags}); err != nil {
+			t.Fatal(err)
+		}
+		got, err := DecodeRequest(&w)
+		if err != nil || got.Op != OpTeamPolicy || got.Teams != flags {
+			t.Fatalf("round trip %d: %+v %v", flags, got, err)
+		}
+	}
+	if err := EncodeRequest(io.Discard, Request{Op: OpTeamPolicy, ID: 2, Teams: 4}); err == nil {
+		t.Fatal("unknown team policy flag accepted")
 	}
 }

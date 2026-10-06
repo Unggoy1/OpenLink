@@ -7,6 +7,7 @@ Status as of 2026-10-05. Tick items as they are done and note the date and how i
 Tested live (one player, one PC, unless noted):
 
 - Player detection, server auto start, no lobby leader (`server_owned`), the server blocks a player's Play / End Game, natural match end, last player leaving (R019).
+- Server-held lobby leader (`server_owned`, default lobby owner): players get no lobby options, map/mode menus or Play, and no End Game or Restart Match in the pause menu; holds through a full match cycle (R025, FN027). More players not needed (user decision).
 - Playlist voting end to end with one voter, the chime, the Windows notification (held by Windows' do-not-disturb while gaming), taskbar flash (R021, user).
 - Remote players on Windows and Linux/Proton played several matches through a tunnel (older test, before lobby control and voting).
 - Server name in Halo's in-game list: shown in capitals, cut after about 38 characters (R022).
@@ -89,6 +90,9 @@ Run a voting server with the local directory (as in R023) and join it with the O
 
 ## 4. Work still to do
 
+- [ ] **FFA modes: players cannot kill each other** (R024): scoreboard correct, team modes fine on the same build. First test the same FFA mode as an ordinary LAN custom game without OpenLink Server, then fix the mode or the selection path.
+- [ ] **Block Restart Match on the server** under `server_owned` (backstop): players no longer see Restart Match since the server holds the lobby leader (R025), but the server still applies a restart request (simulation event 0x58, FN026); only start and end game are dropped today.
+- [x] **Lobby map/mode picker**: fixed by the server-held lobby leader; Map and Mode Editor are greyed for every player (R025).
 - [ ] **Docs pass**:
   - [ ] README "Status and known limitations": lobby control, voting, the overlay and the Linux app now exist.
   - [ ] A playlist.json reference for hosts (limits below).

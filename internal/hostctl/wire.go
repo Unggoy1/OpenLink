@@ -18,6 +18,7 @@ const (
 	OpStart                uint16 = 6 // start the lobby's match (start mode 1), HostPreGame only
 	OpServerOwned          uint16 = 7 // lobby control mode (ServerOwned* constants)
 	OpSetName              uint16 = 8 // name in the in-game server list (ValidName)
+	OpSetLeader            uint16 = 9 // lobby leader XUID the server holds (0 releases it)
 	CodeOK                 uint16 = 0
 	CodeUnsupported        uint16 = 1
 	CodeNativePending      uint16 = 2
@@ -64,6 +65,7 @@ type Request struct {
 	Pair  AssetPair
 	Mode  uint32 // OpServerOwned
 	Name  string // OpSetName
+	XUID  uint64 // OpSetLeader
 }
 
 // MaxNameLength is the longest in-game server name (api.GameName).
@@ -83,7 +85,6 @@ func ValidName(s string) bool {
 	return true
 }
 
-
 // OpServerOwned modes.
 const (
 	ServerOwnedOff         uint32 = 0 // stock lobby: owner assigned, player requests applied
@@ -94,15 +95,18 @@ const (
 
 // Lobby flags (Reply.Lobby.Flags).
 const (
-	LobbyValid       uint32 = 1  // session membership was readable
-	LobbyStartMode   uint32 = 2  // StartMode holds the validated start-mode value
-	LobbyHandler     uint32 = 4  // pregame handler bytes are live
-	LobbyServerOwned uint32 = 8  // join-time lobby-owner assignment is disabled
-	LobbyStartSent   uint32 = 16 // a Start succeeded since the last match began
-	LobbyNoOwner     uint32 = 32 // join-time lobby-owner assignment is disabled
+	LobbyValid       uint32 = 1   // session membership was readable
+	LobbyStartMode   uint32 = 2   // StartMode holds the validated start-mode value
+	LobbyHandler     uint32 = 4   // pregame handler bytes are live
+	LobbyServerOwned uint32 = 8   // join-time lobby-owner assignment is disabled
+	LobbyStartSent   uint32 = 16  // a Start succeeded since the last match began
+	LobbyNoOwner     uint32 = 32  // join-time lobby-owner assignment is disabled
+	LobbyLeaderValid uint32 = 64  // Leader holds the validated leader component value
+	LobbyLeaderHeld  uint32 = 128 // the XUID sent with OpSetLeader is the current leader
 )
 
-// Lobby is the DLL's per-tick lobby observation (version 3 replies).
+// Lobby is the DLL's per-tick lobby observation (version 3 and 4 replies;
+// Leader and LeaderSets only in version 4).
 type Lobby struct {
 	Flags         uint32 `json:"flags"`
 	Connected     int32  `json:"connected"`      // peers in the connected state
@@ -125,6 +129,8 @@ type Lobby struct {
 	SessionKind   int32  `json:"session_kind"`
 	EndGameTable  int32  `json:"end_game_table"` // RVA of the end-game component table
 	EndGame       int32  `json:"end_game"`       // end-game request value, -1 unknown
+	Leader        uint64 `json:"leader"`         // lobby leader XUID, 0 none or unknown
+	LeaderSets    uint32 `json:"leader_sets"`    // times the server re-asserted its leader (OpSetLeader)
 }
 
 type Reply struct {
@@ -167,6 +173,8 @@ func requestSize(r Request) (int, error) {
 			return 0, errors.New("server name must be 1-47 printable ASCII characters")
 		}
 		return 48 + MaxNameLength + 1, nil
+	case OpSetLeader:
+		return 56, nil
 	case OpPrepare, OpPrepareEngine, OpInitialize:
 		if !r.Pair.Valid() {
 			return 0, errors.New("map and mode require nonzero asset and version IDs")
@@ -199,6 +207,9 @@ func EncodeRequest(w io.Writer, r Request) error {
 	}
 	if r.Op == OpSetName {
 		copy(b[48:], r.Name) // zero-padded; the last byte stays the terminator
+	}
+	if r.Op == OpSetLeader {
+		binary.LittleEndian.PutUint64(b[48:], r.XUID)
 	}
 	return writeFrame(w, b)
 }
@@ -247,6 +258,11 @@ func DecodeRequest(rd io.Reader) (Request, error) {
 			}
 		}
 		r.Name = string(field[:n])
+	case OpSetLeader:
+		if len(b) != 56 {
+			return r, errors.New("invalid set-leader size")
+		}
+		r.XUID = binary.LittleEndian.Uint64(b[48:])
 	case OpPrepare, OpPrepareEngine, OpInitialize:
 		if len(b) != 112 {
 			return r, errors.New("invalid prepare size")
@@ -277,7 +293,7 @@ func EncodeReply(w io.Writer, r Reply) error {
 
 func DecodeReply(rd io.Reader) (Reply, error) {
 	var r Reply
-	b, err := readFrame(rd, 176)
+	b, err := readFrame(rd, 192)
 	if err != nil {
 		return r, err
 	}
@@ -287,12 +303,16 @@ func DecodeReply(rd io.Reader) (Reply, error) {
 	r.Version = binary.LittleEndian.Uint16(b[4:])
 	switch {
 	case r.Version == 1 && len(b) == 96:
-	case r.Version == 2 && len(b) == 112, r.Version == 3 && len(b) == 176:
+	case r.Version == 2 && len(b) == 112, r.Version == 3 && len(b) == 176, r.Version == 4 && len(b) == 192:
 		r.State = int32(binary.LittleEndian.Uint32(b[96:]))
 		r.Matches = binary.LittleEndian.Uint32(b[100:])
 		r.Flags = binary.LittleEndian.Uint32(b[104:])
-		if r.Version == 3 {
+		if r.Version >= 3 {
 			r.Lobby = decodeLobby(b[112:])
+		}
+		if r.Version == 4 {
+			r.Lobby.Leader = binary.LittleEndian.Uint64(b[176:])
+			r.Lobby.LeaderSets = binary.LittleEndian.Uint32(b[184:])
 		}
 	default:
 		return r, errors.New("invalid bridge reply header")

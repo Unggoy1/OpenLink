@@ -150,3 +150,30 @@ func TestConfigDescription(t *testing.T) {
 		t.Fatal("121-character description accepted")
 	}
 }
+
+func TestConfigLobbyLeader(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "openlink-server.json")
+	load := func(doc string) (config, error) {
+		os.WriteFile(path, []byte(doc), 0o600)
+		return loadConfig(flag.NewFlagSet("t", flag.ContinueOnError), []string{"-config", path})
+	}
+	for doc, want := range map[string]uint64{
+		`{"name": "x"}`:                       0,
+		`{"name": "x", "server_owned": true}`: defaultLobbyLeader,
+		`{"name": "x", "server_owned": true, "lobby_owner": "first_player"}`:         0,
+		`{"name": "x", "server_owned": true, "lobby_leader_xuid": 2533274962600518}`: 2533274962600518,
+	} {
+		c, err := load(doc)
+		if err != nil || c.lobbyLeader() != want {
+			t.Errorf("%s: leader %d, want %d (%v)", doc, c.lobbyLeader(), want, err)
+		}
+	}
+	for _, doc := range []string{
+		`{"name": "x", "lobby_leader_xuid": 5}`,
+		`{"name": "x", "server_owned": true, "lobby_owner": "first_player", "lobby_leader_xuid": 5}`,
+	} {
+		if _, err := load(doc); err == nil {
+			t.Errorf("%s accepted", doc)
+		}
+	}
+}

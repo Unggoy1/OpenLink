@@ -36,6 +36,7 @@ type lobbyController interface {
 	Status(context.Context) (hostctl.Reply, error)
 	Start(context.Context) (hostctl.Reply, error)
 	ServerOwned(context.Context, uint32) (hostctl.Reply, error)
+	SetLeader(context.Context, uint64) (hostctl.Reply, error)
 }
 
 // lobbyInfo is the lobby state shown by the admin API.
@@ -59,6 +60,34 @@ func (a *agent) setLobby(update func(*lobbyInfo)) {
 
 const lobbyPoll = time.Second
 
+// holdLeader makes the server keep the LAN lobby leader role with a placeholder
+// XUID, so no player is leader. The DLL keeps re-asserting it on every engine
+// tick, so a lobby that does not exist yet (Busy) still gets it later.
+func (a *agent) holdLeader(ctx context.Context, controller lobbyController, xuid uint64, retry time.Duration) {
+	for attempt := 0; attempt < 10 && ctx.Err() == nil && !controller.Closed(); attempt++ {
+		request, cancel := context.WithTimeout(ctx, 4*time.Second)
+		reply, err := controller.SetLeader(request, xuid)
+		cancel()
+		switch {
+		case err != nil:
+			a.log.Error("lobby leader not held; the first player to join becomes leader", "err", err)
+			a.setLobby(func(l *lobbyInfo) { l.Error = "lobby leader failed" })
+			return
+		case reply.Code == hostctl.CodeOK:
+			a.log.Info("server holds the lobby leader role: no player gets lobby options, map/mode menus, Play or End Game", "leader_xuid", xuid)
+			return
+		case reply.Code == hostctl.CodeBusy:
+			a.log.Info("server will hold the lobby leader role once the lobby exists", "leader_xuid", xuid)
+			return
+		case reply.Code != hostctl.CodeNativePending:
+			a.log.Error("lobby leader not held; the first player to join becomes leader", "code", reply.Code)
+			a.setLobby(func(l *lobbyInfo) { l.Error = "lobby leader failed" })
+			return
+		}
+		sleep(ctx, retry)
+	}
+}
+
 // runLobby makes the server own its lobby (no player becomes leader) when
 // configured, logs lobby changes, and with auto_start starts each match once
 // enough players stay connected for the delay.
@@ -78,6 +107,9 @@ func (a *agent) runLobby(ctx context.Context, controller lobbyController, poll t
 		} else {
 			a.log.Info("server owns the lobby: player start and end-game requests are dropped", "lobby_owner", a.cfg.lobbyOwner())
 			a.setLobby(func(l *lobbyInfo) { l.ServerOwned = true })
+			if xuid := a.cfg.lobbyLeader(); xuid != 0 {
+				a.holdLeader(ctx, controller, xuid, poll)
+			}
 		}
 	}
 	var last hostctl.Lobby
@@ -104,7 +136,8 @@ func (a *agent) runLobby(ctx context.Context, controller lobbyController, poll t
 				"allowed", l.Allowed, "prepared", l.Prepared, "prep", [2]int{int(l.PrepStarted), int(l.PrepDone)},
 				"loading", l.Loading, "start", l.Start, "users_required", l.UsersRequired,
 				"game_type", l.GameType, "session_kind", l.SessionKind, "flags", l.Flags,
-				"blocked_start", l.BlockedStart, "blocked_end", l.BlockedEnd, "end_game", l.EndGame, "end_game_table", fmt.Sprintf("%#x", l.EndGameTable))
+				"blocked_start", l.BlockedStart, "blocked_end", l.BlockedEnd, "end_game", l.EndGame, "end_game_table", fmt.Sprintf("%#x", l.EndGameTable),
+				"leader", l.Leader, "leader_held", l.Flags&hostctl.LobbyLeaderHeld != 0, "leader_sets", l.LeaderSets)
 			last, lastState = l, st.State
 		}
 		if a.cfg.AutoStart == nil {

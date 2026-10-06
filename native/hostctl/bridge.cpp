@@ -74,8 +74,9 @@ int read_frame(SOCKET s,uint8_t* p,unsigned capacity,unsigned& size,bool allow_i
     return read_all(s,p,size);
 }
 bool reply(SOCKET s,uint16_t code,uint64_t id,const hostctl::BackendReport* report=nullptr) {
-    // v3: v2 layout (lifecycle state, match count, backend flags) plus the lobby probe at 112.
-    uint8_t b[176]={}; std::memcpy(b,"HICR",4); p16(b+4,3); p16(b+6,code);
+    // v4: v2 layout (lifecycle state, match count, backend flags), the lobby probe at 112,
+    // lobby leader XUID at 176 and leader re-asserts at 184.
+    uint8_t b[192]={}; std::memcpy(b,"HICR",4); p16(b+4,4); p16(b+6,code);
     p64(b+8,id); p32(b+16,GetCurrentProcessId());
     if(report) {
         p32(b+20,report->gates); p64(b+24,report->generation);
@@ -89,6 +90,7 @@ bool reply(SOCKET s,uint16_t code,uint64_t id,const hostctl::BackendReport* repo
         b[150]=l.blocked_start; b[151]=l.blocked_end;
         p32(b+152,uint32_t(l.users_required)); p32(b+156,uint32_t(l.game_type)); p32(b+160,uint32_t(l.session_kind));
         p32(b+164,uint32_t(l.end_game_table)); p32(b+168,uint32_t(l.end_game));
+        p64(b+176,l.leader); p32(b+184,l.leader_sets);
     }
     return send_frame(s,b,sizeof(b));
 }
@@ -180,6 +182,14 @@ DWORD session(SOCKET s) {
                     if(backend_result!=ERROR_SUCCESS) code=1;
                     else { report=hostctl::BackendSetName(units,2000); code=report.code; have_report=true; }
                 }
+            }
+        }
+        // 9 SetLeader: u64 lobby leader XUID the server holds; 0 releases it.
+        if(op==9 && size==56) {
+            code=2;
+            if(launch.version==2) {
+                if(backend_result!=ERROR_SUCCESS) code=1;
+                else { report=hostctl::BackendSetLeader(u64(request+48),2000); code=report.code; have_report=true; }
             }
         }
         if((op==3 || op==4 || op==5) && size==112) {

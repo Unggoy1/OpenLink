@@ -216,3 +216,44 @@ func TestSetNameRequest(t *testing.T) {
 	}
 }
 
+func TestSetLeaderRequest(t *testing.T) {
+	for _, xuid := range []uint64{0, 2533274962600518, ^uint64(0)} {
+		var w bytes.Buffer
+		if err := EncodeRequest(&w, Request{Op: OpSetLeader, ID: 2, XUID: xuid}); err != nil {
+			t.Fatal(err)
+		}
+		if w.Len() != 4+56 {
+			t.Fatalf("set-leader frame is %d bytes", w.Len())
+		}
+		got, err := DecodeRequest(&w)
+		if err != nil || got.Op != OpSetLeader || got.XUID != xuid {
+			t.Fatalf("round trip %d: %+v %v", xuid, got, err)
+		}
+	}
+}
+
+// Version 4 replies add the lobby leader XUID at 176 and re-asserts at 184.
+func TestReplyVersion4Leader(t *testing.T) {
+	b := make([]byte, 192)
+	copy(b, "HICR")
+	binary.LittleEndian.PutUint16(b[4:], 4)
+	binary.LittleEndian.PutUint64(b[8:], 9)
+	binary.LittleEndian.PutUint32(b[16:], 70)
+	binary.LittleEndian.PutUint32(b[112:], LobbyValid|LobbyLeaderValid|LobbyLeaderHeld)
+	binary.LittleEndian.PutUint32(b[116:], 2)
+	binary.LittleEndian.PutUint64(b[176:], 2533274962600518)
+	binary.LittleEndian.PutUint32(b[184:], 3)
+	var w bytes.Buffer
+	writeFrame(&w, b)
+	got, err := DecodeReply(&w)
+	l := got.Lobby
+	if err != nil || got.Version != 4 || l.Connected != 2 || l.Leader != 2533274962600518 || l.LeaderSets != 3 ||
+		l.Flags != LobbyValid|LobbyLeaderValid|LobbyLeaderHeld {
+		t.Fatalf("v4 decode: %+v %v", got, err)
+	}
+	var short bytes.Buffer
+	writeFrame(&short, b[:176])
+	if _, err := DecodeReply(&short); err == nil {
+		t.Fatal("accepted v4 header on a v3-length frame")
+	}
+}

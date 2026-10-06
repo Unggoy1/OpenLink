@@ -84,7 +84,9 @@ bool ValidateImage(uintptr_t base) noexcept {
         {kServerTick,{0x40,0x53,0x48,0x83,0xec,0x20,0x48,0x8b,0xd9,0xe8,0xca,0x06,0x00,0x00,0x48,0x8b}},
         {0x2e1d270,{0x40,0x53,0x48,0x83,0xec,0x20,0x4c,0x8b,0xca,0x48,0x8b,0xd9,0x45,0x33,0xc0,0xe8}},
         {0x2e0d870,{0x40,0x53,0x48,0x83,0xec,0x20,0x8b,0x81,0xc8,0x00,0x00,0x00,0x48,0x8b,0xd9,0x3b}},
-        {0x2e0dcb8,{0x40,0x53,0x48,0x83,0xec,0x20,0x44,0x0f,0xb6,0x81,0xc8,0x00,0x00,0x00,0x48,0x8b}}
+        {0x2e0dcb8,{0x40,0x53,0x48,0x83,0xec,0x20,0x44,0x0f,0xb6,0x81,0xc8,0x00,0x00,0x00,0x48,0x8b}},
+        // qword Set 142e1d39c past its shared prologue: mov rax,[rbx+c8]; cmp rax,[r9]; jnz; test [rbx+c0],1
+        {0x2e1d3b4,{0x48,0x8b,0x83,0xc8,0x00,0x00,0x00,0x49,0x3b,0x01,0x75,0x09,0xf6,0x83,0xc0,0x00}}
     };
     for(const auto& target:targets) {
         uint8_t observed[16]={}; MEMORY_BASIC_INFORMATION region={};
@@ -92,8 +94,11 @@ bool ValidateImage(uintptr_t base) noexcept {
             !(region.Protect&(PAGE_EXECUTE|PAGE_EXECUTE_READ|PAGE_EXECUTE_READWRITE|PAGE_EXECUTE_WRITECOPY)) ||
             !CopyAddress(base+target.rva,observed,sizeof(observed)) || std::memcmp(observed,target.bytes,sizeof(observed))) return false;
     }
-    uintptr_t tick=0,getter=0,setter=0,requested=0,request=0,apply=0,int_getter=0,int_set=0,int_apply=0,byte_apply=0;
-    return Read(base+0x3d44a80+0xa0,int_getter) && int_getter==base+0x4e5cec &&
+    uintptr_t tick=0,getter=0,setter=0,requested=0,request=0,apply=0,int_getter=0,int_set=0,int_apply=0,byte_apply=0,
+        qword_getter=0,qword_set=0;
+    return Read(base+0x3d45040+0xa0,qword_getter) && qword_getter==base+0x4e5cec &&
+        Read(base+0x3d45040+0xb0,qword_set) && qword_set==base+0x2e1d39c &&
+        Read(base+0x3d44a80+0xa0,int_getter) && int_getter==base+0x4e5cec &&
         Read(base+0x3d44a80+0xb0,int_set) && int_set==base+0x2e1d270 &&
         Read(base+0x3d44a80+0x78,int_apply) && int_apply==base+0x2e0d870 &&
         Read(base+0x3e06a20+0x78,byte_apply) && byte_apply==base+0x2e0dcb8 &&
@@ -141,6 +146,25 @@ uint8_t HookByteApply(void* component,const uint8_t* value) {
     return reinterpret_cast<ByteApply>(image.load(std::memory_order_acquire)+kByteApply)(component,value);
 }
 
+// LAN lobby leader (BackendSetLeader, FN027): qword component, valid bit +0xc0,
+// value +0xc8, written on the engine tick through its authoritative Set.
+constexpr uintptr_t kLeader=0xb4ba60,kQwordTable=0x3d45040,kQwordSet=0x2e1d39c;
+using QwordSet=uint8_t (*)(void*,const uint64_t*);
+std::atomic<uint64_t> leader_xuid{0},leader_request{0},leader_completed{0},leader_sequence{0};
+std::atomic<uint16_t> leader_code{CodePending};
+std::atomic<bool> leader_clear{false};
+std::atomic<uint32_t> leader_sets{0};
+// Returns the validated component address, or 0.
+uintptr_t LeaderComponent(uintptr_t base,uintptr_t simulation) noexcept {
+    uintptr_t table=0,set=0;
+    if(!simulation || !Read(simulation+kLeader,table) || table!=base+kQwordTable || !Read(table+0xb0,set) || set!=base+kQwordSet) return 0;
+    return simulation+kLeader;
+}
+bool ReadLeader(uintptr_t component,uint64_t& value) noexcept {
+    uint8_t available=0; value=0;
+    return component && Read(component+0xc0,available) && (available&1) && Read(component+0xc8,value);
+}
+
 LobbyProbe ReadLobby(uintptr_t base,uintptr_t session,uintptr_t simulation) noexcept {
     LobbyProbe p={}; p.owner=p.host_peer=p.start_mode=-1;
     if(session && Read(session+0xa0,p.peers) && Read(session+0xa4,p.peer_mask) && Read(session+0x6c,p.owner) &&
@@ -173,7 +197,43 @@ LobbyProbe ReadLobby(uintptr_t base,uintptr_t session,uintptr_t simulation) noex
     if(server_owned.load(std::memory_order_acquire)) p.flags|=LobbyServerOwned;
     if(owner_patched.load(std::memory_order_acquire)) p.flags|=LobbyNoOwner;
     if(start_sent.load(std::memory_order_acquire)) p.flags|=LobbyStartSent;
+    if(ReadLeader(LeaderComponent(base,simulation),p.leader)) {
+        p.flags|=LobbyLeaderValid;
+        const uint64_t held=leader_xuid.load(std::memory_order_acquire);
+        if(held && p.leader==held) p.flags|=LobbyLeaderHeld;
+    }
+    p.leader_sets=leader_sets.load();
     return p;
+}
+// Keeps the server's leader XUID in the leader component (engine tick only) and
+// answers a pending BackendSetLeader. Set is called only when the value differs.
+void TickLeader(uintptr_t base,uintptr_t simulation) noexcept {
+    const uint64_t ticket=leader_request.exchange(0,std::memory_order_acq_rel);
+    const uint64_t desired=leader_xuid.load(std::memory_order_acquire);
+    const bool clear=!desired && leader_clear.load(std::memory_order_acquire);
+    uint16_t code=CodeOK;
+    if(desired || clear) {
+        code=CodeBusy;
+        if(simulation) {
+            const uintptr_t component=LeaderComponent(base,simulation);
+            code=CodeUnsupported;
+            if(component) {
+                uint64_t current=0; const bool valid=ReadLeader(component,current);
+                code=CodeFailed;
+                if(valid && current==desired) code=CodeOK;
+                else if(reinterpret_cast<QwordSet>(base+kQwordSet)(reinterpret_cast<void*>(component),&desired) &&
+                    ReadLeader(component,current) && current==desired) {
+                    code=CodeOK;
+                    if(desired) { const uint32_t n=leader_sets.load(); if(n!=UINT32_MAX) leader_sets.store(n+1); }
+                }
+                if(clear && code==CodeOK) leader_clear.store(false,std::memory_order_release);
+            }
+        }
+    }
+    if(ticket) {
+        leader_code.store(code,std::memory_order_release);
+        leader_completed.store(ticket,std::memory_order_release);
+    }
 }
 // Executes a queued Start on the engine thread: HostPreGame only, validated
 // component table, native authority-checked Set, then readback.
@@ -266,6 +326,7 @@ void HookTick(void* server) {
         if(frame.state==HostInGame || frame.state==HostEndGame) start_sent.store(false,std::memory_order_release);
         TickStart(base,frame.state,frame.gates,simulation);
         TickName(base);
+        TickLeader(base,simulation);
         auto lobby=ReadLobby(base,session,simulation);
         // A Start whose players all left before the engine began the match would
         // otherwise start instantly for the next joiner; withdraw it (start mode 0).
@@ -434,7 +495,7 @@ uint32_t StopGameBackend() noexcept {
             if(result==ERROR_SUCCESS) result=filter;
         }
     }
-    start_request.store(0); name_request.store(0);
+    start_request.store(0); name_request.store(0); leader_request.store(0); leader_xuid.store(0); leader_clear.store(false);
     AcquireSRWLockExclusive(&selection_lock); lock_active=false; ReleaseSRWLockExclusive(&selection_lock);
     ReleaseSRWLockExclusive(&installation); return result;
 }
@@ -483,6 +544,25 @@ BackendReport BackendSetName(const uint16_t* units,uint32_t wait_ms) noexcept {
         for(unsigned i=0;i<100 && name_completed.load(std::memory_order_acquire)!=ticket;++i) Sleep(5);
     report=commands.Status();
     report.code=name_completed.load(std::memory_order_acquire)==ticket ? name_code.load(std::memory_order_acquire) : uint16_t(CodePending);
+    return WithLockGates(report);
+}
+BackendReport BackendSetLeader(uint64_t xuid,uint32_t wait_ms) noexcept {
+    auto report=commands.Status();
+    if(!running.load(std::memory_order_acquire)) { report.code=CodePending; return WithLockGates(report); }
+    if(wait_ms>2000) wait_ms=2000;
+    // The held value takes effect on the next tick whether or not this call waits for it.
+    leader_clear.store(xuid==0,std::memory_order_release);
+    leader_xuid.store(xuid,std::memory_order_release);
+    const uint64_t ticket=++leader_sequence;
+    uint64_t idle=0;
+    if(!leader_request.compare_exchange_strong(idle,ticket)) { report.code=CodeBusy; return WithLockGates(report); }
+    const ULONGLONG deadline=GetTickCount64()+wait_ms;
+    while(leader_completed.load(std::memory_order_acquire)!=ticket && GetTickCount64()<deadline) Sleep(5);
+    uint64_t waiting=ticket;
+    if(leader_completed.load(std::memory_order_acquire)!=ticket && !leader_request.compare_exchange_strong(waiting,0))
+        for(unsigned i=0;i<100 && leader_completed.load(std::memory_order_acquire)!=ticket;++i) Sleep(5);
+    report=commands.Status();
+    report.code=leader_completed.load(std::memory_order_acquire)==ticket ? leader_code.load(std::memory_order_acquire) : uint16_t(CodePending);
     return WithLockGates(report);
 }
 uint32_t BackendServerOwned(uint32_t mode) noexcept {

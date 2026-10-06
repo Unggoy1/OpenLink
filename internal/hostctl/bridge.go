@@ -138,6 +138,17 @@ func (b *Bridge) SetName(ctx context.Context, name string) (Reply, error) {
 	return b.send(ctx, Request{Op: OpSetName, Name: name})
 }
 
+// SetLeader makes the server hold the LAN lobby leader role with xuid (FN027):
+// clients treat themselves as leader (lobby options, map and mode menus, Play,
+// End Game) only when the leader XUID is their own, so an XUID no player has
+// leaves every player without those controls. The DLL re-asserts it on every
+// engine tick; 0 releases it so the next joiner becomes leader. CodeOK once a
+// tick holds it; CodeBusy while no lobby exists yet (it still applies later);
+// CodeNativePending if no tick ran; CodeUnsupported if the component differs.
+func (b *Bridge) SetLeader(ctx context.Context, xuid uint64) (Reply, error) {
+	return b.send(ctx, Request{Op: OpSetLeader, XUID: xuid})
+}
+
 func (b *Bridge) exchange(ctx context.Context, op uint16, pair AssetPair) (Reply, error) {
 	return b.send(ctx, Request{Op: op, Pair: pair})
 }

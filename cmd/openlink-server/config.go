@@ -12,6 +12,7 @@ import (
 
 	"halocommunity/internal/api"
 	"halocommunity/internal/hostctl"
+	"halocommunity/internal/playlist"
 )
 
 // config is the agent's settings. Every field can be set in openlink-server.json;
@@ -66,10 +67,12 @@ type config struct {
 	// server keeps as LAN lobby leader so that no player is leader (no lobby
 	// options, map/mode menus, Play or End Game). 0 = defaultLobbyLeader.
 	LobbyLeaderXUID uint64 `json:"lobby_leader_xuid,omitempty"`
-	// TeamBalance: in team modes, put players on Eagle and Cobra evenly at the
-	// start of every match (default true; false keeps their own picks). FFA
-	// modes always keep every player on their own team.
-	TeamBalance *bool `json:"team_balance,omitempty"`
+	// TeamBalance, for team modes at the start of every match: "even" (default:
+	// even teams, players stay on their current team where the counts allow),
+	// "shuffle" (random even teams) or "off" (players keep their own picks).
+	// A playlist entry's "teams" sets the number of teams (default 2). FFA modes
+	// always keep every player on their own team.
+	TeamBalance string `json:"team_balance,omitempty"`
 	// AutoStart: the server starts each match itself.
 	AutoStart *autoStart `json:"auto_start,omitempty"`
 	// Vote, with a playlist and proxy mode: players vote in the OpenLink app
@@ -254,6 +257,9 @@ func loadConfig(fs *flag.FlagSet, args []string) (config, error) {
 	if c.LobbyLeaderXUID != 0 && (!c.ServerOwned || c.lobbyOwner() != "none") {
 		return c, errors.New(`lobby_leader_xuid needs "server_owned": true and lobby_owner "none"`)
 	}
+	if c.TeamBalance != "" && c.TeamBalance != "even" && c.TeamBalance != "shuffle" && c.TeamBalance != "off" {
+		return c, errors.New(`team_balance must be "even", "shuffle" or "off"`)
+	}
 	return c, nil
 }
 
@@ -264,12 +270,21 @@ func (c config) lobbyOwner() string {
 	return c.LobbyOwner
 }
 
-// teamPolicy is the OpTeamPolicy flags for this config.
-func (c config) teamPolicy() uint32 {
-	if c.TeamBalance != nil && !*c.TeamBalance {
-		return hostctl.TeamGuardFFA
+// teamPolicy is the server's team rules for a match of entry (nil: no playlist
+// entry, two teams).
+func (c config) teamPolicy(entry *playlist.Entry) hostctl.TeamPolicy {
+	p := hostctl.TeamPolicy{Flags: hostctl.TeamGuardFFA}
+	switch c.TeamBalance {
+	case "off":
+		return p
+	case "shuffle":
+		p.Mode = hostctl.TeamModeShuffle
 	}
-	return hostctl.TeamGuardFFA | hostctl.TeamBalance
+	p.Flags |= hostctl.TeamBalance
+	if entry != nil && entry.Teams != nil {
+		p.Count, p.Size = uint32(entry.Teams.Count), uint32(entry.Teams.Size)
+	}
+	return p
 }
 
 // defaultLobbyLeader is the placeholder lobby leader XUID: Xbox user format

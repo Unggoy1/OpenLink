@@ -91,7 +91,7 @@ Run a voting server with the local directory (as in R023) and join it with the O
 ## 4. Work still to do
 
 - [ ] **FFA modes: players cannot kill each other** (R024): scoreboard correct, team modes fine on the same build. With bots, FFA damage works on OpenLink (R026), and one player gets their own team (R027). Needs a two-player test with the team diagnostics; the server's FFA team guard now keeps every player on their own team.
-- [ ] **Team balance** (`team_balance`, default on): works for one player (R028: moved to Eagle at match prep, Hades from the previous match did not carry over, in-match changes still work). Still check an even split with two or more players. Later: a per-entry team count for multi-team modes (custom games now allow up to 8 teams).
+- [ ] **Team balance** (`team_balance`, default on): works for one player (R028: moved to Eagle at match prep, Hades from the previous match did not carry over, in-match changes still work). Now `"even"` (default, keeps current teams where possible), `"shuffle"` and `"off"`, plus the playlist entry `teams` (`count`/`size`) for multi-team modes; the new version is not yet run live. Check with two or more players: even split, a pair on the same team stays together under `"even"`, `"shuffle"` mixes teams, a `teams` entry (e.g. size 2) makes the expected number of teams.
 - [ ] **Block Restart Match on the server** under `server_owned` (backstop): players no longer see Restart Match since the server holds the lobby leader (R025), but the server still applies a restart request (simulation event 0x58, FN026); only start and end game are dropped today.
 - [x] **Lobby map/mode picker**: fixed by the server-held lobby leader; Map and Mode Editor are greyed for every player (R025).
 - [ ] **Docs pass**:
@@ -126,6 +126,7 @@ Run a voting server with the local directory (as in R023) and join it with the O
 - `map` / `mode` `asset_id` and `version_id`: full 36-character UUIDs, not all zeros. Map thumbnails come from the map IDs; there is no field for them.
 - Ballot size: 4 options in a 1200-byte message, thumbnails included; a playlist that could exceed it is rejected. The check assumes the worst case (longest entries, largest numbers). 80-byte IDs with 80-byte names come to 1197 bytes with default settings and fail with `max_players` 0 or very long vote timers; with IDs of about 32 bytes there is plenty of room.
 - With voting: at least 2 enabled entries.
+- Optional `teams` per entry, for team modes: `{"count": N}` (1-8 teams) and/or `{"size": N}` (1-32 players per team); an empty object is an error. Fill it only when the mode is made for more than two teams (for example from a "Teams of 4" description).
 - The entry just played is not offered again straight away, so 5 or more entries keeps every ballot full. Once the lobby empties, the next vote can offer every entry again.
 
 ## Not needed for the alpha

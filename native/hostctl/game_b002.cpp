@@ -204,13 +204,36 @@ void ReadTeams(uintptr_t base,uintptr_t session,uintptr_t simulation,LobbyProbe&
 //
 // Team balance (TeamBalance policy): once per match, when match prep has put a
 // team mode into that variant (HostPreGame with a start requested, or
-// HostStarting), every non-observer peer gets team 0 or 1 alternately (assigned
-// +0x2cf5 and selected +0x2cf6) and its carried-over request (+0x2505) is cleared,
-// so the game's own pass (142ebfcbc) keeps the even teams. The next lobby clears
-// that variant (absent until prep), which re-arms the balance.
+// HostStarting), the non-observer peers are spread over TeamCount teams with
+// AssignTeams (team_guard.h; even or shuffle, team count or size from the
+// playlist entry), written to assigned +0x2cf5 and selected +0x2cf6, and their
+// carried-over requests (+0x2505) are cleared so the game's own pass (142ebfcbc)
+// keeps the result. The next lobby clears that variant (absent until prep),
+// which re-arms the balance.
 bool WriteAddress(uintptr_t address,const void* source,size_t size) noexcept;
-std::atomic<uint32_t> team_policy{TeamGuardFfa};
+std::atomic<uint32_t> team_policy{TeamGuardFfa},team_mode{TeamModeEven},team_count{0},team_size{0};
 bool balanced=false; // engine thread only
+void BalanceTeams(uintptr_t session,uint32_t mask,bool& changed) noexcept {
+    unsigned peers[kMaxTeamSize],n=0; int8_t current[kMaxTeamSize],want[kMaxTeamSize],requests[kMaxTeamSize];
+    for(unsigned i=0;i<32 && n<kMaxTeamSize;++i) {
+        if(!((mask>>i)&1)) continue;
+        const uintptr_t peer=session+uintptr_t(i)*0x1470;
+        int8_t requested=0,assigned=0,selected=0;
+        if(!Read(peer+0x2505,requested) || !Read(peer+0x2cf5,assigned) || !Read(peer+0x2cf6,selected) ||
+            IsObserver(requested,assigned,selected)) continue;
+        peers[n]=i; current[n]=assigned; requests[n]=requested; ++n;
+    }
+    if(!n) return;
+    LARGE_INTEGER seed={}; QueryPerformanceCounter(&seed);
+    const unsigned teams=TeamCount(n,team_count.load(),team_size.load());
+    AssignTeams(n,current,teams,team_mode.load(),uint64_t(seed.QuadPart)|1,want);
+    for(unsigned k=0;k<n;++k) {
+        const uintptr_t peer=session+uintptr_t(peers[k])*0x1470; const int8_t none=-1;
+        int8_t selected=0; Read(peer+0x2cf6,selected);
+        if(want[k]==current[k] && selected==want[k] && requests[k]==none) continue;
+        if(WriteAddress(peer+0x2cf5,&want[k],1) && WriteAddress(peer+0x2cf6,&want[k],1) && WriteAddress(peer+0x2505,&none,1)) changed=true;
+    }
+}
 void NotifyTeams(uintptr_t session) noexcept {
     int32_t a=0,b=0;
     if(Read(session+0x68,a) && Read(session+0x54d14,b)) { ++a; ++b; WriteAddress(session+0x68,&a,4); WriteAddress(session+0x54d14,&b,4); }
@@ -235,17 +258,7 @@ void TickTeams(uintptr_t session,uintptr_t simulation,int32_t state,bool start_r
     const bool before_spawn=(state==HostPreGame && start_requested) || state==HostStarting;
     if(teams && (policy&TeamBalance) && !balanced && before_spawn) {
         balanced=true;
-        unsigned ordinal=0;
-        for(unsigned i=0;i<32;++i) {
-            if(!((mask>>i)&1)) continue;
-            const uintptr_t peer=session+uintptr_t(i)*0x1470;
-            int8_t requested=0,assigned=0,selected=0;
-            if(!Read(peer+0x2505,requested) || !Read(peer+0x2cf5,assigned) || !Read(peer+0x2cf6,selected) ||
-                IsObserver(requested,assigned,selected)) continue;
-            const int8_t team=BalancedTeam(ordinal++),none=-1;
-            if(assigned==team && selected==team && requested==none) continue;
-            if(WriteAddress(peer+0x2cf5,&team,1) && WriteAddress(peer+0x2cf6,&team,1) && WriteAddress(peer+0x2505,&none,1)) changed=true;
-        }
+        BalanceTeams(session,mask,changed);
     }
     if(changed) NotifyTeams(session);
 }
@@ -657,8 +670,10 @@ BackendReport BackendSetLeader(uint64_t xuid,uint32_t wait_ms) noexcept {
     report.code=leader_completed.load(std::memory_order_acquire)==ticket ? leader_code.load(std::memory_order_acquire) : uint16_t(CodePending);
     return WithLockGates(report);
 }
-uint32_t BackendTeamPolicy(uint32_t flags) noexcept {
-    if(flags&~uint32_t(TeamGuardFfa|TeamBalance)) return ERROR_INVALID_PARAMETER;
+uint32_t BackendTeamPolicy(uint32_t flags,uint32_t mode,uint32_t count,uint32_t size) noexcept {
+    if((flags&~uint32_t(TeamGuardFfa|TeamBalance)) || mode>TeamModeShuffle || count>kMaxTeams || size>kMaxTeamSize)
+        return ERROR_INVALID_PARAMETER;
+    team_mode.store(mode); team_count.store(count); team_size.store(size);
     team_policy.store(flags,std::memory_order_release);
     return ERROR_SUCCESS;
 }

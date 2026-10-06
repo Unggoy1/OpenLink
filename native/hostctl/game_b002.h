@@ -143,10 +143,12 @@ BackendReport BackendSetName(const uint16_t* units,uint32_t wait_ms) noexcept;
 BackendReport BackendSetLeader(uint64_t xuid,uint32_t wait_ms) noexcept;
 // Server team rules (team_guard.h TeamPolicyFlag), applied on the engine tick:
 // TeamGuardFfa (on by default) keeps every player on its own team in FFA modes;
-// TeamBalance puts the non-observers of a team mode on Eagle/Cobra alternately
-// once per match before spawn and clears carried-over team requests.
-// ERROR_INVALID_PARAMETER for unknown flags.
-uint32_t BackendTeamPolicy(uint32_t flags) noexcept;
+// TeamBalance spreads the non-observers of a team mode evenly over the match's
+// teams once per match before spawn and clears carried-over team requests.
+// mode is TeamModeEven or TeamModeShuffle; count (0-8) and size (0-32) are the
+// playlist entry's team count / team size, 0 when not given (TeamCount).
+// ERROR_INVALID_PARAMETER for unknown flags or out-of-range values.
+uint32_t BackendTeamPolicy(uint32_t flags,uint32_t mode,uint32_t count,uint32_t size) noexcept;
 // Cancels pending work and restores our table slot; module remains pinned so
 // a callback already fetched by another thread still has a valid target.
 uint32_t StopGameBackend() noexcept;

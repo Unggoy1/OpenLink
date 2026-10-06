@@ -37,7 +37,6 @@ type lobbyController interface {
 	Start(context.Context) (hostctl.Reply, error)
 	ServerOwned(context.Context, uint32) (hostctl.Reply, error)
 	SetLeader(context.Context, uint64) (hostctl.Reply, error)
-	TeamPolicy(context.Context, uint32) (hostctl.Reply, error)
 }
 
 // lobbyInfo is the lobby state shown by the admin API.
@@ -94,15 +93,6 @@ func (a *agent) holdLeader(ctx context.Context, controller lobbyController, xuid
 // enough players stay connected for the delay.
 func (a *agent) runLobby(ctx context.Context, controller lobbyController, poll time.Duration) {
 	a.setLobby(func(l *lobbyInfo) { l.AutoStart = a.cfg.AutoStart != nil })
-	policy := a.cfg.teamPolicy()
-	request, cancel := context.WithTimeout(ctx, 4*time.Second)
-	reply, err := controller.TeamPolicy(request, policy)
-	cancel()
-	if err != nil || reply.Code != hostctl.CodeOK {
-		a.log.Warn("team rules unavailable; the game's own team handling applies", "err", err, "code", reply.Code)
-	} else {
-		a.log.Info("team rules set", "ffa_own_teams", policy&hostctl.TeamGuardFFA != 0, "balance_team_modes", policy&hostctl.TeamBalance != 0)
-	}
 	if a.cfg.ServerOwned {
 		mode := hostctl.ServerOwnedNoOwner
 		if a.cfg.LobbyOwner == "first_player" {

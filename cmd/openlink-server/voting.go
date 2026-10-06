@@ -108,7 +108,8 @@ type voter struct {
 	options int
 	poll    time.Duration
 	rng     *rand.Rand
-	publish func(voteInfo) // admin status; may be nil
+	publish func(voteInfo)                           // admin status; may be nil
+	teams   func(*playlist.Entry) hostctl.TeamPolicy // team rules per entry; may be nil
 
 	mu      sync.Mutex
 	round   *voteRound
@@ -299,6 +300,7 @@ func (v *voter) closeRound(ctx context.Context, now time.Time) {
 			v.publishLocked("")
 			v.mu.Unlock()
 			v.log.Info("vote closed", "round", r.id, "winner", e.ID, "counts", counts, "starting_in", v.delay)
+			v.sendTeams(ctx, &e)
 			return
 		}
 		if err == nil {
@@ -326,6 +328,7 @@ func (v *voter) initialize(ctx context.Context) bool {
 				cancel()
 				if err == nil && reply.Code == hostctl.CodeSelected {
 					v.log.Info("vote: server selection initialized", "entry", e.ID)
+					v.sendTeams(ctx, &e)
 					return true
 				}
 				v.log.Warn("vote: initial selection failed", "entry", e.ID, "err", err, "code", reply.Code)
@@ -334,6 +337,12 @@ func (v *voter) initialize(ctx context.Context) bool {
 		sleep(ctx, v.poll)
 	}
 	return false
+}
+
+func (v *voter) sendTeams(ctx context.Context, e *playlist.Entry) {
+	if v.teams != nil {
+		sendTeams(ctx, v.ctl, v.teams(e), v.log, e.ID)
+	}
 }
 
 func (v *voter) status(ctx context.Context) (hostctl.Reply, error) {
@@ -478,7 +487,8 @@ func (a *agent) runVoting(ctx context.Context, controller voteController) {
 	v := &voter{log: a.log, ctl: controller, net: a.fwd, entries: f.Entries, window: cfg.window(),
 		delay: cfg.startDelay(), options: cfg.options(), poll: 250 * time.Millisecond,
 		rng:     rand.New(rand.NewPCG(uint64(time.Now().UnixNano()), 0x6f706c6b)),
-		publish: func(info voteInfo) { a.mu.Lock(); a.vote = &info; a.mu.Unlock() }}
+		publish: func(info voteInfo) { a.mu.Lock(); a.vote = &info; a.mu.Unlock() },
+		teams:   a.cfg.teamPolicy}
 	a.mu.Lock()
 	a.voter = v
 	a.mu.Unlock()

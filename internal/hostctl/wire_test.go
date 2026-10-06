@@ -291,17 +291,23 @@ func TestReplyVersion5Teams(t *testing.T) {
 }
 
 func TestTeamPolicyRequest(t *testing.T) {
-	for _, flags := range []uint32{0, TeamGuardFFA, TeamGuardFFA | TeamBalance} {
+	for _, p := range []TeamPolicy{{}, {Flags: TeamGuardFFA}, {Flags: TeamGuardFFA | TeamBalance, Mode: TeamModeShuffle, Count: 4, Size: 3},
+		{Flags: TeamBalance, Count: MaxTeams, Size: MaxTeamSize}} {
 		var w bytes.Buffer
-		if err := EncodeRequest(&w, Request{Op: OpTeamPolicy, ID: 2, Teams: flags}); err != nil {
+		if err := EncodeRequest(&w, Request{Op: OpTeamPolicy, ID: 2, Teams: p}); err != nil {
 			t.Fatal(err)
 		}
+		if w.Len() != 4+64 {
+			t.Fatalf("team-policy frame is %d bytes", w.Len())
+		}
 		got, err := DecodeRequest(&w)
-		if err != nil || got.Op != OpTeamPolicy || got.Teams != flags {
-			t.Fatalf("round trip %d: %+v %v", flags, got, err)
+		if err != nil || got.Op != OpTeamPolicy || got.Teams != p {
+			t.Fatalf("round trip %+v: %+v %v", p, got, err)
 		}
 	}
-	if err := EncodeRequest(io.Discard, Request{Op: OpTeamPolicy, ID: 2, Teams: 4}); err == nil {
-		t.Fatal("unknown team policy flag accepted")
+	for _, bad := range []TeamPolicy{{Flags: 4}, {Mode: 2}, {Count: MaxTeams + 1}, {Size: MaxTeamSize + 1}} {
+		if err := EncodeRequest(io.Discard, Request{Op: OpTeamPolicy, ID: 2, Teams: bad}); err == nil {
+			t.Fatalf("invalid team policy %+v accepted", bad)
+		}
 	}
 }

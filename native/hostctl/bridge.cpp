@@ -196,13 +196,13 @@ DWORD session(SOCKET s) {
                 else { report=hostctl::BackendSetLeader(u64(request+48),2000); code=report.code; have_report=true; }
             }
         }
-        // 10 TeamPolicy: u32 TeamPolicyFlag bits (team_guard.h).
-        if(op==10 && size==52) {
+        // 10 TeamPolicy: u32 TeamPolicyFlag bits, u32 TeamMode, u32 team count, u32 team size (team_guard.h).
+        if(op==10 && size==64) {
             code=2;
             if(launch.version==2) {
                 if(backend_result!=ERROR_SUCCESS) code=1;
                 else {
-                    const DWORD changed=hostctl::BackendTeamPolicy(u32(request+48));
+                    const DWORD changed=hostctl::BackendTeamPolicy(u32(request+48),u32(request+52),u32(request+56),u32(request+60));
                     report=hostctl::BackendStatus(); have_report=true;
                     code=changed==ERROR_SUCCESS ? 0 : 4;
                 }

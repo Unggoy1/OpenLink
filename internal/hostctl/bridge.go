@@ -149,10 +149,15 @@ func (b *Bridge) SetLeader(ctx context.Context, xuid uint64) (Reply, error) {
 	return b.send(ctx, Request{Op: OpSetLeader, XUID: xuid})
 }
 
-// TeamPolicy sets the server's team rules (TeamGuardFFA, TeamBalance). CodeOK
-// once stored; the engine tick applies them. CodeInvalid for unknown flags.
-func (b *Bridge) TeamPolicy(ctx context.Context, flags uint32) (Reply, error) {
-	return b.send(ctx, Request{Op: OpTeamPolicy, Teams: flags})
+// TeamPolicy sets the server's team rules for the coming match: the FFA guard,
+// and for team modes the balance mode and the playlist entry's team count or
+// size. Send it with each selection; the engine tick applies it once per match
+// before players spawn. CodeOK once stored; CodeInvalid for bad values.
+func (b *Bridge) TeamPolicy(ctx context.Context, p TeamPolicy) (Reply, error) {
+	if !p.valid() {
+		return Reply{}, errors.New("invalid team policy")
+	}
+	return b.send(ctx, Request{Op: OpTeamPolicy, Teams: p})
 }
 
 func (b *Bridge) exchange(ctx context.Context, op uint16, pair AssetPair) (Reply, error) {

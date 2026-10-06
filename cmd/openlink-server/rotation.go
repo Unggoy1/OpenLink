@@ -100,6 +100,7 @@ func (a *agent) rotate(ctx context.Context, controller hostController, bag *play
 			}
 			if err == nil && reply.Code == hostctl.CodeSelected {
 				a.log.Info("rotation selected", "entry", entry.ID, "match", st.Matches+1, "generation", reply.Generation)
+				sendTeams(ctx, controller, a.cfg.teamPolicy(&entry), a.log, entry.ID)
 				baseline, initialize, pending, failures = st.Matches, false, nil, 0
 				a.setRotation(func(r *rotationInfo) {
 					r.Current, r.Pending, r.Error = entry.ID, "", ""

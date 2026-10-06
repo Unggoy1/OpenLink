@@ -64,18 +64,34 @@ type Request struct {
 	Token [32]byte
 	PID   uint32
 	Pair  AssetPair
-	Mode  uint32 // OpServerOwned
-	Name  string // OpSetName
-	XUID  uint64 // OpSetLeader
-	Teams uint32 // OpTeamPolicy flags
+	Mode  uint32     // OpServerOwned
+	Name  string     // OpSetName
+	XUID  uint64     // OpSetLeader
+	Teams TeamPolicy // OpTeamPolicy
 }
 
-// OpTeamPolicy flags.
+// TeamPolicy is the server's team rules for the coming match (OpTeamPolicy).
+type TeamPolicy struct {
+	Flags uint32 // TeamGuardFFA, TeamBalance
+	Mode  uint32 // TeamModeEven or TeamModeShuffle
+	Count uint32 // teams for team modes, 1-MaxTeams; 0 = from Size, else 2
+	Size  uint32 // players per team, 1-MaxTeamSize; 0 = not given
+}
+
+// TeamPolicy flags and modes.
 const (
 	TeamGuardFFA      uint32 = 1 // FFA modes: every player on its own team (on in the DLL by default)
-	TeamBalance       uint32 = 2 // team modes: Eagle/Cobra alternately once per match, carried-over picks cleared
+	TeamBalance       uint32 = 2 // team modes: even teams once per match, carried-over picks cleared
 	knownTeamPolicies        = TeamGuardFFA | TeamBalance
+	TeamModeEven      uint32 = 0 // keep players on their current team where the counts allow
+	TeamModeShuffle   uint32 = 1 // random even teams every match
+	MaxTeams                 = 8
+	MaxTeamSize              = 32
 )
+
+func (p TeamPolicy) valid() bool {
+	return p.Flags&^knownTeamPolicies == 0 && p.Mode <= TeamModeShuffle && p.Count <= MaxTeams && p.Size <= MaxTeamSize
+}
 
 // MaxNameLength is the longest in-game server name (api.GameName).
 const MaxNameLength = api.MaxGameNameLength
@@ -197,10 +213,10 @@ func requestSize(r Request) (int, error) {
 	case OpSetLeader:
 		return 56, nil
 	case OpTeamPolicy:
-		if r.Teams&^knownTeamPolicies != 0 {
-			return 0, errors.New("unknown team policy flags")
+		if !r.Teams.valid() {
+			return 0, errors.New("invalid team policy")
 		}
-		return 52, nil
+		return 64, nil
 	case OpPrepare, OpPrepareEngine, OpInitialize:
 		if !r.Pair.Valid() {
 			return 0, errors.New("map and mode require nonzero asset and version IDs")
@@ -238,7 +254,9 @@ func EncodeRequest(w io.Writer, r Request) error {
 		binary.LittleEndian.PutUint64(b[48:], r.XUID)
 	}
 	if r.Op == OpTeamPolicy {
-		binary.LittleEndian.PutUint32(b[48:], r.Teams)
+		for i, v := range []uint32{r.Teams.Flags, r.Teams.Mode, r.Teams.Count, r.Teams.Size} {
+			binary.LittleEndian.PutUint32(b[48+4*i:], v)
+		}
 	}
 	return writeFrame(w, b)
 }
@@ -293,10 +311,11 @@ func DecodeRequest(rd io.Reader) (Request, error) {
 		}
 		r.XUID = binary.LittleEndian.Uint64(b[48:])
 	case OpTeamPolicy:
-		if len(b) != 52 {
+		if len(b) != 64 {
 			return r, errors.New("invalid team-policy size")
 		}
-		r.Teams = binary.LittleEndian.Uint32(b[48:])
+		u := func(i int) uint32 { return binary.LittleEndian.Uint32(b[48+4*i:]) }
+		r.Teams = TeamPolicy{Flags: u(0), Mode: u(1), Count: u(2), Size: u(3)}
 	case OpPrepare, OpPrepareEngine, OpInitialize:
 		if len(b) != 112 {
 			return r, errors.New("invalid prepare size")

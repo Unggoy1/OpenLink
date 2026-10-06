@@ -5,6 +5,7 @@
   "description": "",
   "public_host": "",
   "public_port": 1343,
+  "auto_port_forward": false,
   "server_ip": "127.0.0.2",
   "stop_server": true,
   "playlist": "playlist.json",

@@ -135,6 +135,13 @@ const (
 	dtSingleLine  = 0x0020
 	dtNoPrefix    = 0x0800
 	dtEndEllipsis = 0x8000
+	dtWordBreak   = 0x0010
+	dtCalcRect    = 0x0400
+	dtEditControl = 0x2000 // with dtWordBreak: no partly visible last line
+
+	panelWidth = 400 // DIP
+	rowShort   = 60  // DIP: option row with a one-line name
+	rowTall    = 78  // DIP: option row when a name needs two lines
 
 	wmDestroy       = 0x0002
 	wmActivate      = 0x0006
@@ -292,6 +299,7 @@ type voteOverlay struct {
 	fontName    uintptr
 	fontSmall   uintptr
 	rows        []rect       // option rows from the last paint, for clicks
+	rowH        int32        // option row height in pixels, set by place
 	padTimer    bool         // controller polling runs
 	padSeen     bool         // a controller is connected (labels and full panel)
 	padPrev     [4]uint16    // last buttons per controller slot
@@ -729,8 +737,9 @@ func (o *voteOverlay) place(hwnd uintptr, b *BallotView, cfg Settings) {
 		w = min(o.textWidth(hwnd, o.hintText(b, cfg), o.fontName)+o.px(30), o.px(640))
 		h = o.px(38)
 	} else {
-		w = o.px(360)
-		h = o.px(12+26+8) + int32(len(b.Options))*o.px(66) + o.px(12)
+		w = o.px(panelWidth)
+		o.rowH = o.rowHeight(hwnd, b, w)
+		h = o.px(12+26+8) + int32(len(b.Options))*(o.rowH+o.px(6)) + o.px(12)
 		if o.footer(b, cfg) != "" {
 			h += o.px(22)
 		}
@@ -888,9 +897,9 @@ func (o *voteOverlay) paintPanel(g canvas, b *BallotView, cfg Settings, w int32)
 	o.rows = o.rows[:0]
 	y := head.bottom + o.px(8)
 	for i, opt := range b.Options {
-		row := rect{pad, y, w - pad, y + o.px(60)}
+		row := rect{pad, y, w - pad, y + o.rowH}
 		o.rows = append(o.rows, row)
-		y += o.px(66)
+		y += o.rowH + o.px(6)
 
 		fill, border, nameCol := colRow, colLine, colText
 		if o.open && i == o.sel {
@@ -907,6 +916,7 @@ func (o *voteOverlay) paintPanel(g canvas, b *BallotView, cfg Settings, w int32)
 		g.roundRect(row, fill, border, o.px(2), o.px(8))
 
 		inset := o.px(3)
+		// Full row height; in a two-line row the image is stretched taller (user choice).
 		th := rect{row.left + inset, row.top + inset, row.left + inset + o.px(96), row.bottom - inset}
 		g.fill(th, colBg)
 		if t := thumbs[i]; t != nil {
@@ -919,7 +929,13 @@ func (o *voteOverlay) paintPanel(g canvas, b *BallotView, cfg Settings, w int32)
 
 		tx := th.right + o.px(10)
 		mid := row.top + (row.bottom-row.top)/2
-		g.text(opt.Name, rect{tx, row.top + o.px(6), row.right - o.px(10), mid + o.px(2)}, o.fontName, nameCol, dtVCenter|dtEndEllipsis)
+		if o.rowH > o.px(rowShort) {
+			// Two lines for the name; the key and vote line keeps the bottom 26 DIP.
+			mid = row.bottom - o.px(28)
+			g.textWrap(opt.Name, rect{tx, row.top + o.px(5), row.right - o.px(10), mid + o.px(2)}, o.fontName, nameCol)
+		} else {
+			g.text(opt.Name, rect{tx, row.top + o.px(6), row.right - o.px(10), mid + o.px(2)}, o.fontName, nameCol, dtVCenter|dtEndEllipsis)
+		}
 		votes := strconv.Itoa(opt.Votes) + " votes"
 		if opt.Votes == 1 {
 			votes = "1 vote"

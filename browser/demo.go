@@ -60,7 +60,7 @@ func (d *demoState) ballot() *BallotView {
 	}
 	opts := []struct{ id, name, asset, version string }{
 		{"interference-fiesta", "Fiesta Slayer on Interference", "70f884d7-6869-469d-b4d2-4219627e2d83", "cc791b4b-054a-4653-9034-5dc13c809c54"},
-		{"kusini-ctf", "CTF: Arena on Kusini Bay", "4eb7a3ac-81f7-4faa-acd8-ce6bbba667af", "98a5391c-4a3a-4f04-bdc7-6db58cc27433"},
+		{"kusini-ctf", "Arena: FFA Super Escalation Slayer on Kusini Bay (long name)", "4eb7a3ac-81f7-4faa-acd8-ce6bbba667af", "98a5391c-4a3a-4f04-bdc7-6db58cc27433"},
 		{"kusini-fiesta", "Fiesta Slayer on Kusini Bay", "4eb7a3ac-81f7-4faa-acd8-ce6bbba667af", "98a5391c-4a3a-4f04-bdc7-6db58cc27433"},
 		{"no-thumbnail", "A map without a thumbnail", "00000000-0000-0000-0000-000000000001", "00000000-0000-0000-0000-000000000001"},
 	}

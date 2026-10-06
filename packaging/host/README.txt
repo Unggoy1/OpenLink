@@ -11,7 +11,7 @@ Setup
   2. Copy openlink-server.example.json to openlink-server.json and fill in name,
      description (optional, one line shown in the app) and public_port (your
      port forward). To let openlink-server ask your router to forward the port,
-     add "auto_port_forward": true (opt-in; UPnP or NAT-PMP; see the
+     set "auto_port_forward" to true (opt-in; UPnP or NAT-PMP; see the
      disclaimer below). No key is needed. register_key and
      public_host are only for listing a tunnel address (ask the directory
      operator for a key). Players see your server once the directory has

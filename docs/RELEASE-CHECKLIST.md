@@ -24,6 +24,7 @@ Built and checked without the game (unit tests, demo build or a simulated server
 - Server description in the listing and the app.
 - The app picks LAN broadcast by itself when a server runs on the same PC.
 - Passive overlay is the default on Windows.
+- Overlay option names wrap onto two lines, with full-height thumbnails (seen in the demo build with names from a real playlist, user).
 - An empty lobby resets the vote pool: the next vote can offer every entry.
 - Merge to `master`, tagged CI releases, website update, unggoy playlist generator limits (user).
 
@@ -113,7 +114,7 @@ Run a voting server with the local directory (as in R023) and join it with the O
 - The host agent enforces these: it will not start with a playlist that breaks them. Run `openlink-server check-playlist playlist.json` on generated files.
 - `id`: unique and case-sensitive. Use a readable slug such as `fiesta-slayer-interference`, at most about 32 bytes, from `a-z 0-9 -`. Over 80 bytes is an error. Build it from the mode and map so a regenerated playlist keeps the same IDs.
 - `name`: at most **80 UTF-8 bytes** (not characters); more is an error, so trim it yourself: shorten the longer of mode and map with "…" (3 bytes). Players see the `id` if `name` is empty. No control characters (such as newlines). Avoid `&`, `<`, `>`: each costs 6 bytes on the wire.
-- The overlay shows about 30 characters of a name on one line; the app panel shows the whole name.
+- The overlay wraps a name onto two lines (about 65 characters) and ends it with "…" if it is longer; the app panel shows the whole name.
 - `map` / `mode` `asset_id` and `version_id`: full 36-character UUIDs, not all zeros. Map thumbnails come from the map IDs; there is no field for them.
 - Ballot size: 4 options in a 1200-byte message, thumbnails included; a playlist that could exceed it is rejected. The check assumes the worst case (longest entries, largest numbers). 80-byte IDs with 80-byte names come to 1197 bytes with default settings and fail with `max_players` 0 or very long vote timers; with IDs of about 32 bytes there is plenty of room.
 - With voting: at least 2 enabled entries.
@@ -124,7 +125,7 @@ Run a voting server with the local directory (as in R023) and join it with the O
 - Code signing (deferred 2026-10-05; do it before a wider public launch). Plan: choose the licence (AGPL-3.0 likely), ship the unsigned alpha, then apply to SignPath Foundation (free for OSI-licensed projects; publisher shows as "SignPath Foundation") for the OpenLink app and directory. The server package (loader + DLL) may not pass their "circumvent security measures" review; Azure Artifact Signing ($9.99/month, individuals in the US/Canada) is the fallback. Until then: tell testers to expect the SmartScreen warning ("More info → Run anyway"), point to `SHA256SUMS`, and report antivirus false positives to the vendor.
 - DLL port plan for a new Halo build: no game updates are expected, only playlist updates. The DLL and OpenLink Server refuse an unknown game build.
 - Overlay on Linux (Wayland blocks global hotkeys and always-on-top windows).
-- Overlay names on two lines; names longer than 80 bytes.
+- Names longer than 80 bytes.
 - Sending `& < >` unescaped in ballots.
 - Cosmetic: hide the thumbnail box until it loads.
 - Offline preservation (a later phase).

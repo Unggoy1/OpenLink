@@ -23,7 +23,7 @@ The game server itself does not need a firewall rule: in proxy mode (the default
 
 ### Automatic port forwarding (opt-in)
 
-Instead of forwarding the port by hand, you can let OpenLink Server ask your router to do it while it runs. Add this to `openlink-server.json`:
+Instead of forwarding the port by hand, you can let OpenLink Server ask your router to do it while it runs. Set it in `openlink-server.json` (the example file has it as `false`):
 
 ```json
 "auto_port_forward": true

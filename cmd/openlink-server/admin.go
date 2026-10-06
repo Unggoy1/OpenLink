@@ -219,6 +219,9 @@ func runAdminCommand(addr string, args []string) error {
 		if st.ListingID != "" {
 			fmt.Printf("listing  %s, reachable from the internet: %s\n", st.ListingID, orDash(st.Reachability))
 		}
+		if st.PortForward != "" {
+			fmt.Printf("router   automatic port forward: %s\n", st.PortForward)
+		}
 		if !st.Proxy {
 			fmt.Println("proxy    off (player list and bans need proxy mode)")
 			return nil

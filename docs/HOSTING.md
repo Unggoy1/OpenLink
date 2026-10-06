@@ -88,7 +88,7 @@ OpenLink Server listens on the public port and passes each player's traffic to t
 
 - **Player count** in the server list.
 - **Reachability**: the directory periodically checks that your port answers, and players see your **ping**.
-- **Admin**: see players, kick and ban by IP, a per-player packet limit (`max_pps`, default 500/s, about ten times normal play) and a connection limit (`max_players`, default 32).
+- **Admin**: see players, kick and ban by IP, a per-player packet limit (`max_pps`, default 500/s, about ten times normal play) and a connection limit (`max_players`, default 32). At most 4 connections per IP address (players in one home share an address). A connection the game server never answers is dropped after 15 seconds, and is the first to go when the server is full, so junk traffic cannot fill the slots. Only connections the game answered count as players and can vote.
 
 Proxy mode is required for a listed server: the directory only shows servers whose port has answered its probe, and only proxy mode answers. `"proxy": false` is accepted only with `"directory": ""` (an unlisted server for your own LAN).
 
@@ -106,7 +106,7 @@ openlink-server bans
 
 Bans are stored in `bans.json` next to the config. Players are identified by IP address only. The game's own player names are inside its encrypted traffic, which OpenLink never reads.
 
-The admin API listens on 127.0.0.1:7180 (setting `admin`) and only accepts requests from this PC.
+The admin API listens on 127.0.0.1:7180 (setting `admin`) and only accepts requests from this PC, from the `openlink-server` admin commands: requests from web pages (a foreign `Host` or any `Origin` header) are refused.
 
 ## Several servers on one PC (experimental)
 

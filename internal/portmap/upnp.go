@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/textproto"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -20,9 +21,18 @@ import (
 // ssdpAddr is the UPnP discovery multicast address; a variable for tests.
 var ssdpAddr = "239.255.255.250:1900"
 
-// discoverGateway finds a UPnP internet gateway on the LAN of localIP and
-// returns its description URL.
-func discoverGateway(ctx context.Context, localIP net.IP) (string, error) {
+// upnpClient talks only to the gateway: no redirects to other hosts.
+var upnpClient = &http.Client{Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+
+// wanService is the service type of a gateway's WAN connection; it is also
+// put into SOAP requests, so nothing else is accepted.
+var wanService = regexp.MustCompile(`^urn:schemas-upnp-org:service:WAN(IP|PPP)Connection:[0-9]+$`)
+
+// discoverGateway finds the UPnP internet gateway at gw (the default gateway)
+// from localIP and returns its description URL. Answers from other devices,
+// and descriptions hosted anywhere but on gw, are ignored: any LAN device can
+// answer discovery.
+func discoverGateway(ctx context.Context, localIP, gw net.IP) (string, error) {
 	conn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: localIP})
 	if err != nil {
 		return "", err
@@ -45,9 +55,12 @@ func discoverGateway(ctx context.Context, localIP net.IP) (string, error) {
 	conn.SetReadDeadline(deadline)
 	buf := make([]byte, 2048)
 	for {
-		n, _, err := conn.ReadFromUDP(buf)
+		n, from, err := conn.ReadFromUDP(buf)
 		if err != nil {
 			return "", errors.New("no UPnP gateway answered (UPnP may be off in the router)")
+		}
+		if !from.IP.Equal(gw) {
+			continue
 		}
 		resp, err := http.ReadResponse(bufio.NewReader(bytes.NewReader(buf[:n])), nil)
 		if err != nil {
@@ -55,7 +68,7 @@ func discoverGateway(ctx context.Context, localIP net.IP) (string, error) {
 		}
 		loc := resp.Header.Get("Location")
 		resp.Body.Close()
-		if u, err := url.Parse(loc); err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != "" {
+		if u, err := url.Parse(loc); err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Hostname() == gw.String() {
 			return loc, nil
 		}
 	}
@@ -86,7 +99,7 @@ func findWANService(ctx context.Context, location string) (control, service stri
 	var walk func(d upnpDevice) bool
 	walk = func(d upnpDevice) bool {
 		for _, s := range d.Services {
-			if strings.Contains(s.Type, ":WANIPConnection:") || strings.Contains(s.Type, ":WANPPPConnection:") {
+			if wanService.MatchString(strings.TrimSpace(s.Type)) {
 				control, service = strings.TrimSpace(s.ControlURL), strings.TrimSpace(s.Type)
 				return true
 			}
@@ -113,6 +126,11 @@ func findWANService(ctx context.Context, location string) (control, service stri
 	if err != nil {
 		return "", "", err
 	}
+	// The control endpoint must be on the gateway itself, where the
+	// description came from.
+	if l, err := url.Parse(location); err != nil || c.Hostname() != l.Hostname() || (c.Scheme != "http" && c.Scheme != "https") {
+		return "", "", errors.New("the gateway's control URL points to another host")
+	}
 	return c.String(), service, nil
 }
 
@@ -121,7 +139,7 @@ func httpGet(ctx context.Context, u string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := upnpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -150,7 +168,7 @@ func soap(ctx context.Context, control, service, action string, args [][2]string
 	}
 	req.Header.Set("Content-Type", `text/xml; charset="utf-8"`)
 	req.Header[textproto.CanonicalMIMEHeaderKey("SOAPAction")] = []string{`"` + service + "#" + action + `"`}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := upnpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -211,7 +229,11 @@ func (m *upnpMapping) Remove(ctx context.Context) error {
 }
 
 func mapUPnP(ctx context.Context, r Request) (Mapping, error) {
-	loc, err := discoverGateway(ctx, r.InternalIP)
+	gw, err := findGateway()
+	if err != nil {
+		return nil, fmt.Errorf("default gateway: %w", err)
+	}
+	loc, err := discoverGateway(ctx, r.InternalIP, gw.To4())
 	if err != nil {
 		return nil, err
 	}

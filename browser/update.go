@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -14,6 +15,9 @@ var version = "dev"
 
 // releasesURL lists the project's GitHub releases.
 const releasesURL = "https://api.github.com/repos/Unggoy1/OpenLink/releases?per_page=20"
+
+// releasePages prefixes every release link the app will open.
+const releasePages = "https://github.com/Unggoy1/OpenLink/releases/"
 
 // UpdateInfo describes a newer release, if there is one.
 type UpdateInfo struct {
@@ -44,19 +48,27 @@ func (a *App) CheckUpdate() UpdateInfo {
 		return info
 	}
 	defer resp.Body.Close()
-	var releases []struct {
-		Tag        string `json:"tag_name"`
-		URL        string `json:"html_url"`
-		Draft      bool   `json:"draft"`
-		Prerelease bool   `json:"prerelease"`
-	}
-	if resp.StatusCode != http.StatusOK || json.NewDecoder(resp.Body).Decode(&releases) != nil {
+	var releases []release
+	if resp.StatusCode != http.StatusOK || json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&releases) != nil {
 		return info
 	}
+	return pickUpdate(info, cur, releases)
+}
+
+type release struct {
+	Tag        string `json:"tag_name"`
+	URL        string `json:"html_url"`
+	Draft      bool   `json:"draft"`
+	Prerelease bool   `json:"prerelease"`
+}
+
+// pickUpdate fills info with the newest release newer than cur.
+func pickUpdate(info UpdateInfo, cur semver, releases []release) UpdateInfo {
 	best := cur
 	for _, r := range releases {
 		v, ok := parseSemver(r.Tag)
-		if !ok || r.Draft || (r.Prerelease && cur.pre == "") {
+		// The link is opened in the browser: only this project's release pages.
+		if !ok || r.Draft || (r.Prerelease && cur.pre == "") || !strings.HasPrefix(r.URL, releasePages) {
 			continue
 		}
 		if v.newer(best) {

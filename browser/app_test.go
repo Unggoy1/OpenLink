@@ -22,7 +22,7 @@ func TestAppListFavoritesSettings(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	ts := httptest.NewServer(directory.New(directory.Config{RegisterKey: "k", ShowUnconfirmed: true}))
+	ts := httptest.NewServer(directory.New(directory.Config{RegisterKey: "k", ShowUnconfirmed: true, AllowPrivateHosts: true}))
 	defer ts.Close()
 	dc := directory.NewClient(ts.URL, "k")
 
@@ -40,6 +40,9 @@ func TestAppListFavoritesSettings(t *testing.T) {
 	a := NewApp()
 	if a.GetSettings().Directory != DefaultDirectory || a.GetSettings().Mode != connect.ModeLoopback {
 		t.Fatalf("defaults: %+v", a.GetSettings())
+	}
+	if err := a.SaveSettings(Settings{Directory: "http://openlink-dir.unggoy.xyz"}); err == nil {
+		t.Fatal("accepted plain http for a directory on the internet")
 	}
 	if err := a.SaveSettings(Settings{Directory: "ftp://nope"}); err == nil {
 		t.Fatal("non-http directory accepted")

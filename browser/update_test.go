@@ -20,3 +20,15 @@ func TestSemverOrder(t *testing.T) {
 		}
 	}
 }
+
+func TestPickUpdateOnlyOpensReleasePages(t *testing.T) {
+	cur, _ := parseSemver("v0.7.1")
+	got := pickUpdate(UpdateInfo{Current: "v0.7.1"}, cur, []release{
+		{Tag: "v0.9.0", URL: "search-ms:query=evil"},
+		{Tag: "v0.8.5", URL: "https://evil.example/OpenLink/releases/tag/v0.8.5"},
+		{Tag: "v0.8.0", URL: "https://github.com/Unggoy1/OpenLink/releases/tag/v0.8.0"},
+	})
+	if !got.Available || got.Latest != "v0.8.0" || got.URL != "https://github.com/Unggoy1/OpenLink/releases/tag/v0.8.0" {
+		t.Fatalf("picked %+v", got)
+	}
+}

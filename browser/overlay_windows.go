@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"image"
 	_ "image/jpeg"
@@ -138,6 +139,8 @@ const (
 	dtWordBreak   = 0x0010
 	dtCalcRect    = 0x0400
 	dtEditControl = 0x2000 // with dtWordBreak: no partly visible last line
+
+	maxThumbSide = 4096 // larger map thumbnails are not decoded
 
 	panelWidth = 400 // DIP
 	rowShort   = 60  // DIP: option row with a one-line name
@@ -1062,7 +1065,17 @@ func loadThumb(url string) *thumbImage {
 	if resp.StatusCode != http.StatusOK {
 		return nil
 	}
-	img, _, err := image.Decode(io.LimitReader(resp.Body, 4<<20))
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if err != nil {
+		return nil
+	}
+	// A small file can declare huge dimensions; check before decoding so it
+	// cannot make the decoder allocate gigabytes.
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil || cfg.Width <= 0 || cfg.Height <= 0 || cfg.Width > maxThumbSide || cfg.Height > maxThumbSide {
+		return nil
+	}
+	img, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
 		return nil
 	}

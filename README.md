@@ -67,9 +67,10 @@ The directory is a single small HTTP service. It carries no game traffic: player
 | `OPENLINK_CLIENT_IP_HOPS` | with `X-Forwarded-For`: how many trusted proxies append to it (default 1). On Railway it is likely `2` (its edge has an outer layer whose address is appended last). Confirm with `/v1/whoami?debug=1` |
 | `OPENLINK_REGISTER_KEY` | optional **trusted-host key**. Registration is open to everyone; hosts that send this key may also list an address other than their own IP, such as a tunnel |
 | `OPENLINK_REQUIRE_KEY` | `1` makes the directory private: every host needs the register key |
-| `OPENLINK_ADMIN_KEY` | enables the admin API below (keep it secret, and different from the register key) |
+| `OPENLINK_ADMIN_KEY` | enables the admin API below: at least 24 characters (use a long random string; a shorter key leaves the admin API off and the log says so). Keep it secret, and different from the register key. Every admin request is logged, including wrong keys |
 | `OPENLINK_BANNED_IPS` | addresses or CIDR ranges that may not list servers, comma separated; these survive redeploys |
-| `OPENLINK_BANNED_NAMES` | words not allowed in server names, comma separated, any case |
+| `OPENLINK_BANNED_NAMES` | words not allowed in server names, descriptions, regions or match names, comma separated, any case |
+| `OPENLINK_ALLOW_PRIVATE_HOSTS` | `1` lists hosts at private (LAN) and loopback addresses. Only for testing on a LAN (`-allow-private-hosts`); never in production |
 
 The older `HICOMM_…` names of these variables still work, so an existing deployment keeps running; switch to the `OPENLINK_…` names when convenient.
 
@@ -83,8 +84,9 @@ openlink-directory -listen 127.0.0.1:8080 -client-ip-header X-Forwarded-For
 **How listings are kept honest.** Anyone can list a server, so the directory checks instead of asking for keys:
 
 - A server appears in the player list only after its game port has answered the directory's probe (within about a minute of starting). A listing that never answers is dropped after 5 minutes (`-confirm-within`). Only proxy-mode hosts answer probes, so OpenLink Server requires proxy mode to be listed.
-- Without the register key, a host can only list its own public IP, or a DNS name that resolves to it (dynamic DNS). This stops the directory being used to point players' traffic at third parties. The directory only probes listed endpoints, never addresses a caller supplies.
-- Limits: 8 listings per IP, 12 registrations per IP per 10 minutes, 500 listings in total.
+- Without the register key, a host can only list its own public IP, or a DNS name that resolves to it (dynamic DNS); a name is listed as the address it resolved to, so repointing it later cannot redirect players. This stops the directory being used to point players' traffic at third parties. Private and loopback addresses are refused. The directory only probes listed endpoints, never addresses a caller supplies.
+- Limits: 8 listings per IP (per /64 for IPv6), 12 registrations per IP per 10 minutes, 100 listings waiting for their first probe, 500 listings in total.
+- Registrations and heartbeats must be sent as `application/json`, which browsers cannot do across sites without permission, so a web page cannot make its visitors register listings.
 - Listings expire 45 s after the last heartbeat. A confirmed server that stops answering stays listed, shown as unreachable.
 
 | Endpoint | |

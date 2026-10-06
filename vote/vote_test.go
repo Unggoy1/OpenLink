@@ -33,6 +33,7 @@ func TestBallotRejectsMalformed(t *testing.T) {
 		func(b *Ballot) { b.Closed = true },
 		func(b *Ballot) { b.Counts[0] = -1 },
 		func(b *Ballot) { b.Options[0].ID = "" },
+		func(b *Ballot) { b.Options[1].ID = b.Options[0].ID }, // duplicate IDs break the app's keyed list
 		func(b *Ballot) {
 			for len(b.Options) <= MaxOptions {
 				b.Options = append(b.Options, Option{ID: "x", Name: "x"})
@@ -86,7 +87,7 @@ func TestNameAndSize(t *testing.T) {
 	}
 	b := Ballot{Round: 1, Mine: -1, Winner: -1, StartMS: -1}
 	for i := 0; i < MaxOptions; i++ {
-		b.Options = append(b.Options, Option{ID: strings.Repeat("i", MaxNameBytes), Name: Name(long)})
+		b.Options = append(b.Options, Option{ID: strings.Repeat("i", MaxNameBytes-1) + string(rune('0'+i)), Name: Name(long)})
 		b.Counts = append(b.Counts, 99)
 	}
 	if d, err := EncodeBallot(b); err != nil || len(d) > MaxDatagram {
@@ -97,7 +98,7 @@ func TestNameAndSize(t *testing.T) {
 func TestLargestBallotKeepsOrDropsThumbs(t *testing.T) {
 	b := Ballot{Round: 1, Mine: -1, Winner: -1, StartMS: -1}
 	for i := 0; i < MaxOptions; i++ {
-		b.Options = append(b.Options, Option{ID: strings.Repeat("i", MaxNameBytes), Name: strings.Repeat("n", MaxNameBytes),
+		b.Options = append(b.Options, Option{ID: strings.Repeat("i", MaxNameBytes-1) + string(rune('0'+i)), Name: strings.Repeat("n", MaxNameBytes),
 			Thumb: ifA + "/" + ifV})
 		b.Counts = append(b.Counts, 99)
 	}
@@ -111,7 +112,7 @@ func TestLargestBallotKeepsOrDropsThumbs(t *testing.T) {
 	}
 	// Typical names keep their thumbnails.
 	for i := range b.Options {
-		b.Options[i].ID, b.Options[i].Name = "kusini-ctf", "CTF: Arena on Kusini Bay"
+		b.Options[i].ID, b.Options[i].Name = "kusini-ctf-"+string(rune('0'+i)), "CTF: Arena on Kusini Bay"
 	}
 	d, _ = EncodeBallot(b)
 	if got, _ := DecodeBallot(d); got.Options[3].Thumb == "" {

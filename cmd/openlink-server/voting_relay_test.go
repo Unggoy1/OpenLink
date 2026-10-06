@@ -21,8 +21,18 @@ func TestVoteThroughRealProxy(t *testing.T) {
 		}
 		return c
 	}
-	server := udp() // stands in for the game server: silent
+	server := udp() // stands in for the game server: answers each datagram
 	defer server.Close()
+	go func() {
+		buf := make([]byte, 2048)
+		for {
+			_, from, err := server.ReadFromUDP(buf)
+			if err != nil {
+				return
+			}
+			server.WriteToUDP([]byte("game reply"), from)
+		}
+	}()
 	v := newVoter(&voteServer{state: 8, connected: 1}, nil)
 	host := &relay.Forwarder{Listen: udp(), Upstream: server.LocalAddr().(*net.UDPAddr), InterceptFrom: v.intercept}
 	v.net = host

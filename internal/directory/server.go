@@ -10,6 +10,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"log/slog"
+	"mime"
 	"net"
 	"net/http"
 	"regexp"
@@ -61,8 +63,17 @@ type Config struct {
 	ClientIPHops int
 	TTL          time.Duration // listing expiry without heartbeat
 	MaxServers   int
-	MaxPerIP     int
-	Now          func() time.Time
+	MaxPerIP     int // listings per IPv4 address or IPv6 /64 (default 8)
+	// MaxUnconfirmed caps listings still waiting for their first successful
+	// reachability probe (default 100), so junk registrations cannot fill
+	// MaxServers. Not applied with ShowUnconfirmed.
+	MaxUnconfirmed int
+	// AllowPrivateHosts lists hosts at private, loopback and similar
+	// addresses. Only for testing on a LAN; off in production.
+	AllowPrivateHosts bool
+	// Log receives admin actions; nil = slog.Default().
+	Log *slog.Logger
+	Now func() time.Time
 }
 
 type entry struct {
@@ -97,6 +108,12 @@ func New(cfg Config) *Server {
 	}
 	if cfg.MaxPerIP == 0 {
 		cfg.MaxPerIP = 8
+	}
+	if cfg.MaxUnconfirmed == 0 {
+		cfg.MaxUnconfirmed = 100
+	}
+	if cfg.Log == nil {
+		cfg.Log = slog.Default()
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
@@ -191,6 +208,10 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusUnauthorized, "registration key required")
 		return
 	}
+	if !jsonBody(r) {
+		httpError(w, http.StatusUnsupportedMediaType, "content type must be application/json")
+		return
+	}
 	var req api.RegisterRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httpError(w, http.StatusBadRequest, "bad json")
@@ -201,15 +222,21 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	now := s.cfg.Now()
+	// Bans and the rate limit come before any DNS lookup.
 	s.mu.Lock()
-	banned, badName := s.bannedLocked(ip), s.badNameLocked(req.Name+" "+req.Description)
+	banned, badName := s.bannedLocked(ip), s.badNameLocked(req.Name+" "+req.Description+" "+req.Region)
+	limited := !banned && !badName && s.noteRegistrationLocked(limitKey(ip), now)
 	s.mu.Unlock()
 	switch {
 	case banned:
 		httpError(w, http.StatusForbidden, "this address may not list servers")
 		return
 	case badName:
-		httpError(w, http.StatusForbidden, "server name or description not allowed")
+		httpError(w, http.StatusForbidden, "server name, description or region not allowed")
+		return
+	case limited:
+		httpError(w, http.StatusTooManyRequests, "too many registrations from this address; try again later")
 		return
 	}
 	if req.Host == "" {
@@ -217,39 +244,42 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 	}
 	// Without the trusted-host key a host may only list its own address (or
 	// a DNS name that resolves to it), so the directory cannot be used to
-	// point players' traffic at a third party.
-	if !keyOK && req.Host != ip && !s.resolvesTo(r.Context(), req.Host, ip) {
-		httpError(w, http.StatusForbidden, "host must be the registering address")
+	// point players' traffic at a third party. A name is listed as the
+	// address it resolved to: it could later be pointed somewhere else.
+	if !keyOK && req.Host != ip {
+		if !s.resolvesTo(r.Context(), req.Host, ip) {
+			httpError(w, http.StatusForbidden, "host must be the registering address")
+			return
+		}
+		req.Host = ip
+	}
+	if !s.cfg.AllowPrivateHosts && privateAddress(req.Host) {
+		httpError(w, http.StatusForbidden, "host must be a public internet address")
 		return
 	}
 	id, tok := randHex(8), randHex(24)
-	now := s.cfg.Now()
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	recent := s.regTimes[ip][:0]
-	for _, t := range s.regTimes[ip] {
-		if now.Sub(t) < s.cfg.RegisterWindow {
-			recent = append(recent, t)
-		}
-	}
-	s.regTimes[ip] = append(recent, now)
-	if len(recent) >= s.cfg.RegisterBurst {
-		httpError(w, http.StatusTooManyRequests, "too many registrations from this address; try again later")
-		return
-	}
 	if len(s.servers) >= s.cfg.MaxServers {
 		httpError(w, http.StatusServiceUnavailable, "directory full")
 		return
 	}
-	perIP := 0
+	perIP, waiting := 0, 0
 	for _, e := range s.servers {
-		if e.ownerIP == ip {
+		if limitKey(e.ownerIP) == limitKey(ip) {
 			perIP++
+		}
+		if !e.confirmed {
+			waiting++
 		}
 	}
 	if perIP >= s.cfg.MaxPerIP {
 		httpError(w, http.StatusTooManyRequests, "too many listings from this address")
+		return
+	}
+	if !s.cfg.ShowUnconfirmed && waiting >= s.cfg.MaxUnconfirmed {
+		httpError(w, http.StatusServiceUnavailable, "too many new servers waiting for their reachability check; try again in a few minutes")
 		return
 	}
 	s.servers[id] = &entry{
@@ -259,6 +289,55 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 		token: tok, ownerIP: ip, registeredAt: now,
 	}
 	writeJSON(w, http.StatusCreated, api.RegisterResponse{ID: id, Token: tok, Host: req.Host})
+}
+
+// noteRegistrationLocked records a registration attempt for key and reports
+// whether it is over the limit. Attempts over the limit are not recorded, so
+// a flood cannot grow the record. s.mu held.
+func (s *Server) noteRegistrationLocked(key string, now time.Time) bool {
+	recent := s.regTimes[key][:0]
+	for _, t := range s.regTimes[key] {
+		if now.Sub(t) < s.cfg.RegisterWindow {
+			recent = append(recent, t)
+		}
+	}
+	if len(recent) >= s.cfg.RegisterBurst {
+		s.regTimes[key] = recent
+		return true
+	}
+	s.regTimes[key] = append(recent, now)
+	return false
+}
+
+// limitKey groups addresses for per-address limits: an IPv4 address, or the
+// /64 network of an IPv6 address (one connection usually gets a whole /64).
+func limitKey(ip string) string {
+	p := net.ParseIP(ip)
+	if p == nil || p.To4() != nil {
+		return ip
+	}
+	return p.Mask(net.CIDRMask(64, 128)).String() + "/64"
+}
+
+// privateAddress reports whether host is an IP address players on the
+// internet cannot reach (private, loopback, link-local, unspecified,
+// multicast or carrier-grade NAT). Names are not checked here.
+func privateAddress(host string) bool {
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	_, cgnat, _ := net.ParseCIDR("100.64.0.0/10")
+	return ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
+		ip.IsMulticast() || ip.IsUnspecified() || cgnat.Contains(ip)
+}
+
+// jsonBody reports whether the request says its body is JSON. Browsers send
+// cross-site requests with other types without asking first; requiring JSON
+// makes them ask (a CORS preflight), which this server never grants.
+func jsonBody(r *http.Request) bool {
+	t, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	return err == nil && t == "application/json"
 }
 
 // resolvesTo reports whether host is a DNS name with an address equal to ip
@@ -323,6 +402,10 @@ func (s *Server) authorized(r *http.Request) (*entry, int) {
 }
 
 func (s *Server) heartbeat(w http.ResponseWriter, r *http.Request) {
+	if !jsonBody(r) {
+		httpError(w, http.StatusUnsupportedMediaType, "content type must be application/json")
+		return
+	}
 	var hb api.Heartbeat
 	if err := json.NewDecoder(r.Body).Decode(&hb); err != nil {
 		httpError(w, http.StatusBadRequest, "bad json")
@@ -346,7 +429,7 @@ func (s *Server) heartbeat(w http.ResponseWriter, r *http.Request) {
 	// What the server is playing is optional and display-only: an invalid
 	// report is dropped rather than failing the heartbeat (and the listing).
 	e.info.Match = nil
-	if hb.Match != nil && hb.Match.Valid() {
+	if hb.Match != nil && hb.Match.Valid() && !s.badNameLocked(hb.Match.Name+" "+hb.Match.Entry) {
 		m := *hb.Match
 		e.info.Match = &m
 	}
@@ -356,7 +439,8 @@ func (s *Server) heartbeat(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(hb.Beacon) > 0 {
 		e.beacon = append(e.beacon[:0], hb.Beacon...)
-		e.beaconAt = now.Add(-time.Duration(max(hb.BeaconAgeMS, 0)) * time.Millisecond)
+		// Clamped: a huge age would overflow into a beacon from the future.
+		e.beaconAt = now.Add(-time.Duration(min(max(hb.BeaconAgeMS, 0), int64(time.Hour/time.Millisecond))) * time.Millisecond)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

@@ -32,6 +32,7 @@ func setup(t *testing.T, cfg Config) (*Server, *Client, *clock) {
 func setupGated(t *testing.T, cfg Config) (*Server, *Client, *clock) {
 	clk := &clock{t: time.Date(2026, 10, 3, 0, 0, 0, 0, time.UTC)}
 	cfg.Now = clk.Now
+	cfg.AllowPrivateHosts = true // tests register from 127.0.0.1
 	s := New(cfg)
 	ts := httptest.NewServer(s)
 	t.Cleanup(ts.Close)
@@ -197,6 +198,7 @@ func TestForgedForwardedForCannotListThirdParty(t *testing.T) {
 	r.RemoteAddr = "10.0.0.2:1"
 	// The client forges the first entry; the proxy appends the real address.
 	r.Header.Set("X-Forwarded-For", "203.0.113.1, 198.51.100.7")
+	r.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	s.ServeHTTP(w, r)
 	if w.Code != 403 {
@@ -338,8 +340,13 @@ func TestDNSNameForOwnAddress(t *testing.T) {
 		return nil, errors.New("no such host")
 	}})
 	ctx := context.Background()
-	if _, err := c.Register(ctx, api.RegisterRequest{Name: "DDNS", Host: "home.example.net", Port: 1343, Build: "b"}); err != nil {
+	reg, err := c.Register(ctx, api.RegisterRequest{Name: "DDNS", Host: "home.example.net", Port: 1343, Build: "b"})
+	if err != nil {
 		t.Fatalf("name resolving to the host's own address: %v", err)
+	}
+	// Listed as the address it resolved to: repointing the name later cannot redirect players.
+	if reg.Host != "127.0.0.1" {
+		t.Fatalf("listed host %q, want the resolved address", reg.Host)
 	}
 	for _, h := range []string{"elsewhere.example.net", "missing.example.net"} {
 		if _, err := c.Register(ctx, api.RegisterRequest{Name: "X", Host: h, Port: 1343, Build: "b"}); code(err) != 403 {
@@ -489,5 +496,104 @@ func TestDescription(t *testing.T) {
 	}
 	if list, _ := c.List(ctx, ""); len(list) != 1 || list[0].Description != "Casual BTB, be nice" {
 		t.Fatalf("listing: %+v", list)
+	}
+}
+
+func TestRegistrationHardening(t *testing.T) {
+	s, c, clk := setupGated(t, Config{BannedNames: []string{"badword"}})
+	ctx := context.Background()
+	post := func(contentType string) int {
+		r := httptest.NewRequest("POST", "/v1/servers", strings.NewReader(`{"name":"x","port":1343,"build":"b"}`))
+		r.RemoteAddr = "127.0.0.1:1"
+		if contentType != "" {
+			r.Header.Set("Content-Type", contentType)
+		}
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, r)
+		return w.Code
+	}
+	// A cross-site form or no-cors fetch cannot register: JSON is required.
+	for _, ct := range []string{"", "text/plain", "application/x-www-form-urlencoded"} {
+		if got := post(ct); got != http.StatusUnsupportedMediaType {
+			t.Fatalf("content type %q: %d", ct, got)
+		}
+	}
+	// A flood past the limit is not recorded, so the record stays small.
+	for i := 0; i < 1000; i++ {
+		post("application/json")
+	}
+	s.mu.Lock()
+	n := len(s.regTimes["127.0.0.1"])
+	s.mu.Unlock()
+	if n > s.cfg.RegisterBurst {
+		t.Fatalf("rate-limit record grew to %d entries", n)
+	}
+	// A match report with a banned word is dropped; the heartbeat still counts.
+	clk.Add(time.Hour)
+	s.Expire()
+	reg, err := c.Register(ctx, api.RegisterRequest{Name: "Fine", Port: 1343, Build: "b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Heartbeat(ctx, reg.ID, reg.Token, api.Heartbeat{Status: "ready", Players: 0,
+		Match: &api.Match{Phase: api.PhaseInGame, Name: "BadWord Slayer"}}); err != nil {
+		t.Fatal(err)
+	}
+	if self, _ := c.Self(ctx, reg.ID, reg.Token); self.Match != nil {
+		t.Fatalf("banned word in the match name was published: %+v", self.Match)
+	}
+}
+
+func TestPrivateHostsAndUnconfirmedCap(t *testing.T) {
+	strict := New(Config{MaxUnconfirmed: 1})
+	if strict.cfg.AllowPrivateHosts {
+		t.Fatal("private hosts allowed by default")
+	}
+	register := func(s *Server, host, from string) int {
+		r := httptest.NewRequest("POST", "/v1/servers", strings.NewReader(`{"name":"x","port":1343,"build":"b"}`))
+		r.RemoteAddr = from + ":1"
+		r.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, r)
+		return w.Code
+	}
+	if got := register(strict, "", "192.168.1.5"); got != http.StatusForbidden {
+		t.Fatalf("private registering address: %d", got)
+	}
+	if got := register(strict, "", "198.51.100.7"); got != http.StatusCreated {
+		t.Fatalf("public address: %d", got)
+	}
+	// The first listing is still unconfirmed, so a second one has to wait.
+	if got := register(strict, "", "198.51.100.8"); got != http.StatusServiceUnavailable {
+		t.Fatalf("over the unconfirmed cap: %d", got)
+	}
+}
+
+func TestLimitKey(t *testing.T) {
+	for in, want := range map[string]string{
+		"198.51.100.7":         "198.51.100.7",
+		"2001:db8:1:2:3:4:5:6": "2001:db8:1:2::/64",
+		"2001:db8:1:2:ffff::1": "2001:db8:1:2::/64",
+		"2001:db8:1:3::1":      "2001:db8:1:3::/64",
+	} {
+		if got := limitKey(in); got != want {
+			t.Errorf("limitKey(%s) = %s, want %s", in, got, want)
+		}
+	}
+}
+
+// The client does not follow a redirect to another host or scheme.
+func TestClientRefusesCrossOriginRedirect(t *testing.T) {
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("redirect followed to %s", r.URL)
+		w.Write([]byte("[]"))
+	}))
+	defer other.Close()
+	redirector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, other.URL+r.URL.Path, http.StatusFound)
+	}))
+	defer redirector.Close()
+	if _, err := NewClient(redirector.URL, "").List(context.Background(), ""); err == nil {
+		t.Fatal("cross-origin redirect accepted")
 	}
 }

@@ -29,6 +29,8 @@ The type check is `npm run check` in `frontend/`.
 - Only one copy runs at a time, because two would compete for UDP 1343. Closing the window leaves the server and frees the port.
 - The session bar shows: contacting → ready ("open Custom Game → Create Match → Server") → playing (traffic flowing). It warns when the server stops advertising or the directory is unreachable.
 - Servers built for another game version are shown but cannot be joined.
+- The directory address must use https://. Plain http:// is accepted only for a directory on this PC or the local network (testing). A directory on the internet cannot send the app to addresses on the player's own network, and redirects to another host are not followed.
+- Only this PC's own game can use the app's relay (in LAN broadcast mode it listens on the LAN address, but other devices are refused).
 - When no listed server runs your game version, a notice says which side is behind: your Halo (update it in Steam) or the servers (their hosts need an OpenLink Server update after a Halo update).
 - Hosting and playing on one PC: when a server runs on this PC (UDP 1343 held by `HaloInfinite.exe` or `openlink-server.exe`), joining uses LAN broadcast for that session, since loopback announcements cannot reach the game there. The session bar says so.
 - A host's optional one-line description is shown under the server name.

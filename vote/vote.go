@@ -62,9 +62,14 @@ func (b *Ballot) Validate() error {
 	if b.Round == 0 || n == 0 || n > MaxOptions || len(b.Counts) != n {
 		return errors.New("vote: malformed ballot")
 	}
-	for _, o := range b.Options {
+	for i, o := range b.Options {
 		if o.ID == "" || len(o.ID) > MaxNameBytes || len(o.Name) > MaxNameBytes || !utf8.ValidString(o.Name) || !ValidThumbRef(o.Thumb) {
 			return errors.New("vote: malformed ballot option")
+		}
+		for _, p := range b.Options[:i] {
+			if p.ID == o.ID { // the app keys options by ID
+				return errors.New("vote: duplicate ballot option")
+			}
 		}
 	}
 	for _, c := range b.Counts {

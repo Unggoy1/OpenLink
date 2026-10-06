@@ -46,9 +46,10 @@ func newFakeIGD(t *testing.T) *fakeIGD {
 			}
 		}
 	}()
-	old := ssdpAddr
+	old, oldGW := ssdpAddr, findGateway
 	ssdpAddr = f.ssdp.LocalAddr().String()
-	t.Cleanup(func() { ssdpAddr = old })
+	findGateway = func() (net.IP, error) { return loopback.To4(), nil }
+	t.Cleanup(func() { ssdpAddr, findGateway = old, oldGW })
 	return f
 }
 

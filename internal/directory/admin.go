@@ -37,15 +37,27 @@ type banRequest struct {
 	Name string `json:"name,omitempty"`
 }
 
+// admin wraps an admin handler: key check, and a log line for every admin
+// request (rejected keys included) with its result.
 func (s *Server) admin(h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if subtle.ConstantTimeCompare([]byte(r.Header.Get("X-Admin-Key")), []byte(s.cfg.AdminKey)) != 1 {
+			s.cfg.Log.Warn("admin request with a wrong key", "method", r.Method, "path", r.URL.Path, "ip", s.clientIP(r))
 			httpError(w, http.StatusUnauthorized, "admin key required")
 			return
 		}
-		h(w, r)
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		h(rec, r)
+		s.cfg.Log.Info("admin", "method", r.Method, "path", r.URL.Path, "status", rec.status, "ip", s.clientIP(r))
 	}
 }
+
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (r *statusRecorder) WriteHeader(code int) { r.status = code; r.ResponseWriter.WriteHeader(code) }
 
 func (s *Server) adminServers(w http.ResponseWriter, _ *http.Request) {
 	now := s.cfg.Now()

@@ -35,6 +35,10 @@ var version = "dev"
 // playerWindow: a player counts as connected if they sent traffic this recently.
 const playerWindow = 15 * time.Second
 
+// maxPerIP: game connections one IP address may hold through the proxy; a
+// few, since players in one home share an address.
+const maxPerIP = 4
+
 const usage = `openlink-server — run a Halo Infinite community server
 
 usage:
@@ -287,7 +291,7 @@ func (a *agent) startProxy(ctx context.Context, wg *sync.WaitGroup) error {
 		return fmt.Errorf("bad server-ip %q", a.cfg.ServerIP)
 	}
 	a.fwd = &relay.Forwarder{Listen: conn, Upstream: server, Allow: a.bans.Allowed, Intercept: sim.Answer,
-		InterceptFrom: a.interceptVote, MaxSessions: a.cfg.MaxPlayers, MaxPPS: a.cfg.MaxPPS}
+		InterceptFrom: a.interceptVote, MaxSessions: a.cfg.MaxPlayers, MaxPPS: a.cfg.MaxPPS, MaxPerIP: maxPerIP}
 	a.log.Info("proxy listening", "public", conn.LocalAddr(), "server", server,
 		"max_players", a.cfg.MaxPlayers, "max_pps", a.cfg.MaxPPS)
 	wg.Add(1)

@@ -21,10 +21,20 @@ type Client struct {
 	HTTP        *http.Client
 }
 
-// NewClient returns a client with sane timeouts.
+// NewClient returns a client with sane timeouts. It follows a redirect only
+// to the same scheme and host, so an https directory cannot be downgraded to
+// http or handed off to another server (with the register key or a token).
 func NewClient(base, registerKey string) *Client {
 	return &Client{Base: strings.TrimRight(base, "/"), RegisterKey: registerKey,
-		HTTP: &http.Client{Timeout: 10 * time.Second}}
+		HTTP: &http.Client{Timeout: 10 * time.Second, CheckRedirect: sameOrigin}}
+}
+
+func sameOrigin(req *http.Request, via []*http.Request) error {
+	first := via[0].URL
+	if len(via) > 3 || req.URL.Scheme != first.Scheme || !strings.EqualFold(req.URL.Host, first.Host) {
+		return http.ErrUseLastResponse
+	}
+	return nil
 }
 
 func (c *Client) do(ctx context.Context, method, path, token string, in, out any) error {

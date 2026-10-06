@@ -57,6 +57,10 @@ func splitList(v string) []string {
 // version is set at build time (-ldflags "-X main.version=v0.1.0").
 var version = "dev"
 
+// minAdminKey is the shortest admin key accepted: the admin API is on the
+// internet, so the key must not be guessable.
+const minAdminKey = 24
+
 func main() {
 	defListen := ":8080"
 	if p := os.Getenv("PORT"); p != "" { // set by Railway and similar hosts
@@ -70,6 +74,7 @@ func main() {
 	bannedNames := flag.String("banned-names", api.Getenv("BANNED_NAMES"), "words not allowed in server names, comma separated, any case (env OPENLINK_BANNED_NAMES)")
 	confirmWithin := flag.Duration("confirm-within", 5*time.Minute, "drop a new listing whose game port has not answered a probe within this time")
 	showUnconfirmed := flag.Bool("show-unconfirmed", false, "list servers before their game port has answered a probe (development)")
+	allowPrivate := flag.Bool("allow-private-hosts", envBool("ALLOW_PRIVATE_HOSTS"), "list hosts at private and loopback addresses, for testing on a LAN (env OPENLINK_ALLOW_PRIVATE_HOSTS=1); off in production")
 	ipHeader := flag.String("client-ip-header", api.Getenv("CLIENT_IP_HEADER"), "header carrying the client IP from a trusted reverse proxy, e.g. X-Forwarded-For (rightmost entry is used) or X-Real-IP (env OPENLINK_CLIENT_IP_HEADER)")
 	trustProxy := flag.Bool("trust-proxy", false, "shorthand for -client-ip-header X-Forwarded-For")
 	hops := flag.Int("client-ip-hops", envInt("CLIENT_IP_HOPS", 1), "with X-Forwarded-For: number of trusted proxies that append to it; the client is that many entries from the right (env OPENLINK_CLIENT_IP_HOPS; likely 2 on Railway: check /v1/whoami?debug=1)")
@@ -85,6 +90,10 @@ func main() {
 		log.Error("-require-key needs -register-key")
 		os.Exit(2)
 	}
+	if *adminKey != "" && len(*adminKey) < minAdminKey {
+		log.Error("admin API off: the admin key must be at least 24 characters (use a long random string)")
+		*adminKey = ""
+	}
 	if *probeEvery <= 0 && !*showUnconfirmed {
 		log.Warn("probes are off, so no server could be confirmed: listing servers unconfirmed")
 		*showUnconfirmed = true
@@ -92,6 +101,7 @@ func main() {
 	dir := directory.New(directory.Config{
 		RegisterKey: *key, RequireKey: *requireKey, AdminKey: *adminKey,
 		ShowUnconfirmed: *showUnconfirmed, ConfirmWithin: *confirmWithin,
+		AllowPrivateHosts: *allowPrivate, Log: log,
 		BannedIPs: splitList(*bannedIPs), BannedNames: splitList(*bannedNames),
 		ClientIPHeader: *ipHeader, ClientIPHops: *hops, TTL: *ttl,
 	})

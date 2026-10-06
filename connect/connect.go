@@ -32,6 +32,13 @@ const (
 	ModeBroadcast = "broadcast" // beacon broadcast from the LAN address
 )
 
+// Limits on the player-side relay: one game client uses one session and
+// well under 100 packets a second.
+const (
+	playerSessions = 4
+	playerPPS      = 500
+)
+
 // LocalBuild returns the build of the local game install, or "" if none is found.
 // installDir may be empty to search the usual Steam libraries.
 func LocalBuild(installDir string) string {
@@ -136,7 +143,13 @@ func Start(s Server, o Options) (*Session, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	ss := &Session{server: s, local: fmt.Sprintf("%s:%d", local, gamePort), mode: mode,
 		cancel: cancel, done: make(chan struct{})}
-	ss.fwd = &relay.Forwarder{Listen: listen, Upstream: upstream, InterceptDown: ss.takeBallot}
+	// Only this PC's own game may use the relay. In broadcast mode it listens
+	// on the LAN address, where other devices could otherwise send through
+	// it (traffic the host would see as this player's).
+	own := udpx.LocalIPv4s()
+	ss.fwd = &relay.Forwarder{Listen: listen, Upstream: upstream, InterceptDown: ss.takeBallot,
+		Allow:       func(ip net.IP) bool { return ip.IsLoopback() || own[ip.String()] },
+		MaxSessions: playerSessions, MaxPPS: playerPPS}
 	dc := directory.NewClient(o.Directory, "")
 
 	var wg sync.WaitGroup

@@ -41,7 +41,7 @@ func TestSessionEndToEnd(t *testing.T) {
 	srvPort := srv.LocalAddr().(*net.UDPAddr).Port
 
 	// Directory with the server registered and a beacon posted.
-	ts := httptest.NewServer(directory.New(directory.Config{RegisterKey: "k", ShowUnconfirmed: true}))
+	ts := httptest.NewServer(directory.New(directory.Config{RegisterKey: "k", ShowUnconfirmed: true, AllowPrivateHosts: true}))
 	defer ts.Close()
 	dc := directory.NewClient(ts.URL, "k")
 	reg, err := dc.Register(ctx, api.RegisterRequest{Name: "Sim", Host: "127.0.0.2", Port: srvPort, Build: "b"})
@@ -69,6 +69,10 @@ func TestSessionEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer sess.Stop()
+	// Only this PC's own game may send through the relay.
+	if sess.fwd.Allow(net.ParseIP("203.0.113.9")) || !sess.fwd.Allow(net.IPv4(127, 0, 0, 1)) {
+		t.Fatal("relay accepts traffic from other devices")
+	}
 
 	buf := make([]byte, 2048)
 	game.SetReadDeadline(time.Now().Add(5 * time.Second))

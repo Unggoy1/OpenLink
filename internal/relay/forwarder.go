@@ -62,6 +62,13 @@ type Forwarder struct {
 	InterceptDown func(b []byte) bool
 	MaxSessions   int // 0 = unlimited
 	MaxPPS        int // per-client packets per second; 0 = unlimited
+	// MaxPerIP limits the sessions one IP address may hold (several players
+	// can share a home router); 0 = unlimited.
+	MaxPerIP int
+	// PendingIdle drops a session the server has never answered this long
+	// after it opened (default 15 s). Junk from many source ports cannot hold
+	// slots, and when MaxSessions is reached such sessions are evicted first.
+	PendingIdle time.Duration
 
 	Stats Stats
 
@@ -96,6 +103,9 @@ type SessionInfo struct {
 func (f *Forwarder) Run(ctx context.Context) error {
 	if f.Idle == 0 {
 		f.Idle = 2 * time.Minute
+	}
+	if f.PendingIdle == 0 {
+		f.PendingIdle = 15 * time.Second
 	}
 	f.mu.Lock()
 	f.sessions = map[string]*session{}
@@ -183,7 +193,18 @@ func (f *Forwarder) session(ctx context.Context, client *net.UDPAddr) (*session,
 	if s, ok := f.sessions[key]; ok {
 		return s, nil
 	}
-	if f.MaxSessions > 0 && len(f.sessions) >= f.MaxSessions {
+	if f.MaxPerIP > 0 {
+		n := 0
+		for _, s := range f.sessions {
+			if s.client.IP.Equal(client.IP) {
+				n++
+			}
+		}
+		if n >= f.MaxPerIP {
+			return nil, errTooManySessions
+		}
+	}
+	if f.MaxSessions > 0 && len(f.sessions) >= f.MaxSessions && !f.evictPendingLocked() {
 		return nil, errTooManySessions
 	}
 	network := "udp4"
@@ -200,6 +221,29 @@ func (f *Forwarder) session(ctx context.Context, client *net.UDPAddr) (*session,
 	f.Stats.Sessions.Add(1)
 	go f.downstream(ctx, s)
 	return s, nil
+}
+
+// answered reports whether the server has replied through the session: a
+// real game client, not just traffic sent at the port.
+func (s *session) answered() bool { return s.dnPkts.Load() > 0 }
+
+// evictPendingLocked closes the oldest session the server never answered,
+// making room for a new one. f.mu held.
+func (f *Forwarder) evictPendingLocked() bool {
+	var oldestKey string
+	var oldest *session
+	for k, s := range f.sessions {
+		if !s.answered() && (oldest == nil || s.since.Before(oldest.since)) {
+			oldestKey, oldest = k, s
+		}
+	}
+	if oldest == nil {
+		return false
+	}
+	oldest.up.Close()
+	delete(f.sessions, oldestKey)
+	f.Stats.Sessions.Add(-1)
+	return true
 }
 
 // downstream copies server replies back to the client.
@@ -243,14 +287,14 @@ func (f *Forwarder) Sessions() []SessionInfo {
 	return out
 }
 
-// Active counts client endpoints that sent traffic within window: the number
-// of players connected through this forwarder.
+// Active counts client endpoints the server has answered that had traffic
+// within window: the number of players connected through this forwarder.
 func (f *Forwarder) Active(window time.Duration) int {
 	cutoff := time.Now().Add(-window).UnixNano()
 	n := 0
 	f.mu.Lock()
 	for _, s := range f.sessions {
-		if s.last.Load() >= cutoff {
+		if s.answered() && s.last.Load() >= cutoff {
 			n++
 		}
 	}
@@ -258,26 +302,28 @@ func (f *Forwarder) Active(window time.Duration) int {
 	return n
 }
 
-// Clients lists the client endpoints that sent traffic within window.
+// Clients lists the client endpoints the server has answered that had
+// traffic within window.
 func (f *Forwarder) Clients(window time.Duration) []*net.UDPAddr {
 	cutoff := time.Now().Add(-window).UnixNano()
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	out := make([]*net.UDPAddr, 0, len(f.sessions))
 	for _, s := range f.sessions {
-		if s.last.Load() >= cutoff {
+		if s.answered() && s.last.Load() >= cutoff {
 			out = append(out, s.client)
 		}
 	}
 	return out
 }
 
-// HasSession reports whether client has a session that sent traffic within window.
+// HasSession reports whether client has a session the server has answered
+// that had traffic within window.
 func (f *Forwarder) HasSession(client *net.UDPAddr, window time.Duration) bool {
 	f.mu.Lock()
 	s, ok := f.sessions[client.String()]
 	f.mu.Unlock()
-	return ok && s.last.Load() >= time.Now().Add(-window).UnixNano()
+	return ok && s.answered() && s.last.Load() >= time.Now().Add(-window).UnixNano()
 }
 
 // SendTo sends b to a client from the listening socket, as the server's replies appear.
@@ -322,7 +368,7 @@ func (f *Forwarder) Drop(ip net.IP) int {
 }
 
 func (f *Forwarder) reap(ctx context.Context) {
-	t := time.NewTicker(10 * time.Second)
+	t := time.NewTicker(min(10*time.Second, f.PendingIdle))
 	defer t.Stop()
 	for {
 		select {
@@ -330,10 +376,11 @@ func (f *Forwarder) reap(ctx context.Context) {
 			return
 		case <-t.C:
 		}
-		cutoff := time.Now().Add(-f.Idle).UnixNano()
+		now := time.Now()
+		cutoff, pending := now.Add(-f.Idle).UnixNano(), now.Add(-f.PendingIdle)
 		f.mu.Lock()
 		for k, s := range f.sessions {
-			if s.last.Load() < cutoff {
+			if s.last.Load() < cutoff || (!s.answered() && s.since.Before(pending)) {
 				s.up.Close()
 				delete(f.sessions, k)
 				f.Stats.Sessions.Add(-1)

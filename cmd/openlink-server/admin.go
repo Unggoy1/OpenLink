@@ -12,6 +12,7 @@ import (
 	"os"
 	"sort"
 	"strconv"
+	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -109,7 +110,11 @@ func (a *agent) serveAdmin(ctx context.Context) {
 	})
 	guard := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		host, _, _ := net.SplitHostPort(r.RemoteAddr)
-		if ip := net.ParseIP(host); ip == nil || !ip.IsLoopback() || r.Header.Get(adminHeader) != "1" {
+		// A web page can rebind its own domain name to 127.0.0.1 and then send
+		// "same-origin" requests here; its Host header still names that domain,
+		// and browsers add Origin. The admin commands send neither.
+		if ip := net.ParseIP(host); ip == nil || !ip.IsLoopback() || r.Header.Get(adminHeader) != "1" ||
+			!localHostHeader(r.Host) || r.Header.Get("Origin") != "" {
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
@@ -291,4 +296,18 @@ func orDash(s string) string {
 		return "—"
 	}
 	return s
+}
+
+// localHostHeader reports whether an HTTP Host header names this PC by
+// address (127.x, ::1) or as localhost, with or without a port.
+func localHostHeader(h string) bool {
+	if host, _, err := net.SplitHostPort(h); err == nil {
+		h = host
+	}
+	h = strings.Trim(h, "[]")
+	if strings.EqualFold(h, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(h)
+	return ip != nil && ip.IsLoopback()
 }

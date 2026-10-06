@@ -1,2 +1,34 @@
 bin/
 
+# Build outputs
+dist/
+native-out/
+native-tests/
+host/
+browser/build/bin/
+browser/frontend/dist/
+browser/frontend/node_modules/
+*.exe
+*.dll
+*.lib
+*.exp
+*.obj
+*.zip
+
+# Files OpenLink Server and the app write at run time (keys, player IPs, logs)
+openlink-server.json
+bans.json
+saved.json
+settings.json
+*.log
+*.log.1
+openlink-diagnostics-*.txt
+/playlist.json
+
+# Never commit captures or keys
+private/
+*.pcap
+*.pcapng
+*.pem
+*.pfx
+*.key

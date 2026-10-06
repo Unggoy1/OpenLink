@@ -122,8 +122,9 @@ func (a *App) SaveSettings(s Settings) error {
 	if s.Mode != connect.ModeLoopback && s.Mode != connect.ModeBroadcast {
 		s.Mode = connect.ModeLoopback
 	}
-	if s.Directory != "" && !strings.HasPrefix(s.Directory, "https://") && !strings.HasPrefix(s.Directory, "http://") {
-		return errors.New("the directory address must start with https://")
+	if s.Directory != "" && !strings.HasPrefix(s.Directory, "https://") &&
+		!(strings.HasPrefix(s.Directory, "http://") && localNetworkURL(s.Directory)) {
+		return errors.New("the directory address must start with https:// (http:// only for a directory on this PC or your local network)")
 	}
 	if err := normalizeOverlay(&s); err != nil {
 		return err
@@ -177,6 +178,18 @@ func (a *App) ListServers() ([]ServerView, error) {
 		return nil, err
 	}
 	local := connect.LocalBuild(s.InstallDir)
+	// The list is keyed by ID in the UI: a repeated ID (only a broken or
+	// hostile directory sends one) is dropped, not allowed to break it. So is
+	// a listing pointing at the player's own network (serverHostAllowed).
+	seen := map[string]bool{}
+	unique := servers[:0]
+	for _, sv := range servers {
+		if !seen[sv.ID] && serverHostAllowed(s.Directory, sv.Host) {
+			seen[sv.ID] = true
+			unique = append(unique, sv)
+		}
+	}
+	servers = unique
 	out := make([]ServerView, len(servers))
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, 8)
@@ -240,7 +253,7 @@ func (a *App) Join(id string) error {
 	}
 	var target *connect.Server
 	for i := range servers {
-		if servers[i].ID == id {
+		if servers[i].ID == id && serverHostAllowed(s.Directory, servers[i].Host) {
 			target = &servers[i]
 		}
 	}

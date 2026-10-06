@@ -21,7 +21,11 @@ func TestLiveDiscoveryReadOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	loc, err := discoverGateway(ctx, ip)
+	gw, gerr := defaultGateway()
+	if gerr != nil {
+		t.Fatal(gerr)
+	}
+	loc, err := discoverGateway(ctx, ip, gw)
 	if err != nil {
 		t.Logf("UPnP: %v", err)
 		return

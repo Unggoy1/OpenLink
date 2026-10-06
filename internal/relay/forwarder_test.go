@@ -257,3 +257,64 @@ func TestSideChannelThroughSessions(t *testing.T) {
 		t.Fatal("stranger has a session")
 	}
 }
+
+// Junk from many source ports cannot hold the session table: sessions the
+// server never answered are evicted for new ones and expire, and they are
+// not counted as players.
+func TestUnansweredSessionsDoNotHoldSlots(t *testing.T) {
+	silent := loop(t) // a server that never answers
+	defer silent.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	f := &Forwarder{Listen: loop(t), Upstream: silent.LocalAddr().(*net.UDPAddr), MaxSessions: 2, PendingIdle: 300 * time.Millisecond}
+	go f.Run(ctx)
+	to := f.Listen.LocalAddr().(*net.UDPAddr)
+	var junk []*net.UDPConn
+	for i := 0; i < 5; i++ {
+		c := loop(t)
+		defer c.Close()
+		junk = append(junk, c)
+		c.WriteToUDP([]byte("junk"), to)
+	}
+	waitSessions := func(want int32) {
+		t.Helper()
+		for deadline := time.Now().Add(2 * time.Second); f.Stats.Sessions.Load() != want; time.Sleep(5 * time.Millisecond) {
+			if time.Now().After(deadline) {
+				t.Fatalf("sessions %d, want %d", f.Stats.Sessions.Load(), want)
+			}
+		}
+	}
+	waitSessions(2) // the table is full of junk, but each new sender evicted the oldest
+	if f.Stats.Snapshot().Dropped != 0 {
+		t.Fatalf("new senders were refused instead of evicting junk: %+v", f.Stats.Snapshot())
+	}
+	if f.Active(time.Minute) != 0 || len(f.Clients(time.Minute)) != 0 ||
+		f.HasSession(junk[4].LocalAddr().(*net.UDPAddr), time.Minute) {
+		t.Fatal("unanswered sessions counted as players")
+	}
+	waitSessions(0) // and they expire after PendingIdle
+}
+
+func TestMaxPerIP(t *testing.T) {
+	server := echoServer(t)
+	defer server.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	f := &Forwarder{Listen: loop(t), Upstream: server.LocalAddr().(*net.UDPAddr), MaxPerIP: 2}
+	go f.Run(ctx)
+	to := f.Listen.LocalAddr().(*net.UDPAddr)
+	answered := 0
+	for i := 0; i < 3; i++ { // all from 127.0.0.1
+		c := loop(t)
+		defer c.Close()
+		if _, ok := send(t, c, to, "hi"); ok {
+			answered++
+		}
+	}
+	if answered != 2 || f.Stats.Snapshot().Dropped == 0 {
+		t.Fatalf("answered %d of 3 with MaxPerIP 2, stats %+v", answered, f.Stats.Snapshot())
+	}
+	if f.Active(time.Minute) != 2 {
+		t.Fatalf("active %d", f.Active(time.Minute))
+	}
+}

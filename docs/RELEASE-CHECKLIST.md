@@ -26,6 +26,7 @@ Built and checked without the game (unit tests, demo build or a simulated server
 - Passive overlay is the default on Windows.
 - Overlay option names wrap onto two lines, with full-height thumbnails (seen in the demo build with names from a real playlist, user).
 - An empty lobby resets the vote pool: the next vote can offer every entry.
+- Security review fixes (2026-10-05, unit-tested; a short live start passed): per-IP and unanswered-session limits in the proxy, votes and player counts only from connections the game answered, directory DNS names listed as their resolved IP, bounded rate-limit records, JSON-only registration, a cap on unconfirmed listings, private hosts refused, admin key of 24+ characters and logged admin actions, duplicate IDs rejected in the app, the app's relay locked to this PC, https-only directories (http for LAN testing), admin API Host/Origin checks, UPnP trusts only the gateway, thumbnail size checks, update links limited to the GitHub releases page, a Content-Security-Policy, pinned GitHub Actions, `npm ci` builds and a fuller `.gitignore`.
 - Merge to `master`, tagged CI releases, website update, unggoy playlist generator limits (user).
 
 ## 1. Tests you can run alone on your PC
@@ -41,6 +42,7 @@ Run a voting server with the local directory (as in R023) and join it with the O
 
 ### Voting
 
+- [ ] Player count and voting still work through the proxy after the security changes (only connections the game answered count).
 - [ ] A vote after a match (not only the first one in the lobby).
 - [ ] Everyone leaves, then someone joins: the first vote can include the map just played (the log says "every playlist entry can be offered again").
 - [ ] Thumbnails and long names in a live vote. Use an unggoy playlist with long map and mode names.
@@ -75,6 +77,7 @@ Run a voting server with the local directory (as in R023) and join it with the O
 - [ ] `server_owned`: no player can start or end a match.
 - [ ] Voting with several voters: counts update for everyone, a tie, nobody votes (random pick), a player changes their vote.
 - [ ] A player joins mid-vote and gets the ballot; a player leaves mid-vote.
+- [ ] Two players from the same home (one public IP) are both counted and can both vote.
 - [ ] Linux app (the CI build) on a real Linux or Proton machine: join, vote in the app panel, overlay settings hidden.
 
 ## 3. Tests that need another network or setup
@@ -92,7 +95,7 @@ Run a voting server with the local directory (as in R023) and join it with the O
   - [ ] A player guide: install, join, voting, the overlay and controller voting, and that the app does not modify the game.
   - [ ] Privacy note: the directory sees host IP addresses; the app talks to the directory, GitHub (update check) and Halo Waypoint (map thumbnails); OpenLink Server talks to your router only with `auto_port_forward`. Nothing asks for Xbox credentials.
 - [ ] Smoke test of each release artifact on a clean PC: the OpenLink Server zip, the Windows app and the Linux app.
-- [ ] **Production directory settings on Railway**: set `OPENLINK_ADMIN_KEY`; keep `OPENLINK_REGISTER_KEY` (or the old `HICOMM_REGISTER_KEY`) as the trusted-host key for tunnels; set `OPENLINK_REQUIRE_KEY=1` only to keep the directory private until release. Check logging.
+- [ ] **Production directory settings on Railway**: set `OPENLINK_ADMIN_KEY` (at least 24 characters, or the admin API stays off); keep `OPENLINK_REGISTER_KEY` (or the old `HICOMM_REGISTER_KEY`) as the trusted-host key for tunnels; set `OPENLINK_REQUIRE_KEY=1` only to keep the directory private until release. Check logging.
 - [ ] **Live check of the safeguards**: a port-forwarded host appears within about a minute; a tunnel host with the key appears; a host with a closed port never appears and its log says so; an admin ban removes a listing.
 - [ ] Idea, not decided: an `openlink-server end-match` admin command (the DLL knows the game's end-game switch), for a stuck or empty match.
 - [ ] **Dockerized host with Wine/Proton** (Linux servers). Not attempted yet; every step is unproven:

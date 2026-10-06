@@ -146,7 +146,9 @@ BackendReport BackendSetLeader(uint64_t xuid,uint32_t wait_ms) noexcept;
 // TeamBalance spreads the non-observers of a team mode evenly over the match's
 // teams once per match before spawn and clears carried-over team requests.
 // mode is TeamModeEven or TeamModeShuffle; count (0-8) and size (0-32) are the
-// playlist entry's team count / team size, 0 when not given (TeamCount).
+// playlist entry's team count / team size, 0 when not given (TeamCount). They
+// apply to the next match only (cleared at its prep), so send them with every
+// selection; flags and mode persist.
 // ERROR_INVALID_PARAMETER for unknown flags or out-of-range values.
 uint32_t BackendTeamPolicy(uint32_t flags,uint32_t mode,uint32_t count,uint32_t size) noexcept;
 // Cancels pending work and restores our table slot; module remains pinned so

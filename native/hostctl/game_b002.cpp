@@ -256,9 +256,12 @@ void TickTeams(uintptr_t session,uintptr_t simulation,int32_t state,bool start_r
         }
     }
     const bool before_spawn=(state==HostPreGame && start_requested) || state==HostStarting;
-    if(teams && (policy&TeamBalance) && !balanced && before_spawn) {
+    if(!balanced && before_spawn) {
         balanced=true;
-        BalanceTeams(session,mask,changed);
+        if(teams && (policy&TeamBalance)) BalanceTeams(session,mask,changed);
+        // The entry's team count/size apply to this match only: if the next
+        // entry's rules never arrive, that match falls back to two teams.
+        team_count.store(0); team_size.store(0);
     }
     if(changed) NotifyTeams(session);
 }

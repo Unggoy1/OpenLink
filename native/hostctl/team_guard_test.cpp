@@ -33,9 +33,10 @@ int main() {
     check(TeamCount(10,0,0)==2,"default is two teams");
     check(TeamCount(10,4,0)==4,"playlist count");
     check(TeamCount(10,0,3)==4,"teams of 3 for 10 players -> 4 teams");
-    check(TeamCount(8,0,4)==2 && TeamCount(1,0,4)==1,"teams of 4");
+    check(TeamCount(8,0,4)==2 && TeamCount(9,0,4)==3,"teams of 4");
+    check(TeamCount(4,0,4)==2 && TeamCount(3,0,4)==2 && TeamCount(1,0,4)==2,"never fewer than two teams");
     check(TeamCount(40,0,1)==8 && TeamCount(5,12,0)==8,"at most 8 teams");
-    check(TeamCount(0,0,3)==1,"at least one team");
+    check(TeamCount(0,0,3)==2,"no players still means two teams");
 
     {   // one player on Cobra keeps Cobra
         const int8_t current[]={1}; int8_t out[1]={};

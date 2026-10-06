@@ -22,12 +22,13 @@ enum TeamMode : uint32_t { TeamModeEven=0,TeamModeShuffle=1 };
 
 // Number of teams for a team-mode match with `players` non-observers: the
 // playlist's team count if given, else enough teams of `size` for everyone,
-// else 2 (Eagle and Cobra). Always 1-8.
+// else 2 (Eagle and Cobra). Always 2-8, so a team mode never puts everyone on
+// one team (teams of 4 with only 4 players: two teams of 2).
 inline unsigned TeamCount(unsigned players,unsigned count,unsigned size) noexcept {
     unsigned teams=2;
     if(count) teams=count;
     else if(size) teams=(players+size-1)/size;
-    return teams<1 ? 1 : teams>kMaxTeams ? kMaxTeams : teams;
+    return teams<2 ? 2 : teams>kMaxTeams ? kMaxTeams : teams;
 }
 
 // Assigns n players (in peer order, current = their current team, -1 none) to

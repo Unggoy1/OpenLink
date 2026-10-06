@@ -5,8 +5,10 @@ import (
 	"flag"
 	"io"
 	"log/slog"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"halocommunity/internal/hostctl"
@@ -98,5 +100,24 @@ func TestWarnFFATeamsOncePerEntry(t *testing.T) {
 	a.warnFFATeams(0) // once per entry
 	if len(h.warnings) != 1 {
 		t.Fatalf("warnings %q", h.warnings)
+	}
+}
+
+type teamSelectControl struct {
+	fakeControl
+	teamFake
+}
+
+// A manual selection (admin select) is not a playlist entry: it gets the
+// default team rules, not the previous entry's count or size.
+func TestManualSelectionSendsDefaultTeams(t *testing.T) {
+	f := &teamSelectControl{}
+	a := &agent{control: f, cfg: config{TeamBalance: "shuffle"}, log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	a.entryTeams(&playlist.Entry{ID: "race", Teams: &playlist.Teams{Size: 4}}) // the previous entry
+	w := httptest.NewRecorder()
+	a.handleControlSelect(w, httptest.NewRequest("POST", "/host-control/select", strings.NewReader(selectionJSON)))
+	want := hostctl.TeamPolicy{Flags: hostctl.TeamGuardFFA | hostctl.TeamBalance, Mode: hostctl.TeamModeShuffle}
+	if w.Code != 200 || len(f.got) != 1 || f.got[0] != want {
+		t.Fatalf("%d %+v", w.Code, f.got)
 	}
 }

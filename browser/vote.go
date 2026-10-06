@@ -74,11 +74,24 @@ func (a *App) Vote(round uint64, choice int) error {
 	if sess == nil {
 		return errors.New("not joined to a server")
 	}
-	return sess.Vote(round, choice)
+	if err := sess.Vote(round, choice); err != nil {
+		a.events.Add("vote in round %d failed: %v", round, err)
+		return err
+	}
+	a.events.Add("voted option %d in round %d", choice, round)
+	return nil
 }
 
+// OverlaySupported reports whether this build has the in-game vote overlay.
+func (a *App) OverlaySupported() bool { return a.overlay != nil }
+
+// OverlayKeyConflicts returns the hotkeys (as written) that another app has
+// already taken. Keys the overlay itself holds right now are not reported.
+func (a *App) OverlayKeyConflicts(keys []string) []string { return a.overlay.conflicts(keys) }
+
 // watchVotes alerts the player when a new vote opens: a Windows notification
-// and a flashing taskbar button, since they are usually in the game.
+// and a flashing taskbar button, since they are usually in the game. It also
+// feeds the overlay, which decides for itself whether to show.
 func (a *App) watchVotes(ctx context.Context) {
 	notifications := runtime.InitializeNotifications(ctx) == nil
 	t := time.NewTicker(500 * time.Millisecond)
@@ -90,6 +103,7 @@ func (a *App) watchVotes(ctx context.Context) {
 		case <-t.C:
 		}
 		b := a.Ballot()
+		a.overlay.update(b, a.GetSettings())
 		if b == nil || b.Closed || b.Round == a.notified {
 			continue
 		}

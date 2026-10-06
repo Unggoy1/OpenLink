@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+
+	"halocommunity/internal/api"
 )
 
 const (
@@ -15,6 +17,7 @@ const (
 	OpInitialize           uint16 = 5
 	OpStart                uint16 = 6 // start the lobby's match (start mode 1), HostPreGame only
 	OpServerOwned          uint16 = 7 // lobby control mode (ServerOwned* constants)
+	OpSetName              uint16 = 8 // name in the in-game server list (ValidName)
 	CodeOK                 uint16 = 0
 	CodeUnsupported        uint16 = 1
 	CodeNativePending      uint16 = 2
@@ -60,7 +63,26 @@ type Request struct {
 	PID   uint32
 	Pair  AssetPair
 	Mode  uint32 // OpServerOwned
+	Name  string // OpSetName
 }
+
+// MaxNameLength is the longest in-game server name (api.GameName).
+const MaxNameLength = api.MaxGameNameLength
+
+// ValidName reports whether s can be sent with OpSetName: 1-47 printable
+// ASCII characters (space through tilde).
+func ValidName(s string) bool {
+	if len(s) == 0 || len(s) > MaxNameLength {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < 0x20 || s[i] > 0x7e {
+			return false
+		}
+	}
+	return true
+}
+
 
 // OpServerOwned modes.
 const (
@@ -140,6 +162,11 @@ func requestSize(r Request) (int, error) {
 			return 0, errors.New("invalid server-owned mode")
 		}
 		return 52, nil
+	case OpSetName:
+		if !ValidName(r.Name) {
+			return 0, errors.New("server name must be 1-47 printable ASCII characters")
+		}
+		return 48 + MaxNameLength + 1, nil
 	case OpPrepare, OpPrepareEngine, OpInitialize:
 		if !r.Pair.Valid() {
 			return 0, errors.New("map and mode require nonzero asset and version IDs")
@@ -169,6 +196,9 @@ func EncodeRequest(w io.Writer, r Request) error {
 	}
 	if r.Op == OpServerOwned {
 		binary.LittleEndian.PutUint32(b[48:], r.Mode)
+	}
+	if r.Op == OpSetName {
+		copy(b[48:], r.Name) // zero-padded; the last byte stays the terminator
 	}
 	return writeFrame(w, b)
 }
@@ -202,6 +232,21 @@ func DecodeRequest(rd io.Reader) (Request, error) {
 		if r.Mode = binary.LittleEndian.Uint32(b[48:]); r.Mode > serverOwnedHighestMode {
 			return r, errors.New("invalid server-owned mode")
 		}
+	case OpSetName:
+		if len(b) != 48+MaxNameLength+1 {
+			return r, errors.New("invalid set-name size")
+		}
+		field := b[48:]
+		n := 0
+		for n < len(field) && field[n] != 0 {
+			n++
+		}
+		for _, c := range field[n:] {
+			if c != 0 {
+				return r, errors.New("set-name padding must be zero")
+			}
+		}
+		r.Name = string(field[:n])
 	case OpPrepare, OpPrepareEngine, OpInitialize:
 		if len(b) != 112 {
 			return r, errors.New("invalid prepare size")

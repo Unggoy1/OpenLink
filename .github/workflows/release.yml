@@ -51,21 +51,17 @@ jobs:
             GOOS=$1 GOARCH=$2 go build -trimpath -ldflags "-s -w -X main.version=$VERSION" \
               -o "dist/$3-$1-$2$ext" "./cmd/$3"
           }
-          build windows amd64 hi-connector
-          build windows amd64 hi-hostagent
-          build windows amd64 hi-directory
-          build linux   amd64 hi-connector
-          build linux   amd64 hi-directory
-          build linux   arm64 hi-connector
-          build linux   arm64 hi-directory
+          build windows amd64 openlink-directory
+          build linux   amd64 openlink-directory
+          build linux   arm64 openlink-directory
           ls -l dist
       - uses: actions/upload-artifact@v4
         with:
           name: tools
           path: dist/*
 
-  # Host package: hi-hostagent.exe, the host-control DLL and its loader, plus
-  # example configs, in one zip. The DLL is built with the runner's MSVC x64
+  # OpenLink Server package: openlink-server.exe, openlink-control.dll and
+  # openlink-loader.exe plus example configs, in one zip. The DLL is built with the runner's MSVC x64
   # tools (native/hostctl/vcvars.cmd finds them) and a static C runtime.
   host-windows:
     needs: test
@@ -81,13 +77,13 @@ jobs:
       - name: Native tests
         shell: cmd
         run: |
-          for %%t in (slot provider mailbox image choice snapshot backend) do (
+          for %%t in (slot provider mailbox image choice snapshot backend beacon) do (
             call native\hostctl\test-%%t.cmd "%GITHUB_WORKSPACE%\native-tests\%%t" || exit /b 1
           )
       - name: DLL-backed Go tests
         shell: pwsh
         run: |
-          $env:HOSTCTL_TEST_DLL = "$env:GITHUB_WORKSPACE\native-out\hi-hostctl.dll"
+          $env:HOSTCTL_TEST_DLL = "$env:GITHUB_WORKSPACE\native-out\openlink-control.dll"
           $env:HOSTCTL_TEST_HARNESS = "$env:GITHUB_WORKSPACE\native-out\hostctl-harness.exe"
           go test -count=1 ./internal/hostctl/
       - name: Package
@@ -96,15 +92,15 @@ jobs:
           CGO_ENABLED: "0"
         run: |
           New-Item -ItemType Directory host | Out-Null
-          go build -trimpath -ldflags "-s -w -X main.version=$env:VERSION" -o host\hi-hostagent.exe ./cmd/hi-hostagent
-          Copy-Item native-out\hi-hostctl.dll, native-out\hostctl-loader.exe host\
+          go build -trimpath -ldflags "-s -w -X main.version=$env:VERSION" -o host\openlink-server.exe ./cmd/openlink-server
+          Copy-Item native-out\openlink-control.dll, native-out\openlink-loader.exe host\
           Copy-Item packaging\host\* host\
-          Compress-Archive -Path host\* -DestinationPath OpenLink-host-windows-amd64.zip
+          Compress-Archive -Path host\* -DestinationPath OpenLink-Server-windows-amd64.zip
           Get-ChildItem host | Format-Table Name, Length
       - uses: actions/upload-artifact@v4
         with:
           name: host-windows
-          path: OpenLink-host-windows-amd64.zip
+          path: OpenLink-Server-windows-amd64.zip
 
   browser-windows:
     needs: test
@@ -133,7 +129,7 @@ jobs:
           path: browser/build/bin/OpenLink-windows-amd64.exe
 
   # Experimental: the Linux app has not been tested yet. A failure here does
-  # not block the release; Linux players can use hi-connector meanwhile.
+  # not block the release.
   browser-linux:
     needs: test
     runs-on: ubuntu-24.04

@@ -69,6 +69,19 @@
   const hiddenOtherVersions = $derived(
     localBuild && !filters.otherVersions ? servers.filter((s) => !s.buildMatch).length : 0,
   );
+  // When no server runs the player's game version, say which side is behind.
+  // Builds start with a build number, e.g. "269225.26.04.08.1618-1.hi_1_13_0".
+  const buildNumber = (b: string) => parseInt(b.split('.')[0], 10);
+  const versionNotice = $derived.by(() => {
+    if (!localBuild || servers.length === 0 || servers.some((s) => s.buildMatch)) return '';
+    const mine = buildNumber(localBuild);
+    const theirs = servers.map((s) => buildNumber(s.build)).filter((n) => !isNaN(n));
+    if (isNaN(mine) || theirs.length === 0) return '';
+    if (theirs.every((n) => n < mine))
+      return 'Your Halo Infinite is newer than every listed server. Halo was probably just updated: servers come back once their hosts install an OpenLink Server update for the new version.';
+    if (theirs.every((n) => n > mine)) return 'Your Halo Infinite is older than every listed server. Update it in Steam to join them.';
+    return 'No listed server runs your game version.';
+  });
 
   async function refresh() {
     if (!settings?.directory) return;
@@ -138,6 +151,33 @@
     return s.pingMs < 1 ? '<1 ms' : `${s.pingMs} ms`;
   }
 
+  // What a server is playing, as its host reports it.
+  function matchText(m: main.MatchView): string {
+    switch (m.phase) {
+      case 'lobby':
+        return m.name ? `In lobby · next: ${m.name}` : 'In lobby';
+      case 'voting':
+        return 'Voting for the next match';
+      case 'starting':
+        return m.name ? `Starting: ${m.name}` : 'Starting a match';
+      case 'in_game':
+        return m.name ? `${m.name} · in game` : 'In game';
+      case 'post_game':
+        return m.name ? `${m.name} · match over` : 'Match over';
+    }
+    return '';
+  }
+
+  // Map thumbnails: which URL is being tried (.jpg, then .png), keyed by the
+  // first URL so a new map starts fresh; past the end = no image.
+  let thumbTry = $state<Record<string, number>>({});
+  const matchThumb = (m: main.MatchView | undefined) =>
+    m?.thumbs?.length ? m.thumbs[thumbTry[m.thumbs[0]] ?? 0] : undefined;
+  function matchThumbFailed(m: main.MatchView) {
+    const key = m.thumbs[0];
+    thumbTry[key] = (thumbTry[key] ?? 0) + 1;
+  }
+
   onMount(() => {
     (async () => {
       settings = await GetSettings();
@@ -204,6 +244,7 @@
           Halo Infinite was not found, so game versions can't be checked. Set the game folder in Settings.
         </p>
       {/if}
+      {#if versionNotice}<p class="notice warn">{versionNotice}</p>{/if}
       {#if listError}<p class="notice warn">{listError}</p>{/if}
       {#if actionError}<p class="notice warn">{actionError}</p>{/if}
 
@@ -254,7 +295,24 @@
                     aria-pressed={s.favorite}>{s.favorite ? '★' : '☆'}</button
                   >
                 </td>
-                <td class="name">{s.name}</td>
+                <td class="name">
+                  <div class="server">
+                    {#if s.match}
+                      {@const m = s.match}
+                      {@const thumb = matchThumb(m)}
+                      <div class="mthumb">
+                        {#if thumb}
+                          <img src={thumb} alt="" loading="lazy" decoding="async" onerror={() => matchThumbFailed(m)} />
+                        {/if}
+                      </div>
+                    {/if}
+                    <div class="server-text">
+                      <div>{s.name}</div>
+                      {#if s.description}<div class="desc" title={s.description}>{s.description}</div>{/if}
+                      {#if s.match}<div class="match" class:live={s.match.phase === 'in_game'}>{matchText(s.match)}</div>{/if}
+                    </div>
+                  </div>
+                </td>
                 <td>{s.region || '—'}</td>
                 <td>{s.players >= 0 ? s.players : '—'}</td>
                 <td>{ping(s)}</td>
@@ -338,6 +396,27 @@
   .star { background: none; border: none; padding: 0 2px; font-size: 18px; line-height: 1; color: var(--muted); }
   .star.on { color: #ffd166; }
   .name { font-weight: 600; }
+  .server { display: flex; align-items: center; gap: 12px; }
+  .server-text { min-width: 0; }
+  .mthumb {
+    flex: 0 0 auto;
+    width: 64px;
+    aspect-ratio: 16 / 9;
+    border-radius: 4px;
+    overflow: hidden;
+    background: var(--bg);
+  }
+  .mthumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .match { font-weight: 400; font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .match.live { color: var(--accent); }
+  .desc {
+    font-weight: 400;
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 2px;
+    overflow-wrap: anywhere;
+  }
+  tr.dim .mthumb { opacity: 0.5; }
   .state { color: var(--muted); font-size: 13px; }
   .act { text-align: right; width: 1%; white-space: nowrap; }
   tr.dim .name { color: var(--faint); }

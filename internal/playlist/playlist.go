@@ -23,15 +23,14 @@ type Content struct {
 	VersionID string `json:"version_id"`
 }
 
-// Entry is one playable map/mode pair. ModeKind is "custom" for a UGC game
-// variant (the normal case) or "engine" for an engine game variant.
+// Entry is one playable map/mode pair: a map and a published game variant,
+// as in a custom game.
 type Entry struct {
-	ID       string  `json:"id"`
-	Name     string  `json:"name,omitempty"`
-	Map      Content `json:"map"`
-	Mode     Content `json:"mode"`
-	ModeKind string  `json:"mode_kind,omitempty"` // default "custom"
-	Enabled  *bool   `json:"enabled,omitempty"`   // default true
+	ID      string  `json:"id"`
+	Name    string  `json:"name,omitempty"`
+	Map     Content `json:"map"`
+	Mode    Content `json:"mode"`
+	Enabled *bool   `json:"enabled,omitempty"` // default true
 }
 
 // ThumbRef is the entry's map thumbnail reference for vote ballots
@@ -81,11 +80,14 @@ func Parse(b []byte) (*File, error) {
 			return nil, fmt.Errorf("playlist: duplicate entry id %q", e.ID)
 		}
 		seen[e.ID] = true
-		if e.ModeKind == "" {
-			e.ModeKind = "custom"
-		}
-		if e.ModeKind != "custom" && e.ModeKind != "engine" {
-			return nil, fmt.Errorf("playlist: entry %q mode_kind %q must be custom or engine", e.ID, e.ModeKind)
+		// IDs and names go on vote ballots, which cap them at vote.MaxNameBytes.
+		for _, f := range []struct{ field, value string }{{"id", e.ID}, {"name", e.Name}} {
+			if n := len(f.value); n > vote.MaxNameBytes {
+				return nil, fmt.Errorf("playlist: entry %q %s is %d bytes; the limit is %d UTF-8 bytes (not characters)", e.ID, f.field, n, vote.MaxNameBytes)
+			}
+			if strings.IndexFunc(f.value, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0 {
+				return nil, fmt.Errorf("playlist: entry %q %s contains a control character", e.ID, f.field)
+			}
 		}
 		for _, id := range []struct{ name, value string }{
 			{"map.asset_id", e.Map.AssetID}, {"map.version_id", e.Map.VersionID},
@@ -152,17 +154,6 @@ func (b *Bag) Next() Entry {
 	b.pos++
 	b.last = i
 	return b.entries[i]
-}
-
-// NextMatching returns the next entry for which ok is true, consuming the
-// entries it skips. It reports false after a full cycle without a match.
-func (b *Bag) NextMatching(ok func(Entry) bool) (Entry, bool) {
-	for range len(b.entries) * 2 {
-		if e := b.Next(); ok(e) {
-			return e, true
-		}
-	}
-	return Entry{}, false
 }
 
 func (b *Bag) refill() {

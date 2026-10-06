@@ -28,7 +28,7 @@ func freePort(t *testing.T) int {
 // The "game" listens on the discovery port and sends to the session's local address.
 func TestSessionEndToEnd(t *testing.T) {
 	gamePort, discPort := freePort(t), freePort(t)
-	t.Setenv("HICOMM_DEV_PORTS", fmt.Sprintf("%d,%d", gamePort, discPort))
+	t.Setenv("OPENLINK_DEV_PORTS", fmt.Sprintf("%d,%d", gamePort, discPort))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -41,7 +41,7 @@ func TestSessionEndToEnd(t *testing.T) {
 	srvPort := srv.LocalAddr().(*net.UDPAddr).Port
 
 	// Directory with the server registered and a beacon posted.
-	ts := httptest.NewServer(directory.New(directory.Config{RegisterKey: "k"}))
+	ts := httptest.NewServer(directory.New(directory.Config{RegisterKey: "k", ShowUnconfirmed: true}))
 	defer ts.Close()
 	dc := directory.NewClient(ts.URL, "k")
 	reg, err := dc.Register(ctx, api.RegisterRequest{Name: "Sim", Host: "127.0.0.2", Port: srvPort, Build: "b"})

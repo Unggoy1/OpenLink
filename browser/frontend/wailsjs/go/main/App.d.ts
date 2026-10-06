@@ -6,6 +6,8 @@ export function Ballot():Promise<main.BallotView>;
 
 export function CheckUpdate():Promise<main.UpdateInfo>;
 
+export function Diagnostics():Promise<string>;
+
 export function GetSettings():Promise<main.Settings>;
 
 export function Join(arg1:string):Promise<void>;
@@ -15,6 +17,10 @@ export function Leave():Promise<void>;
 export function ListServers():Promise<Array<main.ServerView>>;
 
 export function LocalBuild():Promise<string>;
+
+export function OverlayKeyConflicts(arg1:Array<string>):Promise<Array<string>>;
+
+export function OverlaySupported():Promise<boolean>;
 
 export function SaveSettings(arg1:main.Settings):Promise<void>;
 

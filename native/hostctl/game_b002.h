@@ -107,6 +107,12 @@ BackendReport BackendStart(uint32_t wait_ms) noexcept;
 // Returns ERROR_SUCCESS, ERROR_INVALID_FUNCTION (bytes differ) or a Win32 error.
 // StopGameBackend restores the original bytes.
 uint32_t BackendServerOwned(uint32_t mode) noexcept;
+// Sets the name in the in-game server list (beacon_name.h): on the next engine
+// tick the 48 zero-filled UTF-16 units replace the beacon object's PC name,
+// after the object's fields are checked. OK when written and read back, Busy
+// before the beacon started, Unsupported if the object differs, Pending if no
+// tick ran within wait_ms (at most 2000).
+BackendReport BackendSetName(const uint16_t* units,uint32_t wait_ms) noexcept;
 // Cancels pending work and restores our table slot; module remains pinned so
 // a callback already fetched by another thread still has a valid target.
 uint32_t StopGameBackend() noexcept;

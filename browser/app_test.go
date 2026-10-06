@@ -17,11 +17,12 @@ import (
 func TestAppListFavoritesSettings(t *testing.T) {
 	t.Setenv("AppData", t.TempDir()) // os.UserConfigDir on Windows
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("OPENLINK_DIRECTORY", "")
 	t.Setenv("HICOMM_DIRECTORY", "")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	ts := httptest.NewServer(directory.New(directory.Config{RegisterKey: "k"}))
+	ts := httptest.NewServer(directory.New(directory.Config{RegisterKey: "k", ShowUnconfirmed: true}))
 	defer ts.Close()
 	dc := directory.NewClient(ts.URL, "k")
 

@@ -75,7 +75,7 @@ func StartManaged(ctx context.Context, process *os.Process, executable, dll stri
 	if err != nil {
 		return nil, err
 	}
-	helper := filepath.Join(filepath.Dir(dll), "hostctl-loader.exe")
+	helper := filepath.Join(filepath.Dir(dll), "openlink-loader.exe")
 	for _, path := range []string{dll, executable, helper} {
 		info, e := os.Stat(path)
 		if e != nil {

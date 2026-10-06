@@ -96,6 +96,25 @@ func EncodeBallot(b Ballot) ([]byte, error) {
 	return d, err
 }
 
+// BallotSize is the encoded size of b in bytes, with or without its
+// thumbnails, ignoring MaxDatagram. Host agents use it to reject playlists
+// whose ballots could not be sent whole.
+func BallotSize(b Ballot, thumbs bool) int {
+	if !thumbs {
+		bare := b
+		bare.Options = make([]Option, len(b.Options))
+		for i, o := range b.Options {
+			bare.Options[i] = Option{ID: o.ID, Name: o.Name}
+		}
+		b = bare
+	}
+	j, err := json.Marshal(b)
+	if err != nil {
+		return 0
+	}
+	return len(BallotPrefix) + len(j)
+}
+
 // DecodeBallot parses a ballot datagram; ok is false if d is not one.
 func DecodeBallot(d []byte) (b Ballot, ok bool) {
 	if !decode(d, BallotPrefix, &b) || b.Validate() != nil {

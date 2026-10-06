@@ -211,3 +211,40 @@ func TestBridgeConcurrentExchangesAndStaleGenerations(t *testing.T) {
 		})
 	}
 }
+
+func TestBridgeSetName(t *testing.T) {
+	a, b := net.Pipe()
+	defer a.Close()
+	defer b.Close()
+	var token [32]byte
+	token[0] = 3
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	got := make(chan string, 1)
+	go func() {
+		if EncodeRequest(b, Request{Op: OpHello, ID: 1, Token: token, PID: 42}) != nil {
+			return
+		}
+		if _, err := DecodeReply(b); err != nil {
+			return
+		}
+		r, err := DecodeRequest(b)
+		if err != nil || r.Op != OpSetName || r.Token != token {
+			got <- "bad request"
+			return
+		}
+		got <- r.Name
+		EncodeReply(b, Reply{Code: CodeOK, ID: r.ID, PID: 42})
+	}()
+	peer, err := AcceptBridge(ctx, a, token, 42)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := peer.SetName(ctx, "café"); err == nil || peer.Closed() {
+		t.Fatalf("invalid name sent or closed the bridge: %v", err)
+	}
+	r, err := peer.SetName(ctx, "Community Server")
+	if err != nil || r.Code != CodeOK || <-got != "Community Server" {
+		t.Fatalf("set name: %+v %v", r, err)
+	}
+}

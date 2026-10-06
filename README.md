@@ -1,5 +1,8 @@
 # OpenLink
 
+> [!CAUTION]
+> This project is in early development and lots of things are broken or buggy. Use at your own risk
+
 **Community dedicated servers for Halo Infinite.** Run your own Halo Infinite server, list it in a community directory, and let players anywhere join it, using the game's own LAN server mode. Players' games are never modified.
 
 Three parts:

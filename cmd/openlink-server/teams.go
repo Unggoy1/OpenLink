@@ -5,7 +5,39 @@ import (
 	"time"
 
 	"halocommunity/internal/hostctl"
+	"halocommunity/internal/playlist"
 )
+
+// entryTeams returns the team rules for entry and remembers it as the entry of
+// the coming match, for warnFFATeams.
+func (a *agent) entryTeams(entry *playlist.Entry) hostctl.TeamPolicy {
+	a.mu.Lock()
+	a.teamEntry = entry
+	a.mu.Unlock()
+	return a.cfg.teamPolicy(entry)
+}
+
+// warnFFATeams logs once per entry when the match being prepared is a
+// free-for-all mode (lobbyVariantTeams 0) but its playlist entry sets "teams":
+// the server ignores them, and the host should remove them.
+func (a *agent) warnFFATeams(lobbyVariantTeams int8) {
+	if lobbyVariantTeams != 0 {
+		return
+	}
+	a.mu.Lock()
+	e := a.teamEntry
+	warn := e != nil && e.Teams != nil && !a.teamWarned[e.ID]
+	if warn {
+		if a.teamWarned == nil {
+			a.teamWarned = map[string]bool{}
+		}
+		a.teamWarned[e.ID] = true
+	}
+	a.mu.Unlock()
+	if warn {
+		a.log.Warn("playlist entry sets teams, but its mode is free-for-all; the teams are ignored (remove them from the playlist)", "entry", e.ID)
+	}
+}
 
 // teamController is a server bridge that takes team rules (hostctl.Bridge).
 type teamController interface {

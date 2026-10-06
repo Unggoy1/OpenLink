@@ -38,16 +38,20 @@ type Entry struct {
 }
 
 // Teams is a playlist entry's team setup. Count is the number of teams
-// (1-MaxTeams); Size the players per team (1-MaxTeamSize), used to work out the
-// number of teams when Count is not given. At least one must be set.
+// (MinTeams-MaxTeams); Size the players per team (MinTeamSize-MaxTeamSize),
+// used to work out the number of teams when Count is not given. At least one
+// must be set.
 type Teams struct {
 	Count int `json:"count,omitempty"`
 	Size  int `json:"size,omitempty"`
 }
 
-// Team setup limits (custom games: up to 8 teams, 32 players).
+// Team setup limits (custom games: up to 8 teams, 32 players; a team mode has
+// at least two teams of at least two).
 const (
+	MinTeams    = 2
 	MaxTeams    = 8
+	MinTeamSize = 2
 	MaxTeamSize = 32
 )
 
@@ -119,10 +123,10 @@ func Parse(b []byte) (*File, error) {
 			switch {
 			case t.Count == 0 && t.Size == 0:
 				return nil, fmt.Errorf("playlist: entry %q teams needs count or size", e.ID)
-			case t.Count < 0 || t.Count > MaxTeams:
-				return nil, fmt.Errorf("playlist: entry %q teams.count %d must be 1-%d", e.ID, t.Count, MaxTeams)
-			case t.Size < 0 || t.Size > MaxTeamSize:
-				return nil, fmt.Errorf("playlist: entry %q teams.size %d must be 1-%d", e.ID, t.Size, MaxTeamSize)
+			case t.Count != 0 && (t.Count < MinTeams || t.Count > MaxTeams):
+				return nil, fmt.Errorf("playlist: entry %q teams.count %d must be %d-%d", e.ID, t.Count, MinTeams, MaxTeams)
+			case t.Size != 0 && (t.Size < MinTeamSize || t.Size > MaxTeamSize):
+				return nil, fmt.Errorf("playlist: entry %q teams.size %d must be %d-%d", e.ID, t.Size, MinTeamSize, MaxTeamSize)
 			}
 		}
 		if e.enabled() {

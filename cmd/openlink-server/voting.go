@@ -488,7 +488,7 @@ func (a *agent) runVoting(ctx context.Context, controller voteController) {
 		delay: cfg.startDelay(), options: cfg.options(), poll: 250 * time.Millisecond,
 		rng:     rand.New(rand.NewPCG(uint64(time.Now().UnixNano()), 0x6f706c6b)),
 		publish: func(info voteInfo) { a.mu.Lock(); a.vote = &info; a.mu.Unlock() },
-		teams:   a.cfg.teamPolicy}
+		teams:   a.entryTeams}
 	a.mu.Lock()
 	a.voter = v
 	a.mu.Unlock()

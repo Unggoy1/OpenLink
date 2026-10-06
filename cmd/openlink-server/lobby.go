@@ -130,6 +130,9 @@ func (a *agent) runLobby(ctx context.Context, controller lobbyController, poll t
 		}
 		l := st.Lobby
 		a.setLobby(func(info *lobbyInfo) { info.Lobby, info.State = l, st.State })
+		if st.Version >= 5 {
+			a.warnFFATeams(l.LobbyVariantTeams)
+		}
 		if l != last || st.State != lastState {
 			a.log.Info("lobby", "state", st.State, "connected", l.Connected, "peers", l.Peers, "mask", l.PeerMask,
 				"owner", l.Owner, "host_peer", l.HostPeer, "players", l.Players, "start_mode", l.StartMode,

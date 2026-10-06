@@ -126,7 +126,7 @@ Run a voting server with the local directory (as in R023) and join it with the O
 - `map` / `mode` `asset_id` and `version_id`: full 36-character UUIDs, not all zeros. Map thumbnails come from the map IDs; there is no field for them.
 - Ballot size: 4 options in a 1200-byte message, thumbnails included; a playlist that could exceed it is rejected. The check assumes the worst case (longest entries, largest numbers). 80-byte IDs with 80-byte names come to 1197 bytes with default settings and fail with `max_players` 0 or very long vote timers; with IDs of about 32 bytes there is plenty of room.
 - With voting: at least 2 enabled entries.
-- Optional `teams` per entry, for team modes: `{"count": N}` (1-8 teams) and/or `{"size": N}` (1-32 players per team); an empty object is an error. Fill it only when the mode is made for more than two teams (for example from a "Teams of 4" description).
+- Optional `teams` per entry, for team modes: `{"count": N}` (2-8 teams) and/or `{"size": N}` (2-32 players per team); an empty object is an error. Fill it only when the mode is made for more than two teams (for example from a "Teams of 4" description).
 - The entry just played is not offered again straight away, so 5 or more entries keeps every ballot full. Once the lobby empties, the next vote can offer every entry again.
 
 ## Not needed for the alpha
@@ -138,3 +138,4 @@ Run a voting server with the local directory (as in R023) and join it with the O
 - Sending `& < >` unescaped in ballots.
 - Cosmetic: hide the thumbnail box until it loads.
 - Offline preservation (a later phase).
+- Blocking in-match team changes outside a playlist entry's team count (looked into 2026-10-06, left for now; the next match's balance fixes it anyway). The server sees each request (peer `requested` byte) before the game applies it. Option 1, simple: the DLL puts a player who moves to a team outside the count back on their previous team (Change Teams still lists all 8; the pick just snaps back). Option 2, cleaner but needs research: clear the "enabled" bit of team slots beyond the count in the mode data (lobby variant and loaded game variant), so the game itself rejects those teams and the menu probably lists only valid ones; the change must reach clients.

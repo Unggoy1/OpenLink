@@ -124,7 +124,7 @@ func TestParseTeams(t *testing.T) {
 	with := func(teams string) string {
 		return strings.Replace(sample, `{"id": "kusini-ctf",`, `{"id": "kusini-ctf", "teams": `+teams+`,`, 1)
 	}
-	for _, bad := range []string{`{}`, `{"count": 9}`, `{"count": -1}`, `{"size": 33}`, `{"size": -2}`} {
+	for _, bad := range []string{`{}`, `{"count": 9}`, `{"count": -1}`, `{"count": 1}`, `{"size": 33}`, `{"size": -2}`, `{"size": 1}`} {
 		if _, err := Parse([]byte(with(bad))); err == nil {
 			t.Errorf("teams %s accepted", bad)
 		}

@@ -70,8 +70,10 @@ type config struct {
 	// TeamBalance, for team modes at the start of every match: "even" (default:
 	// even teams, players stay on their current team where the counts allow),
 	// "shuffle" (random even teams) or "off" (players keep their own picks).
-	// A playlist entry's "teams" sets the number of teams (default 2). FFA modes
-	// always keep every player on their own team.
+	// A playlist entry's "teams" sets the number of teams (default 2) and is
+	// always applied, as "even" when this is "off", so every player ends up on
+	// one of that entry's teams. FFA modes always keep every player on their
+	// own team.
 	TeamBalance string `json:"team_balance,omitempty"`
 	// AutoStart: the server starts each match itself.
 	AutoStart *autoStart `json:"auto_start,omitempty"`
@@ -274,14 +276,17 @@ func (c config) lobbyOwner() string {
 // entry, two teams).
 func (c config) teamPolicy(entry *playlist.Entry) hostctl.TeamPolicy {
 	p := hostctl.TeamPolicy{Flags: hostctl.TeamGuardFFA}
-	switch c.TeamBalance {
-	case "off":
+	teams := entry != nil && entry.Teams != nil
+	switch {
+	case c.TeamBalance == "off" && !teams:
 		return p
-	case "shuffle":
+	case c.TeamBalance == "shuffle":
 		p.Mode = hostctl.TeamModeShuffle
 	}
+	// "off" with an entry's teams still balances (even), so nobody stays on a
+	// team the entry does not have.
 	p.Flags |= hostctl.TeamBalance
-	if entry != nil && entry.Teams != nil {
+	if teams {
 		p.Count, p.Size = uint32(entry.Teams.Count), uint32(entry.Teams.Size)
 	}
 	return p

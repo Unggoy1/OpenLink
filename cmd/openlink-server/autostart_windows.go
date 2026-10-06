@@ -63,3 +63,20 @@ func runAutostart(c config, args []string) error {
 	}
 	return fmt.Errorf("usage: autostart enable|disable|status")
 }
+
+// autostartSummary is the autostart task's state for diagnostics.
+func autostartSummary() string {
+	out, err := exec.Command("schtasks", "/Query", "/TN", taskName, "/V", "/FO", "LIST").CombinedOutput()
+	if err != nil {
+		return "off"
+	}
+	var b strings.Builder
+	for _, line := range strings.Split(string(out), "\n") {
+		for _, k := range []string{"Status:", "Task To Run:", "Last Run Time:", "Last Result:"} {
+			if strings.HasPrefix(strings.TrimSpace(line), k) {
+				b.WriteString(strings.TrimSpace(line) + "\n")
+			}
+		}
+	}
+	return b.String()
+}

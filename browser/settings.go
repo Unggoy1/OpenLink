@@ -26,6 +26,9 @@ type Settings struct {
 	OverlayCorner   string   `json:"overlayCorner"`
 	OverlayOpenKey  string   `json:"overlayOpenKey"`  // interactive: opens the overlay
 	OverlayVoteKeys []string `json:"overlayVoteKeys"` // passive: one per choice
+	// OverlayNoController turns off voting with a controller (hold View, press
+	// the D-pad) while the overlay is on.
+	OverlayNoController bool `json:"overlayNoController"`
 }
 
 func settingsPath() (string, error) {
@@ -50,8 +53,8 @@ func loadSettings() Settings {
 		s.Mode = connect.ModeLoopback
 	}
 	if normalizeOverlay(&s) != nil {
-		// Hand-edited and invalid: start with the overlay off and default keys.
-		s.OverlayMode, s.OverlayOpenKey, s.OverlayVoteKeys = overlayOff, "", nil
+		// Hand-edited and invalid: start again from the default mode and keys.
+		s.OverlayMode, s.OverlayOpenKey, s.OverlayVoteKeys = "", "", nil
 		normalizeOverlay(&s)
 	}
 	return s

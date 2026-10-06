@@ -96,7 +96,7 @@ func (s *Server) adminBan(w http.ResponseWriter, r *http.Request) {
 	}
 	removed := 0
 	for id, e := range s.servers {
-		if s.bannedLocked(e.ownerIP) || s.badNameLocked(e.info.Name) {
+		if s.bannedLocked(e.ownerIP) || s.badNameLocked(e.info.Name+" "+e.info.Description) {
 			delete(s.servers, id)
 			removed++
 		}

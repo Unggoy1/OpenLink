@@ -34,7 +34,7 @@ func (d *demoState) servers() []ServerView {
 		return ServerView{ID: id, Key: id + ":1343", Name: name, Region: region, Status: "ready", Joinable: joinable,
 			Build: "demo", BuildMatch: joinable, Players: players, Reachability: api.ReachOK, PingMS: ping, Match: matchView(m)}
 	}
-	return []ServerView{
+	list := []ServerView{
 		row("demo", "Vote Test (demo)", "us-west", 3, 18, true, joined),
 		row("arena", "Unggoy Arena", "us-east", 8, 64, true, &api.Match{Phase: api.PhaseInGame, Name: "Fiesta Slayer on Interference", Thumb: interference}),
 		row("kusini", "Kusini Nights", "eu-west", 1, 142, true, &api.Match{Phase: api.PhaseLobby, Name: "CTF: Arena on Kusini Bay", Thumb: kusini}),
@@ -42,6 +42,8 @@ func (d *demoState) servers() []ServerView {
 			Thumb: vote.MapThumbRef("00000000-0000-0000-0000-000000000001", "00000000-0000-0000-0000-000000000001")}),
 		row("new", "Just Started", "us-east", -1, -1, false, nil), // no match report yet
 	}
+	list[1].Description = "Casual BTB and Fiesta every night. Be nice, have fun."
+	return list
 }
 
 func (*demoState) status() *StatusView {

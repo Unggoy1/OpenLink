@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"slices"
 	"sort"
@@ -13,6 +14,8 @@ import (
 
 	"halocommunity/connect"
 	"halocommunity/internal/api"
+	"halocommunity/internal/diag"
+	"halocommunity/internal/game"
 	"halocommunity/vote"
 )
 
@@ -26,11 +29,17 @@ type App struct {
 
 	notified uint64       // last vote round the player was alerted to
 	overlay  *voteOverlay // in-game vote overlay; nil off Windows
+
+	events     *diag.Events // recent events for Diagnostics
+	autoMode   bool         // this session uses broadcast because a server runs on this PC
+	lastPhase  string       // session phase last recorded in events
+	lastListOK string       // last listing result recorded in events
 }
 
 // NewApp creates the app with saved settings.
 func NewApp() *App {
-	a := &App{settings: loadSettings()}
+	a := &App{settings: loadSettings(), events: diag.NewEvents(200)}
+	a.events.Add("OpenLink %s started", version)
 	a.overlay = newVoteOverlay(a.Vote)
 	return a
 }
@@ -51,6 +60,7 @@ type ServerView struct {
 	ID           string     `json:"id"`
 	Key          string     `json:"key"` // host:port; stable identity for favourites
 	Name         string     `json:"name"`
+	Description  string     `json:"description"` // one line from the host; "" = none
 	Region       string     `json:"region"`
 	Status       string     `json:"status"`
 	Joinable     bool       `json:"joinable"`
@@ -86,6 +96,7 @@ type StatusView struct {
 	// GameName is how the server appears in Halo's in-game server list (capitals,
 	// api.GameName); "" when the game shows the host's PC name.
 	GameName  string  `json:"gameName"`
+	AutoMode  bool    `json:"autoMode"` // broadcast chosen because a server runs on this PC
 	Mode      string  `json:"mode"`
 	BeaconAge float64 `json:"beaconAge"` // seconds; -1 = no beacon yet
 	Connected bool    `json:"connected"` // the server answered in the last few seconds
@@ -161,6 +172,7 @@ func (a *App) ListServers() ([]ServerView, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	servers, err := connect.List(ctx, s.Directory, "")
+	a.noteList(len(servers), err)
 	if err != nil {
 		return nil, err
 	}
@@ -170,7 +182,7 @@ func (a *App) ListServers() ([]ServerView, error) {
 	sem := make(chan struct{}, 8)
 	for i, sv := range servers {
 		key := net.JoinHostPort(sv.Host, strconv.Itoa(sv.Port))
-		out[i] = ServerView{ID: sv.ID, Key: key, Name: sv.Name, Region: sv.Region, Status: sv.Status,
+		out[i] = ServerView{ID: sv.ID, Key: key, Name: sv.Name, Description: sv.Description, Region: sv.Region, Status: sv.Status,
 			Joinable: sv.Joinable, Build: sv.Build, BuildMatch: local != "" && sv.Build == local, Players: sv.Players,
 			Reachability: sv.Reachability, PingMS: -1, Favorite: slices.Contains(s.Favorites, key), Match: matchView(sv.Match)}
 		if !sv.Proxy {
@@ -236,14 +248,41 @@ func (a *App) Join(id string) error {
 		return errors.New("that server is no longer listed")
 	}
 	a.Leave() // free UDP 1343 before taking it again
-	sess, err := connect.Start(*target, connect.Options{Directory: s.Directory, Mode: s.Mode})
+	// With a server on this PC, it holds the discovery port and loopback
+	// beacons never reach the game, so this session broadcasts instead.
+	mode, auto := s.Mode, false
+	if mode != connect.ModeBroadcast && game.LocalServerRunning() {
+		mode, auto = connect.ModeBroadcast, true
+	}
+	sess, err := connect.Start(*target, connect.Options{Directory: s.Directory, Mode: mode})
 	if err != nil {
+		a.events.Add("join %q failed (mode %s): %v", target.Name, mode, err)
 		return err
 	}
+	note := ""
+	if auto {
+		note = ", chosen because a server runs on this PC"
+	}
+	a.events.Add("joined %q (build %s, mode %s%s)", target.Name, target.Build, mode, note)
 	a.mu.Lock()
-	a.sess = sess
+	a.sess, a.autoMode, a.lastPhase = sess, auto, ""
 	a.mu.Unlock()
 	return nil
+}
+
+// noteList records listing results in the event log when they change.
+func (a *App) noteList(n int, err error) {
+	msg := fmt.Sprintf("server list: %d servers", n)
+	if err != nil {
+		msg = "server list failed: " + err.Error()
+	}
+	a.mu.Lock()
+	changed := msg != a.lastListOK
+	a.lastListOK = msg
+	a.mu.Unlock()
+	if changed {
+		a.events.Add("%s", msg)
+	}
 }
 
 // Leave stops the current session, if any.
@@ -254,6 +293,7 @@ func (a *App) Leave() {
 	a.mu.Unlock()
 	if sess != nil {
 		sess.Stop()
+		a.events.Add("left %q", sess.Status().Server.Name)
 	}
 }
 
@@ -273,8 +313,33 @@ func (a *App) Status() *StatusView {
 	if st.BeaconAge >= 0 {
 		age = st.BeaconAge.Seconds()
 	}
-	return &StatusView{ServerID: st.Server.ID, ServerName: st.Server.Name, GameName: gameListName(st.Server.Name), Mode: st.Mode, BeaconAge: age,
+	v := &StatusView{ServerID: st.Server.ID, ServerName: st.Server.Name, GameName: gameListName(st.Server.Name), Mode: st.Mode, BeaconAge: age,
 		Connected: st.Connected(), UpKB: float64(st.UpBytes) / 1024, DownKB: float64(st.DownBytes) / 1024, Error: st.Err}
+	a.mu.Lock()
+	v.AutoMode = a.autoMode
+	phase := sessionPhase(v)
+	changed := phase != a.lastPhase
+	a.lastPhase = phase
+	a.mu.Unlock()
+	if changed {
+		a.events.Add("session: %s", phase)
+	}
+	return v
+}
+
+// sessionPhase matches the phases SessionBar shows.
+func sessionPhase(v *StatusView) string {
+	switch {
+	case v.Error != "":
+		return "error: " + v.Error
+	case v.Connected:
+		return "connected to the server"
+	case v.BeaconAge < 0:
+		return "contacting the server"
+	case v.BeaconAge > 15:
+		return "server stopped advertising"
+	}
+	return "ready, waiting for the game to join"
 }
 
 // gameListName is a server's name as Halo's in-game server list shows it.

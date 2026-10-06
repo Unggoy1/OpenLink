@@ -69,6 +69,19 @@
   const hiddenOtherVersions = $derived(
     localBuild && !filters.otherVersions ? servers.filter((s) => !s.buildMatch).length : 0,
   );
+  // When no server runs the player's game version, say which side is behind.
+  // Builds start with a build number, e.g. "269225.26.04.08.1618-1.hi_1_13_0".
+  const buildNumber = (b: string) => parseInt(b.split('.')[0], 10);
+  const versionNotice = $derived.by(() => {
+    if (!localBuild || servers.length === 0 || servers.some((s) => s.buildMatch)) return '';
+    const mine = buildNumber(localBuild);
+    const theirs = servers.map((s) => buildNumber(s.build)).filter((n) => !isNaN(n));
+    if (isNaN(mine) || theirs.length === 0) return '';
+    if (theirs.every((n) => n < mine))
+      return 'Your Halo Infinite is newer than every listed server. Halo was probably just updated: servers come back once their hosts install an OpenLink Server update for the new version.';
+    if (theirs.every((n) => n > mine)) return 'Your Halo Infinite is older than every listed server. Update it in Steam to join them.';
+    return 'No listed server runs your game version.';
+  });
 
   async function refresh() {
     if (!settings?.directory) return;
@@ -231,6 +244,7 @@
           Halo Infinite was not found, so game versions can't be checked. Set the game folder in Settings.
         </p>
       {/if}
+      {#if versionNotice}<p class="notice warn">{versionNotice}</p>{/if}
       {#if listError}<p class="notice warn">{listError}</p>{/if}
       {#if actionError}<p class="notice warn">{actionError}</p>{/if}
 
@@ -294,6 +308,7 @@
                     {/if}
                     <div class="server-text">
                       <div>{s.name}</div>
+                      {#if s.description}<div class="desc" title={s.description}>{s.description}</div>{/if}
                       {#if s.match}<div class="match" class:live={s.match.phase === 'in_game'}>{matchText(s.match)}</div>{/if}
                     </div>
                   </div>
@@ -394,6 +409,13 @@
   .mthumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
   .match { font-weight: 400; font-size: 12px; color: var(--muted); margin-top: 2px; }
   .match.live { color: var(--accent); }
+  .desc {
+    font-weight: 400;
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 2px;
+    overflow-wrap: anywhere;
+  }
   tr.dim .mthumb { opacity: 0.5; }
   .state { color: var(--muted); font-size: 13px; }
   .act { text-align: right; width: 1%; white-space: nowrap; }

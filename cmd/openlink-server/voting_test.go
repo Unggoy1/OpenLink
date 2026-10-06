@@ -289,3 +289,38 @@ func TestPickOptionsAndRanking(t *testing.T) {
 		t.Fatalf("ties not broken randomly: %v", firsts)
 	}
 }
+
+// When everyone leaves, the entry just played may be offered again to the
+// next players.
+func TestEmptyLobbyForgetsLastPlayed(t *testing.T) {
+	srv := &voteServer{state: 8, connected: 1}
+	alice := &net.UDPAddr{IP: net.IPv4(10, 0, 0, 1), Port: 5000}
+	nw := &voteNet{clients: []*net.UDPAddr{alice}, ballots: map[string][]vote.Ballot{}}
+	v := newVoter(srv, nw)
+	v.entries = voteEntries()[:3] // 4 options: 2 when the last match is left out, 3 when not
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go v.run(ctx)
+
+	waitFor(t, "first ballot", func() bool { b, ok := nw.latest(alice); return ok && !b.Closed })
+	first, _ := nw.latest(alice)
+	waitFor(t, "start", func() bool { _, n := srv.get(); return n == 1 })
+	played, _ := nw.latest(alice)
+	last := played.Options[played.Winner].ID
+
+	// The match runs, everyone leaves, and the server returns to an empty lobby.
+	srv.set(func(s *voteServer) { s.state = 9; s.matches = 1; s.connected = 0 })
+	time.Sleep(50 * time.Millisecond)
+	srv.set(func(s *voteServer) { s.state = 8 })
+	time.Sleep(50 * time.Millisecond)
+	srv.set(func(s *voteServer) { s.connected = 1 })
+	waitFor(t, "ballot for the new group", func() bool { b, ok := nw.latest(alice); return ok && !b.Closed && b.Round > first.Round })
+	b, _ := nw.latest(alice)
+	offered := false
+	for _, o := range b.Options {
+		offered = offered || o.ID == last
+	}
+	if len(b.Options) != 3 || !offered {
+		t.Fatalf("after an empty lobby, %s should be offered again: %+v", last, b.Options)
+	}
+}

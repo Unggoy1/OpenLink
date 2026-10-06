@@ -67,13 +67,31 @@ func ValidServerName(name string) bool {
 	return true
 }
 
+// MaxDescriptionRunes bounds the optional listing description a host adds.
+const MaxDescriptionRunes = 120
+
+// ValidDescription reports whether the directory accepts a server
+// description: up to 120 characters, no control characters ("" = none).
+func ValidDescription(s string) bool {
+	if utf8.RuneCountInString(s) > MaxDescriptionRunes {
+		return false
+	}
+	for _, r := range s {
+		if r < 0x20 || r == 0x7f {
+			return false
+		}
+	}
+	return true
+}
+
 // RegisterRequest is sent by a host agent to list a server.
 type RegisterRequest struct {
-	Name   string `json:"name"`
-	Host   string `json:"host,omitempty"` // empty: the directory uses the request's source IP
-	Port   int    `json:"port"`
-	Build  string `json:"build"`
-	Region string `json:"region,omitempty"`
+	Name        string `json:"name"`
+	Host        string `json:"host,omitempty"` // empty: the directory uses the request's source IP
+	Port        int    `json:"port"`
+	Build       string `json:"build"`
+	Region      string `json:"region,omitempty"`
+	Description string `json:"description,omitempty"` // ValidDescription
 }
 
 // RegisterResponse carries the server ID and the secret used for later updates.
@@ -143,6 +161,7 @@ type ServerInfo struct {
 	Port         int       `json:"port"`
 	Build        string    `json:"build"`
 	Region       string    `json:"region,omitempty"`
+	Description  string    `json:"description,omitempty"`
 	Status       string    `json:"status"`
 	Players      int       `json:"players"`
 	Joinable     bool      `json:"joinable"`

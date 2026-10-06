@@ -10,8 +10,8 @@ import (
 	"halocommunity/vote"
 )
 
-// The vote overlay (Windows only, overlay_windows.go) is off unless the
-// player picks a mode in Settings.
+// The vote overlay (Windows only, overlay_windows.go). New installs start in
+// defaultOverlayMode: passive on Windows (user decision 2026-10-05), off elsewhere.
 const (
 	overlayOff         = "off"
 	overlayPassive     = "passive"     // shows itself; vote with one hotkey per choice
@@ -120,7 +120,7 @@ func parseHotkey(s string) (hotkey, string, error) {
 // normalizeOverlay fills in defaults and checks the overlay settings.
 func normalizeOverlay(s *Settings) error {
 	if s.OverlayMode == "" {
-		s.OverlayMode = overlayOff
+		s.OverlayMode = defaultOverlayMode
 	}
 	if s.OverlayMode != overlayOff && s.OverlayMode != overlayPassive && s.OverlayMode != overlayInteractive {
 		return fmt.Errorf("unknown overlay mode %q", s.OverlayMode)

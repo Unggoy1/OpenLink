@@ -38,6 +38,7 @@ type adminStatus struct {
 	ListingID       string              `json:"listing_id,omitempty"`
 	Reachability    string              `json:"reachability,omitempty"`
 	HostControl     *controlInfo        `json:"host_control,omitempty"`
+	PortForward     string              `json:"port_forward,omitempty"` // auto_port_forward result
 }
 
 type banRequest struct {
@@ -48,7 +49,7 @@ type banRequest struct {
 func (a *agent) adminSnapshot() adminStatus {
 	a.mu.Lock()
 	st := adminStatus{Version: version, Status: a.status, PID: a.pid, Build: a.build,
-		ListingID: a.listingID, Reachability: a.reachability, Players: -1}
+		ListingID: a.listingID, Reachability: a.reachability, Players: -1, PortForward: a.portForward}
 	if a.cfg.HostControlDLL != "" {
 		st.HostControl = &controlInfo{Native: a.cfg.HostControlNative, Connected: a.control != nil, Error: a.controlError}
 		if a.rotation != nil {

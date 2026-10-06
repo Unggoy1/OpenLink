@@ -41,6 +41,7 @@ var (
 	kernel32 = syscall.NewLazyDLL("kernel32.dll")
 	shcore   = syscall.NewLazyDLL("shcore.dll")
 	dwmapi   = syscall.NewLazyDLL("dwmapi.dll")
+	xinput   = loadXInput()
 
 	procRegisterClassExW           = user32.NewProc("RegisterClassExW")
 	procCreateWindowExW            = user32.NewProc("CreateWindowExW")
@@ -56,6 +57,8 @@ var (
 	procSetForegroundWindow        = user32.NewProc("SetForegroundWindow")
 	procGetWindowThreadProcessId   = user32.NewProc("GetWindowThreadProcessId")
 	procRegisterHotKey             = user32.NewProc("RegisterHotKey")
+	procSetTimer                   = user32.NewProc("SetTimer")
+	procKillTimer                  = user32.NewProc("KillTimer")
 	procUnregisterHotKey           = user32.NewProc("UnregisterHotKey")
 	procBeginPaint                 = user32.NewProc("BeginPaint")
 	procEndPaint                   = user32.NewProc("EndPaint")
@@ -141,6 +144,7 @@ const (
 	wmMouseActivate = 0x0021
 	wmKeyDown       = 0x0100
 	wmHotkey        = 0x0312
+	wmTimer         = 0x0113
 	wmLButtonDown   = 0x0201
 	wmOverlayUpdate = 0x8000 + 1 // WM_APP+1: state changed, re-evaluate
 
@@ -156,6 +160,10 @@ const (
 	dwmCornerRound      = 2
 
 	hotkeyOpenID = 100 // interactive open key; vote keys are 1..MaxOptions
+	padTimerID   = 200 // controller polling while a vote is open
+
+	// defaultOverlayMode is the mode of a new install (user decision 2026-10-05).
+	defaultOverlayMode = overlayPassive
 
 	gameExe        = "HaloInfinite.exe"
 	resultLinger   = 8 * time.Second // the result stays up this long after the vote closes
@@ -283,7 +291,12 @@ type voteOverlay struct {
 	fontTitle   uintptr
 	fontName    uintptr
 	fontSmall   uintptr
-	rows        []rect // option rows from the last paint, for clicks
+	rows        []rect       // option rows from the last paint, for clicks
+	padTimer    bool         // controller polling runs
+	padSeen     bool         // a controller is connected (labels and full panel)
+	padPrev     [4]uint16    // last buttons per controller slot
+	padConn     [4]bool      // a controller answered in this slot
+	padNext     [4]time.Time // when to look at an empty slot again
 }
 
 var (
@@ -417,6 +430,11 @@ func overlayWndProc(hwnd, msg, wParam, lParam uintptr) uintptr {
 	case wmHotkey:
 		o.hotkey(hwnd, int(wParam))
 		return 0
+	case wmTimer:
+		if wParam == padTimerID {
+			o.pollPads(hwnd)
+		}
+		return 0
 	case wmMouseActivate:
 		if !o.open {
 			return maNoActivate
@@ -442,6 +460,7 @@ func overlayWndProc(hwnd, msg, wParam, lParam uintptr) uintptr {
 		}
 	case wmDestroy:
 		o.setKeys(hwnd, nil)
+		o.setPadTimer(hwnd, false)
 		procPostQuitMessage.Call(0)
 		return 0
 	}
@@ -461,6 +480,7 @@ func (o *voteOverlay) refresh(hwnd uintptr) {
 	if b == nil || cfg.OverlayMode == overlayOff || len(b.Options) == 0 {
 		o.closePanel(hwnd, false)
 		o.setKeys(hwnd, nil)
+		o.setPadTimer(hwnd, false)
 		o.hide(hwnd)
 		return
 	}
@@ -475,6 +495,7 @@ func (o *voteOverlay) refresh(hwnd uintptr) {
 		}
 	}
 	o.setKeys(hwnd, want)
+	o.setPadTimer(hwnd, !b.Closed && !cfg.OverlayNoController)
 
 	if b.Closed {
 		if o.closedRound != b.Round {
@@ -682,7 +703,7 @@ func (o *voteOverlay) px(v int) int32 { return int32(v * int(o.dpi) / 96) }
 
 // compact is the one-line hint used by the interactive mode until opened.
 func (o *voteOverlay) compact(cfg Settings) bool {
-	return cfg.OverlayMode == overlayInteractive && !o.open
+	return cfg.OverlayMode == overlayInteractive && !o.open && !(o.padSeen && !cfg.OverlayNoController)
 }
 
 // place sizes and positions the window on the game's monitor and shows it.
@@ -909,6 +930,12 @@ func (o *voteOverlay) paintPanel(g canvas, b *BallotView, cfg Settings, w int32)
 				keyLabel = strconv.Itoa(i + 1)
 			} else if cfg.OverlayMode == overlayPassive {
 				keyLabel = cfg.OverlayVoteKeys[i]
+			}
+			if o.padSeen && !cfg.OverlayNoController && i < len(padLabels) {
+				if keyLabel != "" {
+					keyLabel += " · "
+				}
+				keyLabel += padLabels[i]
 			}
 		}
 		info := rect{tx, mid + o.px(2), row.right - o.px(10), row.bottom - o.px(8)}

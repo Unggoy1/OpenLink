@@ -10,6 +10,10 @@ export function CheckUpdate() {
   return window['go']['main']['App']['CheckUpdate']();
 }
 
+export function Diagnostics() {
+  return window['go']['main']['App']['Diagnostics']();
+}
+
 export function GetSettings() {
   return window['go']['main']['App']['GetSettings']();
 }

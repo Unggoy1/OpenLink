@@ -9,9 +9,9 @@ func TestGameName(t *testing.T) {
 	for in, want := range map[string]string{
 		"My Server":                      "My Server",
 		"  padded  ":                     "padded",
-		"café \U0001F600 club":      "caf  club",
+		"café \U0001F600 club":           "caf  club",
 		"tab\tand\nnewline":              "tabandnewline",
-		"éè":                   "",
+		"éè":                             "",
 		"   ":                            "",
 		strings.Repeat("y", 60):          strings.Repeat("y", MaxGameNameLength),
 		strings.Repeat("z", 46) + " end": strings.Repeat("z", 46),
@@ -29,6 +29,17 @@ func TestValidServerName(t *testing.T) {
 	} {
 		if got := ValidServerName(name); got != want {
 			t.Fatalf("ValidServerName(%q) = %v", name, got)
+		}
+	}
+}
+
+func TestValidDescription(t *testing.T) {
+	for s, want := range map[string]bool{
+		"": true, "Casual BTB, be nice": true, strings.Repeat("é", 120): true,
+		strings.Repeat("x", 121): false, "line\nbreak": false,
+	} {
+		if got := ValidDescription(s); got != want {
+			t.Errorf("ValidDescription(%q) = %v", s, got)
 		}
 	}
 }

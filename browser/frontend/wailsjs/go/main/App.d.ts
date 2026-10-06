@@ -6,6 +6,8 @@ export function Ballot():Promise<main.BallotView>;
 
 export function CheckUpdate():Promise<main.UpdateInfo>;
 
+export function Diagnostics():Promise<string>;
+
 export function GetSettings():Promise<main.Settings>;
 
 export function Join(arg1:string):Promise<void>;

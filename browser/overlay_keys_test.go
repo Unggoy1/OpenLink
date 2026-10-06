@@ -36,7 +36,7 @@ func TestNormalizeOverlay(t *testing.T) {
 	if err := normalizeOverlay(&s); err != nil {
 		t.Fatal(err)
 	}
-	if s.OverlayMode != overlayOff || s.OverlayCorner != defaultOverlayCorner || s.OverlayOpenKey != defaultOverlayOpen ||
+	if s.OverlayMode != defaultOverlayMode || s.OverlayCorner != defaultOverlayCorner || s.OverlayOpenKey != defaultOverlayOpen ||
 		!slices.Equal(s.OverlayVoteKeys, defaultOverlayVoteKeys()) {
 		t.Fatalf("defaults: %+v", s)
 	}

@@ -6,6 +6,9 @@ package main
 // and the desktop notification are the only alerts.
 type voteOverlay struct{}
 
+// defaultOverlayMode is off: there is no overlay here.
+const defaultOverlayMode = overlayOff
+
 func newVoteOverlay(func(round uint64, choice int) error) *voteOverlay { return nil }
 
 func (*voteOverlay) update(*BallotView, Settings) {}

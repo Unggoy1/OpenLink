@@ -40,6 +40,7 @@
       {:else if phase === 'ready'}
         In Halo Infinite, open <b>Custom Game → Create Match → Server</b> and click
         {#if status.gameName}<b>{status.gameName}</b>{:else}the host's PC name{/if}.
+        {#if status.autoMode}(Using LAN broadcast because a server runs on this PC.){/if}
       {:else}
         Connected · sent {kb(status.upKB)} · received {kb(status.downKB)}
       {/if}

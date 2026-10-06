@@ -471,3 +471,23 @@ func TestAdminOffWithoutKey(t *testing.T) {
 		t.Fatalf("admin API without an admin key: %d", w.Code)
 	}
 }
+
+func TestDescription(t *testing.T) {
+	_, c, _ := setup(t, Config{BannedNames: []string{"badword"}})
+	ctx := context.Background()
+	if _, err := c.Register(ctx, api.RegisterRequest{Name: "A", Port: 1343, Build: "b", Description: "line\nbreak"}); code(err) != 400 {
+		t.Fatalf("control character: %v", err)
+	}
+	if _, err := c.Register(ctx, api.RegisterRequest{Name: "A", Port: 1343, Build: "b", Description: strings.Repeat("x", 121)}); code(err) != 400 {
+		t.Fatalf("too long: %v", err)
+	}
+	if _, err := c.Register(ctx, api.RegisterRequest{Name: "A", Port: 1343, Build: "b", Description: "a BadWord here"}); code(err) != 403 {
+		t.Fatalf("banned word in description: %v", err)
+	}
+	if _, err := c.Register(ctx, api.RegisterRequest{Name: "A", Port: 1343, Build: "b", Description: "  Casual BTB, be nice  "}); err != nil {
+		t.Fatal(err)
+	}
+	if list, _ := c.List(ctx, ""); len(list) != 1 || list[0].Description != "Casual BTB, be nice" {
+		t.Fatalf("listing: %+v", list)
+	}
+}

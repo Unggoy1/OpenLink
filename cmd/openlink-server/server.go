@@ -7,6 +7,7 @@ import (
 	"net"
 	"os/exec"
 	"strconv"
+	"strings"
 	"time"
 
 	"halocommunity/internal/api"
@@ -217,7 +218,7 @@ func (a *agent) directoryLoop(ctx context.Context) {
 	var lastCheck time.Time
 	for ctx.Err() == nil {
 		if reg.ID == "" {
-			r, err := dc.Register(ctx, api.RegisterRequest{Name: a.cfg.Name, Host: a.cfg.PublicHost,
+			r, err := dc.Register(ctx, api.RegisterRequest{Name: a.cfg.Name, Description: strings.TrimSpace(a.cfg.Description), Host: a.cfg.PublicHost,
 				Port: a.cfg.PublicPort, Build: a.build, Region: a.cfg.Region})
 			if err != nil {
 				a.log.Warn("directory registration failed", "err", err, "retry_in", backoff)

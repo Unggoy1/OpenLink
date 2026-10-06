@@ -367,6 +367,12 @@ func (v *voter) run(ctx context.Context) {
 		now := time.Now()
 		lobby := st.State == statePreGame && st.Gates&hostctl.GateLobby != 0
 		players := st.Lobby.Connected
+		// Everyone left: the next players are a new group, so their first vote
+		// may offer any entry, including the one played last.
+		if lobby && players == 0 && last != "" {
+			v.log.Info("vote: lobby empty; every playlist entry can be offered again", "last_played", last)
+			last = ""
+		}
 		v.mu.Lock()
 		phase := v.phase
 		v.mu.Unlock()

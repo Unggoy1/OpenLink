@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"halocommunity/internal/api"
@@ -18,6 +19,7 @@ type config struct {
 	Directory   string `json:"directory"`
 	RegisterKey string `json:"register_key,omitempty"`
 	Name        string `json:"name"`
+	Description string `json:"description,omitempty"` // one line shown under the name in the app
 	Region      string `json:"region,omitempty"`
 	PublicHost  string `json:"public_host,omitempty"`
 	PublicPort  int    `json:"public_port"`
@@ -36,6 +38,10 @@ type config struct {
 	ServerIP   string `json:"server_ip"` // the server's -bindip in proxy mode
 	MaxPlayers int    `json:"max_players"`
 	MaxPPS     int    `json:"max_pps"`
+
+	// AutoPortForward asks the router (UPnP, then NAT-PMP) to forward
+	// public_port to this PC while OpenLink Server runs. Opt-in: see HOSTING.md.
+	AutoPortForward bool `json:"auto_port_forward,omitempty"`
 
 	BindIP string `json:"bind_ip,omitempty"` // without proxy mode: the server's -bindip
 
@@ -92,6 +98,7 @@ func loadConfig(fs *flag.FlagSet, args []string) (config, error) {
 	fs.StringVar(&f.Directory, "directory", c.Directory, "directory URL (env OPENLINK_DIRECTORY); empty = do not list")
 	fs.StringVar(&f.RegisterKey, "register-key", api.Getenv("REGISTER_KEY"), "directory registration key, if the directory requires one (env OPENLINK_REGISTER_KEY)")
 	fs.StringVar(&f.Name, "name", c.Name, "server name shown in the browser")
+	fs.StringVar(&f.Description, "description", "", "one line about the server, shown under its name in the app (up to 120 characters)")
 	fs.StringVar(&f.Region, "region", "", "region label, e.g. us-west")
 	fs.StringVar(&f.PublicHost, "public-host", "", "address players connect to; empty = the directory uses this machine's public IP")
 	fs.IntVar(&f.PublicPort, "public-port", c.PublicPort, "external UDP port players connect to (your port forward)")
@@ -101,6 +108,7 @@ func loadConfig(fs *flag.FlagSet, args []string) (config, error) {
 	fs.BoolVar(&f.Restart, "restart", c.Restart, "restart a managed server after exit (false for a single scoped test)")
 	fs.BoolVar(&f.StopServer, "stop-server", false, "stop the managed server when the agent exits")
 	fs.BoolVar(&f.Proxy, "proxy", c.Proxy, "proxy mode: front the server for player counts, probes, bans and rate limits")
+	fs.BoolVar(&f.AutoPortForward, "auto-port-forward", false, "opt in: ask your router (UPnP or NAT-PMP) to forward the public port to this PC while running")
 	fs.StringVar(&f.Listen, "listen", c.Listen, "proxy mode: public UDP listen address")
 	fs.StringVar(&f.ServerIP, "server-ip", c.ServerIP, "proxy mode: local address the server binds (use 127.0.0.2, .3, ... for more servers on one PC)")
 	fs.IntVar(&f.MaxPlayers, "max-players", c.MaxPlayers, "proxy mode: most player connections at once (0 = no limit)")
@@ -144,6 +152,8 @@ func loadConfig(fs *flag.FlagSet, args []string) (config, error) {
 			c.RegisterKey = f.RegisterKey
 		case "name":
 			c.Name = f.Name
+		case "description":
+			c.Description = f.Description
 		case "region":
 			c.Region = f.Region
 		case "public-host":
@@ -162,6 +172,8 @@ func loadConfig(fs *flag.FlagSet, args []string) (config, error) {
 			c.StopServer = f.StopServer
 		case "proxy":
 			c.Proxy = f.Proxy
+		case "auto-port-forward":
+			c.AutoPortForward = f.AutoPortForward
 		case "listen":
 			c.Listen = f.Listen
 		case "server-ip":
@@ -214,6 +226,12 @@ func loadConfig(fs *flag.FlagSet, args []string) (config, error) {
 	}
 	if c.Directory != "" && !api.ValidServerName(c.Name) {
 		return c, errors.New("name must be 1-48 characters with no control characters (the in-game server list shows up to 47 of them, printable ASCII only)")
+	}
+	if !api.ValidDescription(strings.TrimSpace(c.Description)) {
+		return c, errors.New("description must be at most 120 characters with no control characters")
+	}
+	if c.AutoPortForward && !c.Proxy {
+		return c, errors.New("auto_port_forward requires proxy mode")
 	}
 	if c.Vote != nil && !c.Proxy {
 		return c, errors.New("vote requires proxy mode")

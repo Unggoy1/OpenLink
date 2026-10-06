@@ -2,6 +2,7 @@
   "directory": "https://openlink-dir.unggoy.xyz",
   "register_key": "",
   "name": "My Server",
+  "description": "",
   "public_host": "",
   "public_port": 1343,
   "server_ip": "127.0.0.2",

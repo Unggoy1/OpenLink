@@ -80,6 +80,7 @@ export namespace main {
 	    id: string;
 	    key: string;
 	    name: string;
+	    description: string;
 	    region: string;
 	    status: string;
 	    joinable: boolean;
@@ -100,6 +101,7 @@ export namespace main {
 	        this.id = source["id"];
 	        this.key = source["key"];
 	        this.name = source["name"];
+	        this.description = source["description"];
 	        this.region = source["region"];
 	        this.status = source["status"];
 	        this.joinable = source["joinable"];
@@ -140,6 +142,7 @@ export namespace main {
 	    overlayCorner: string;
 	    overlayOpenKey: string;
 	    overlayVoteKeys: string[];
+	    overlayNoController: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new Settings(source);
@@ -156,12 +159,14 @@ export namespace main {
 	        this.overlayCorner = source["overlayCorner"];
 	        this.overlayOpenKey = source["overlayOpenKey"];
 	        this.overlayVoteKeys = source["overlayVoteKeys"];
+	        this.overlayNoController = source["overlayNoController"];
 	    }
 	}
 	export class StatusView {
 	    serverId: string;
 	    serverName: string;
 	    gameName: string;
+	    autoMode: boolean;
 	    mode: string;
 	    beaconAge: number;
 	    connected: boolean;
@@ -178,6 +183,7 @@ export namespace main {
 	        this.serverId = source["serverId"];
 	        this.serverName = source["serverName"];
 	        this.gameName = source["gameName"];
+	        this.autoMode = source["autoMode"];
 	        this.mode = source["mode"];
 	        this.beaconAge = source["beaconAge"];
 	        this.connected = source["connected"];

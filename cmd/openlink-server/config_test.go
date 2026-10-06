@@ -135,3 +135,18 @@ func TestConfigServerName(t *testing.T) {
 		t.Errorf("unlisted server with no name rejected: %v", err)
 	}
 }
+
+func TestConfigDescription(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "openlink-server.json")
+	load := func(doc string) error {
+		os.WriteFile(path, []byte(doc), 0o600)
+		_, err := loadConfig(flag.NewFlagSet("t", flag.ContinueOnError), []string{"-config", path})
+		return err
+	}
+	if err := load(`{"name": "x", "description": "Casual BTB, be nice"}`); err != nil {
+		t.Fatal(err)
+	}
+	if err := load(`{"name": "x", "description": "` + strings.Repeat("d", 121) + `"}`); err == nil {
+		t.Fatal("121-character description accepted")
+	}
+}

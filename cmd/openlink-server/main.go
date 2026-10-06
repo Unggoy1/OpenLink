@@ -9,6 +9,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"os"
@@ -46,6 +47,7 @@ usage:
   openlink-server unban <ip> | bans        remove a ban | list bans
   openlink-server select <selection.json> select pinned map/mode descriptors (loading/start unverified)
   openlink-server check-playlist [file]    check a playlist (default: the configured one) and exit
+  openlink-server diagnostics              write a report to send when asking for help (keys and public IPs removed)
   openlink-server version
 
 flags:
@@ -76,6 +78,7 @@ type agent struct {
 	lobby        *lobbyInfo     // nil until the native backend connects
 	voter        *voter         // nil unless voting runs
 	vote         *voteInfo      // nil unless voting runs
+	portForward  string         // auto_port_forward result for the admin API
 }
 
 func (a *agent) setStatus(s string) {
@@ -110,18 +113,28 @@ func main() {
 		return
 	}
 
-	a := &agent{cfg: c, log: slog.New(slog.NewTextHandler(os.Stderr, nil))}
+	var logOut io.Writer = os.Stderr
+	logFile, logErr := openLog(c.logDir())
+	if logErr == nil {
+		defer logFile.Close()
+		logOut = io.MultiWriter(os.Stderr, logFile)
+	}
+	a := &agent{cfg: c, log: slog.New(slog.NewTextHandler(logOut, nil))}
+	if logErr != nil {
+		a.log.Warn("no log file; logging to the console only", "err", logErr)
+	}
 	if !c.Simulate {
 		// Every real server runs from a playlist through the control DLL;
 		// refuse to start without them rather than discover it once the
 		// server is up.
+		// Logged, not only printed: under autostart there is no console.
 		if err := checkControlFiles(c.resolve(c.HostControlDLL)); err != nil {
-			fmt.Fprintln(os.Stderr, "error:", err)
+			a.log.Error("cannot start", "err", err)
 			os.Exit(2)
 		}
 		f, report, err := checkPlaylist(c, c.resolve(c.Playlist), c.Vote != nil)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "error:", err)
+			a.log.Error("cannot start", "err", err)
 			os.Exit(2)
 		}
 		a.playlist = f
@@ -167,6 +180,8 @@ func runCommand(c config, args []string) error {
 		return selectCommand(c.Admin, args[1])
 	case "check-playlist":
 		return checkPlaylistCommand(c, args)
+	case "diagnostics":
+		return diagnosticsCommand(c)
 	}
 	return fmt.Errorf("unknown command %q (run with -h for help)", args[0])
 }
@@ -196,6 +211,9 @@ func (a *agent) run(ctx context.Context) error {
 			return fmt.Errorf("read build: %w", err)
 		}
 		a.log.Info("game install", "root", in.Root, "build", a.build)
+		if err := checkGameBuild(in, a.build, supportedBuild, supportedGameSHA256); err != nil {
+			return err
+		}
 
 		existing := a.serverAlreadyRunning()
 		serverBind := a.cfg.BindIP
@@ -207,6 +225,10 @@ func (a *agent) run(ctx context.Context) error {
 				a.cfg.Proxy = false
 			} else if err := a.startProxy(ctx, &wg); err != nil {
 				return err
+			}
+			if a.cfg.AutoPortForward && a.cfg.Proxy {
+				wg.Add(1)
+				go func() { defer wg.Done(); a.runPortForward(ctx) }()
 			}
 		}
 		wg.Add(2)

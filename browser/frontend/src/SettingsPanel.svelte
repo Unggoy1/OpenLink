@@ -1,7 +1,8 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import { main } from '../wailsjs/go/models';
-  import { OverlayKeyConflicts, OverlaySupported } from '../wailsjs/go/main/App.js';
+  import { Diagnostics, OverlayKeyConflicts, OverlaySupported } from '../wailsjs/go/main/App.js';
+  import { ClipboardSetText } from '../wailsjs/runtime/runtime.js';
   import HotkeyInput from './HotkeyInput.svelte';
 
   interface Props {
@@ -22,6 +23,7 @@
   let overlayCorner = $state(initial.overlayCorner || 'top-right');
   let openKey = $state(initial.overlayOpenKey);
   let voteKeys = $state([...(initial.overlayVoteKeys ?? [])]);
+  let controllerVote = $state(!initial.overlayNoController);
   let error = $state('');
   let saving = $state(false);
 
@@ -40,6 +42,21 @@
     return () => (stale = true);
   });
 
+  let copying = $state(false);
+  let copied = $state('');
+  async function copyDiagnostics() {
+    copying = true;
+    copied = '';
+    try {
+      const ok = await ClipboardSetText(await Diagnostics());
+      copied = ok ? 'Copied. Paste it where you ask for help.' : 'Could not copy to the clipboard.';
+    } catch (err) {
+      copied = String(err);
+    } finally {
+      copying = false;
+    }
+  }
+
   async function save(e: SubmitEvent) {
     e.preventDefault();
     error = '';
@@ -55,6 +72,7 @@
           overlayCorner,
           overlayOpenKey: openKey,
           overlayVoteKeys: voteKeys,
+          overlayNoController: !controllerVote,
         }),
       );
     } catch (err) {
@@ -88,7 +106,7 @@
     </label>
     <label class="radio">
       <input type="radio" bind:group={mode} value="broadcast" />
-      <span>LAN broadcast: if servers never appear in game, or you host the server on this PC</span>
+      <span>LAN broadcast: if servers never appear in game (used automatically when a server runs on this PC)</span>
     </label>
   </fieldset>
 
@@ -102,11 +120,11 @@
       <legend>In-game vote overlay</legend>
       <label class="radio">
         <input type="radio" bind:group={overlayMode} value="off" />
-        <span>Off: vote in this app (recommended)</span>
+        <span>Off: vote in this app only</span>
       </label>
       <label class="radio">
         <input type="radio" bind:group={overlayMode} value="passive" />
-        <span>Passive: shows over the game by itself; vote with a hotkey for each choice</span>
+        <span>Passive (recommended): shows over the game by itself; vote with a hotkey for each choice</span>
       </label>
       <label class="radio">
         <input type="radio" bind:group={overlayMode} value="interactive" />
@@ -131,6 +149,10 @@
               <option value="bottom-right">Bottom right</option>
             </select>
           </div>
+          <label class="radio">
+            <input type="checkbox" bind:checked={controllerVote} />
+            <span>Vote with a controller: hold View and press the D-pad (↑ 1, → 2, ↓ 3, ← 4)</span>
+          </label>
           {#if taken.length}
             <p class="error">{taken.join(', ')} {taken.length === 1 ? 'is' : 'are'} already used by another app. Pick a different key.</p>
           {/if}
@@ -143,6 +165,20 @@
       {/if}
     </fieldset>
   {/if}
+
+  <fieldset>
+    <legend>Help</legend>
+    <div class="row">
+      <button type="button" class="secondary" onclick={copyDiagnostics} disabled={copying}>
+        {copying ? 'Collecting…' : 'Copy diagnostics'}
+      </button>
+      {#if copied}<small>{copied}</small>{/if}
+    </div>
+    <small>
+      Copies a report of your versions, settings and recent connection events to paste when you ask for help. Public IP
+      addresses are removed.
+    </small>
+  </fieldset>
 
   {#if error}<p class="error">{error}</p>{/if}
 

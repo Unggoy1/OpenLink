@@ -74,7 +74,12 @@ func (a *App) Vote(round uint64, choice int) error {
 	if sess == nil {
 		return errors.New("not joined to a server")
 	}
-	return sess.Vote(round, choice)
+	if err := sess.Vote(round, choice); err != nil {
+		a.events.Add("vote in round %d failed: %v", round, err)
+		return err
+	}
+	a.events.Add("voted option %d in round %d", choice, round)
+	return nil
 }
 
 // OverlaySupported reports whether this build has the in-game vote overlay.

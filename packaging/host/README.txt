@@ -8,8 +8,11 @@ Files
 
 Setup
   1. Keep all files in one folder.
-  2. Copy openlink-server.example.json to openlink-server.json and fill in name
-     and public_port (your port forward). No key is needed. register_key and
+  2. Copy openlink-server.example.json to openlink-server.json and fill in name,
+     description (optional, one line shown in the app) and public_port (your
+     port forward). To let openlink-server ask your router to forward the port,
+     add "auto_port_forward": true (opt-in; UPnP or NAT-PMP; see the
+     disclaimer below). No key is needed. register_key and
      public_host are only for listing a tunnel address (ask the directory
      operator for a key). Players see your server once the directory has
      reached its port, usually within a minute.
@@ -38,12 +41,24 @@ and, once someone joins, "vote open". The lobby screen may show another map
 name until the match loads; the OpenLink app shows the real next match.
 
 Notes
-  - The DLL supports one game build only. After a Halo update it refuses to
-    load until a new release supports the new build.
+  - Each release supports one Halo build. After a Halo update openlink-server
+    refuses to start (the log says why) until a release for the new build.
   - This modifies your own server process (never players' games). Hosting
     this way is at your own risk with respect to the game's terms.
   - With a tunnel pointed at 127.0.0.1:1343, keep "server_ip": "127.0.0.2".
-  - Playing on the hosting PC: set the OpenLink app to "LAN broadcast" in
-    Settings, or your game will not see the server through the app.
+  - Playing on the hosting PC: the OpenLink app switches to LAN broadcast by
+    itself when it sees the server running on the same PC.
   - Check status: openlink-server.exe status
+  - The log is openlink-server.log next to openlink-server.json. When you ask
+    for help, run openlink-server.exe diagnostics and attach the file it
+    writes (public IPs and keys are removed).
+
+Disclaimer
+  OpenLink is community software provided as is, without warranty. Hosting a
+  server opens a port on your network to the internet, and you do so at your
+  own risk. The OpenLink and unggoy developers are not responsible for changes
+  you or openlink-server make to your router, firewall or network, including
+  automatic port forwarding, or for any consequences of exposing your PC to
+  the internet.
+
 Full documentation: docs/HOST-CONTROL.md in the repository.

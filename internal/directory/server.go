@@ -202,14 +202,14 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.mu.Lock()
-	banned, badName := s.bannedLocked(ip), s.badNameLocked(req.Name)
+	banned, badName := s.bannedLocked(ip), s.badNameLocked(req.Name+" "+req.Description)
 	s.mu.Unlock()
 	switch {
 	case banned:
 		httpError(w, http.StatusForbidden, "this address may not list servers")
 		return
 	case badName:
-		httpError(w, http.StatusForbidden, "server name not allowed")
+		httpError(w, http.StatusForbidden, "server name or description not allowed")
 		return
 	}
 	if req.Host == "" {
@@ -254,7 +254,8 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 	}
 	s.servers[id] = &entry{
 		info: api.ServerInfo{ID: id, Name: req.Name, Host: req.Host, Port: req.Port, Build: req.Build,
-			Region: req.Region, Status: "starting", Players: -1, LastSeen: now, Reachability: api.ReachUnknown},
+			Description: req.Description,
+			Region:      req.Region, Status: "starting", Players: -1, LastSeen: now, Reachability: api.ReachUnknown},
 		token: tok, ownerIP: ip, registeredAt: now,
 	}
 	writeJSON(w, http.StatusCreated, api.RegisterResponse{ID: id, Token: tok, Host: req.Host})
@@ -282,6 +283,7 @@ func (s *Server) resolvesTo(ctx context.Context, host, ip string) bool {
 
 func validateRegister(req *api.RegisterRequest) error {
 	req.Name = strings.TrimSpace(req.Name)
+	req.Description = strings.TrimSpace(req.Description)
 	switch {
 	case !api.ValidServerName(req.Name):
 		return errors.New("name must be 1-48 printable characters")
@@ -291,6 +293,8 @@ func validateRegister(req *api.RegisterRequest) error {
 		return errors.New("bad build")
 	case len(req.Region) > 32 || !printable(req.Region):
 		return errors.New("bad region")
+	case !api.ValidDescription(req.Description):
+		return errors.New("description must be at most 120 characters, no control characters")
 	case req.Host != "" && net.ParseIP(req.Host) == nil && !hostRe.MatchString(req.Host):
 		return errors.New("bad host")
 	}

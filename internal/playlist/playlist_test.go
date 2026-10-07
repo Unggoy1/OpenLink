@@ -2,6 +2,7 @@ package playlist
 
 import (
 	"math/rand/v2"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -109,6 +110,9 @@ func TestPackagedExample(t *testing.T) {
 	if err != nil || len(f.Entries) == 0 {
 		t.Fatalf("packaged playlist example: %v", err)
 	}
+	if !slices.ContainsFunc(f.Entries, func(e Entry) bool { return e.Teams != nil }) {
+		t.Error("packaged playlist example has no entry with teams")
+	}
 }
 
 func TestThumbRef(t *testing.T) {
@@ -117,5 +121,31 @@ func TestThumbRef(t *testing.T) {
 		`"},"mode":{"asset_id":"` + asset + `","version_id":"` + version + `"}}]}`))
 	if err != nil || f.Entries[0].ThumbRef() != asset+"/"+version {
 		t.Fatalf("ref %q %v", f.Entries[0].ThumbRef(), err)
+	}
+}
+
+func TestParseTeams(t *testing.T) {
+	with := func(teams string) string {
+		return strings.Replace(sample, `{"id": "kusini-ctf",`, `{"id": "kusini-ctf", "teams": `+teams+`,`, 1)
+	}
+	for _, bad := range []string{`{}`, `{"count": 9}`, `{"count": -1}`, `{"count": 1}`, `{"size": 33}`, `{"size": -2}`, `{"size": 1}`} {
+		if _, err := Parse([]byte(with(bad))); err == nil {
+			t.Errorf("teams %s accepted", bad)
+		}
+	}
+	for teams, want := range map[string]Teams{`{"count": 4}`: {Count: 4}, `{"size": 3}`: {Size: 3}, `{"count": 8, "size": 32}`: {Count: 8, Size: 32}} {
+		f, err := Parse([]byte(with(teams)))
+		if err != nil {
+			t.Fatalf("teams %s rejected: %v", teams, err)
+		}
+		var got *Teams
+		for _, e := range f.Entries {
+			if e.ID == "kusini-ctf" {
+				got = e.Teams
+			}
+		}
+		if got == nil || *got != want {
+			t.Errorf("teams %s parsed as %+v", teams, got)
+		}
 	}
 }

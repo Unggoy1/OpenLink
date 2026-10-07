@@ -7,6 +7,7 @@
 #include "image_validation.h"
 #include "simulation_state.h"
 #include "beacon_name.h"
+#include "team_guard.h"
 #include <atomic>
 #include <cstring>
 
@@ -84,7 +85,9 @@ bool ValidateImage(uintptr_t base) noexcept {
         {kServerTick,{0x40,0x53,0x48,0x83,0xec,0x20,0x48,0x8b,0xd9,0xe8,0xca,0x06,0x00,0x00,0x48,0x8b}},
         {0x2e1d270,{0x40,0x53,0x48,0x83,0xec,0x20,0x4c,0x8b,0xca,0x48,0x8b,0xd9,0x45,0x33,0xc0,0xe8}},
         {0x2e0d870,{0x40,0x53,0x48,0x83,0xec,0x20,0x8b,0x81,0xc8,0x00,0x00,0x00,0x48,0x8b,0xd9,0x3b}},
-        {0x2e0dcb8,{0x40,0x53,0x48,0x83,0xec,0x20,0x44,0x0f,0xb6,0x81,0xc8,0x00,0x00,0x00,0x48,0x8b}}
+        {0x2e0dcb8,{0x40,0x53,0x48,0x83,0xec,0x20,0x44,0x0f,0xb6,0x81,0xc8,0x00,0x00,0x00,0x48,0x8b}},
+        // qword Set 142e1d39c past its shared prologue: mov rax,[rbx+c8]; cmp rax,[r9]; jnz; test [rbx+c0],1
+        {0x2e1d3b4,{0x48,0x8b,0x83,0xc8,0x00,0x00,0x00,0x49,0x3b,0x01,0x75,0x09,0xf6,0x83,0xc0,0x00}}
     };
     for(const auto& target:targets) {
         uint8_t observed[16]={}; MEMORY_BASIC_INFORMATION region={};
@@ -92,8 +95,11 @@ bool ValidateImage(uintptr_t base) noexcept {
             !(region.Protect&(PAGE_EXECUTE|PAGE_EXECUTE_READ|PAGE_EXECUTE_READWRITE|PAGE_EXECUTE_WRITECOPY)) ||
             !CopyAddress(base+target.rva,observed,sizeof(observed)) || std::memcmp(observed,target.bytes,sizeof(observed))) return false;
     }
-    uintptr_t tick=0,getter=0,setter=0,requested=0,request=0,apply=0,int_getter=0,int_set=0,int_apply=0,byte_apply=0;
-    return Read(base+0x3d44a80+0xa0,int_getter) && int_getter==base+0x4e5cec &&
+    uintptr_t tick=0,getter=0,setter=0,requested=0,request=0,apply=0,int_getter=0,int_set=0,int_apply=0,byte_apply=0,
+        qword_getter=0,qword_set=0;
+    return Read(base+0x3d45040+0xa0,qword_getter) && qword_getter==base+0x4e5cec &&
+        Read(base+0x3d45040+0xb0,qword_set) && qword_set==base+0x2e1d39c &&
+        Read(base+0x3d44a80+0xa0,int_getter) && int_getter==base+0x4e5cec &&
         Read(base+0x3d44a80+0xb0,int_set) && int_set==base+0x2e1d270 &&
         Read(base+0x3d44a80+0x78,int_apply) && int_apply==base+0x2e0d870 &&
         Read(base+0x3e06a20+0x78,byte_apply) && byte_apply==base+0x2e0dcb8 &&
@@ -141,6 +147,125 @@ uint8_t HookByteApply(void* component,const uint8_t* value) {
     return reinterpret_cast<ByteApply>(image.load(std::memory_order_acquire)+kByteApply)(component,value);
 }
 
+// LAN lobby leader (BackendSetLeader, FN027): qword component, valid bit +0xc0,
+// value +0xc8, written on the engine tick through its authoritative Set.
+constexpr uintptr_t kLeader=0xb4ba60,kQwordTable=0x3d45040,kQwordSet=0x2e1d39c;
+using QwordSet=uint8_t (*)(void*,const uint64_t*);
+std::atomic<uint64_t> leader_xuid{0},leader_request{0},leader_completed{0},leader_sequence{0};
+std::atomic<uint16_t> leader_code{CodePending};
+std::atomic<bool> leader_clear{false};
+std::atomic<uint32_t> leader_sets{0};
+// Returns the validated component address, or 0.
+uintptr_t LeaderComponent(uintptr_t base,uintptr_t simulation) noexcept {
+    uintptr_t table=0,set=0;
+    if(!simulation || !Read(simulation+kLeader,table) || table!=base+kQwordTable || !Read(table+0xb0,set) || set!=base+kQwordSet) return 0;
+    return simulation+kLeader;
+}
+bool ReadLeader(uintptr_t component,uint64_t& value) noexcept {
+    uint8_t available=0; value=0;
+    return component && Read(component+0xc0,available) && (available&1) && Read(component+0xc8,value);
+}
+
+// Team diagnostics (LobbyProbe team fields): plain reads, no game calls.
+constexpr uintptr_t kLobbyVariant=0x542c0,kVariantTeams=0x10bc,kGameGlobals=0x5121d28,kGameIndex=0x45c5838;
+std::atomic<uint32_t> team_fixes{0}; // TickTeamGuard corrections
+int8_t VariantTeams(uintptr_t variant) noexcept {
+    uint8_t teams=0;
+    return variant && Read(variant+kVariantTeams,teams) ? int8_t(teams!=0) : int8_t(-1);
+}
+void ReadTeams(uintptr_t base,uintptr_t session,uintptr_t simulation,LobbyProbe& p) noexcept {
+    std::memset(p.peer_team,0xff,sizeof(p.peer_team));
+    p.lobby_variant_teams=p.game_variant_teams=-1; p.game_state=-1;
+    uint8_t available=0,present=0;
+    if(simulation && Read(simulation+kLobbyVariant+0xc0,available) && (available&1) &&
+        Read(simulation+kLobbyVariant+0xc8,present) && present)
+        p.lobby_variant_teams=VariantTeams(simulation+kLobbyVariant+0xd0);
+    uintptr_t globals=0; uint16_t index=0;
+    if(Read(base+kGameGlobals,globals) && globals && Read(base+kGameIndex,index)) {
+        const uintptr_t game=globals+uintptr_t(index)*0x1134f0;
+        if(Read(game,p.game_state)) p.game_variant_teams=VariantTeams(game+0x28);
+    }
+    Read(base+0x4dcf9ac,p.last_teams_enabled); Read(base+0x4dcf9b0,p.last_team_count); Read(base+0x4dc340c,p.forced_team_count);
+    p.team_fixes=uint8_t(team_fixes.load()>255 ? 255 : team_fixes.load());
+    if(!session || !(p.flags&LobbyValid)) return;
+    for(unsigned i=0;i<16;++i) {
+        if(!((p.peer_mask>>i)&1)) continue;
+        const uintptr_t peer=session+uintptr_t(i)*0x1470;
+        Read(peer+0x2505,p.peer_team[i][0]); Read(peer+0x2cf5,p.peer_team[i][1]); Read(peer+0x2cf6,p.peer_team[i][2]);
+    }
+}
+
+// FFA team guard. When the match's game variant (simulation+0x542c0) has teams
+// off, the game's own rule (142ebfcbc with teamsEnabled false) puts each peer on
+// its own team: assigned (+0x2cf5) = peer index, or 31 if the peer requested the
+// observer team (+0x2505). This re-applies that rule on the engine tick if a peer
+// differs, with the same change notification (session +0x68 and +0x54d14), so no
+// two players can share a team in FFA. Normally a no-op: the game already did it.
+//
+// Team balance (TeamBalance policy): once per match, when match prep has put a
+// team mode into that variant (HostPreGame with a start requested, or
+// HostStarting), the non-observer peers are spread over TeamCount teams with
+// AssignTeams (team_guard.h; even or shuffle, team count or size from the
+// playlist entry), written to assigned +0x2cf5 and selected +0x2cf6, and their
+// carried-over requests (+0x2505) are cleared so the game's own pass (142ebfcbc)
+// keeps the result. The next lobby clears that variant (absent until prep),
+// which re-arms the balance.
+bool WriteAddress(uintptr_t address,const void* source,size_t size) noexcept;
+std::atomic<uint32_t> team_policy{TeamGuardFfa},team_mode{TeamModeEven},team_count{0},team_size{0};
+bool balanced=false; // engine thread only
+void BalanceTeams(uintptr_t session,uint32_t mask,bool& changed) noexcept {
+    unsigned peers[kMaxTeamSize],n=0; int8_t current[kMaxTeamSize],want[kMaxTeamSize],requests[kMaxTeamSize];
+    for(unsigned i=0;i<32 && n<kMaxTeamSize;++i) {
+        if(!((mask>>i)&1)) continue;
+        const uintptr_t peer=session+uintptr_t(i)*0x1470;
+        int8_t requested=0,assigned=0,selected=0;
+        if(!Read(peer+0x2505,requested) || !Read(peer+0x2cf5,assigned) || !Read(peer+0x2cf6,selected) ||
+            IsObserver(requested,assigned,selected)) continue;
+        peers[n]=i; current[n]=assigned; requests[n]=requested; ++n;
+    }
+    if(!n) return;
+    LARGE_INTEGER seed={}; QueryPerformanceCounter(&seed);
+    const unsigned teams=TeamCount(n,team_count.load(),team_size.load());
+    AssignTeams(n,current,teams,team_mode.load(),uint64_t(seed.QuadPart)|1,want);
+    for(unsigned k=0;k<n;++k) {
+        const uintptr_t peer=session+uintptr_t(peers[k])*0x1470; const int8_t none=-1;
+        int8_t selected=0; Read(peer+0x2cf6,selected);
+        if(want[k]==current[k] && selected==want[k] && requests[k]==none) continue;
+        if(WriteAddress(peer+0x2cf5,&want[k],1) && WriteAddress(peer+0x2cf6,&want[k],1) && WriteAddress(peer+0x2505,&none,1)) changed=true;
+    }
+}
+void NotifyTeams(uintptr_t session) noexcept {
+    int32_t a=0,b=0;
+    if(Read(session+0x68,a) && Read(session+0x54d14,b)) { ++a; ++b; WriteAddress(session+0x68,&a,4); WriteAddress(session+0x54d14,&b,4); }
+    const uint32_t n=team_fixes.load(); if(n!=UINT32_MAX) team_fixes.store(n+1);
+}
+void TickTeams(uintptr_t session,uintptr_t simulation,int32_t state,bool start_requested) noexcept {
+    uint8_t available=0,present=0,teams=0; uint32_t mask=0;
+    if(!session || !simulation || !Read(simulation+kLobbyVariant+0xc0,available) || !(available&1) ||
+        !Read(simulation+kLobbyVariant+0xc8,present) || !present) { balanced=false; return; }
+    if(!Read(simulation+kLobbyVariant+0xd0+kVariantTeams,teams) || !Read(session+0xa4,mask)) return;
+    const uint32_t policy=team_policy.load(std::memory_order_acquire);
+    bool changed=false;
+    if(!teams && (policy&TeamGuardFfa)) {
+        for(unsigned i=0;i<32;++i) {
+            if(!((mask>>i)&1)) continue;
+            const uintptr_t peer=session+uintptr_t(i)*0x1470;
+            int8_t requested=0,assigned=0,want=0;
+            if(!Read(peer+0x2505,requested) || !Read(peer+0x2cf5,assigned) || !FfaTeamFix(i,requested,assigned,want)) continue;
+            if(WriteAddress(peer+0x2cf5,&want,1)) changed=true;
+        }
+    }
+    const bool before_spawn=(state==HostPreGame && start_requested) || state==HostStarting;
+    if(!balanced && before_spawn) {
+        balanced=true;
+        if(teams && (policy&TeamBalance)) BalanceTeams(session,mask,changed);
+        // The entry's team count/size apply to this match only: if the next
+        // entry's rules never arrive, that match falls back to two teams.
+        team_count.store(0); team_size.store(0);
+    }
+    if(changed) NotifyTeams(session);
+}
+
 LobbyProbe ReadLobby(uintptr_t base,uintptr_t session,uintptr_t simulation) noexcept {
     LobbyProbe p={}; p.owner=p.host_peer=p.start_mode=-1;
     if(session && Read(session+0xa0,p.peers) && Read(session+0xa4,p.peer_mask) && Read(session+0x6c,p.owner) &&
@@ -173,7 +298,44 @@ LobbyProbe ReadLobby(uintptr_t base,uintptr_t session,uintptr_t simulation) noex
     if(server_owned.load(std::memory_order_acquire)) p.flags|=LobbyServerOwned;
     if(owner_patched.load(std::memory_order_acquire)) p.flags|=LobbyNoOwner;
     if(start_sent.load(std::memory_order_acquire)) p.flags|=LobbyStartSent;
+    if(ReadLeader(LeaderComponent(base,simulation),p.leader)) {
+        p.flags|=LobbyLeaderValid;
+        const uint64_t held=leader_xuid.load(std::memory_order_acquire);
+        if(held && p.leader==held) p.flags|=LobbyLeaderHeld;
+    }
+    p.leader_sets=leader_sets.load();
+    ReadTeams(base,session,simulation,p);
     return p;
+}
+// Keeps the server's leader XUID in the leader component (engine tick only) and
+// answers a pending BackendSetLeader. Set is called only when the value differs.
+void TickLeader(uintptr_t base,uintptr_t simulation) noexcept {
+    const uint64_t ticket=leader_request.exchange(0,std::memory_order_acq_rel);
+    const uint64_t desired=leader_xuid.load(std::memory_order_acquire);
+    const bool clear=!desired && leader_clear.load(std::memory_order_acquire);
+    uint16_t code=CodeOK;
+    if(desired || clear) {
+        code=CodeBusy;
+        if(simulation) {
+            const uintptr_t component=LeaderComponent(base,simulation);
+            code=CodeUnsupported;
+            if(component) {
+                uint64_t current=0; const bool valid=ReadLeader(component,current);
+                code=CodeFailed;
+                if(valid && current==desired) code=CodeOK;
+                else if(reinterpret_cast<QwordSet>(base+kQwordSet)(reinterpret_cast<void*>(component),&desired) &&
+                    ReadLeader(component,current) && current==desired) {
+                    code=CodeOK;
+                    if(desired) { const uint32_t n=leader_sets.load(); if(n!=UINT32_MAX) leader_sets.store(n+1); }
+                }
+                if(clear && code==CodeOK) leader_clear.store(false,std::memory_order_release);
+            }
+        }
+    }
+    if(ticket) {
+        leader_code.store(code,std::memory_order_release);
+        leader_completed.store(ticket,std::memory_order_release);
+    }
 }
 // Executes a queued Start on the engine thread: HostPreGame only, validated
 // component table, native authority-checked Set, then readback.
@@ -266,6 +428,13 @@ void HookTick(void* server) {
         if(frame.state==HostInGame || frame.state==HostEndGame) start_sent.store(false,std::memory_order_release);
         TickStart(base,frame.state,frame.gates,simulation);
         TickName(base);
+        TickLeader(base,simulation);
+        {
+            uintptr_t mode_table=0; uint8_t mode_available=0; int32_t start_mode=0;
+            const bool start_requested=simulation && Read(simulation+kStartMode,mode_table) && mode_table==base+kIntTable &&
+                Read(simulation+kStartMode+0xc0,mode_available) && (mode_available&1) && Read(simulation+kStartMode+0xc8,start_mode) && start_mode==1;
+            TickTeams(session,simulation,frame.state,start_requested);
+        }
         auto lobby=ReadLobby(base,session,simulation);
         // A Start whose players all left before the engine began the match would
         // otherwise start instantly for the next joiner; withdraw it (start mode 0).
@@ -434,7 +603,7 @@ uint32_t StopGameBackend() noexcept {
             if(result==ERROR_SUCCESS) result=filter;
         }
     }
-    start_request.store(0); name_request.store(0);
+    start_request.store(0); name_request.store(0); leader_request.store(0); leader_xuid.store(0); leader_clear.store(false);
     AcquireSRWLockExclusive(&selection_lock); lock_active=false; ReleaseSRWLockExclusive(&selection_lock);
     ReleaseSRWLockExclusive(&installation); return result;
 }
@@ -484,6 +653,32 @@ BackendReport BackendSetName(const uint16_t* units,uint32_t wait_ms) noexcept {
     report=commands.Status();
     report.code=name_completed.load(std::memory_order_acquire)==ticket ? name_code.load(std::memory_order_acquire) : uint16_t(CodePending);
     return WithLockGates(report);
+}
+BackendReport BackendSetLeader(uint64_t xuid,uint32_t wait_ms) noexcept {
+    auto report=commands.Status();
+    if(!running.load(std::memory_order_acquire)) { report.code=CodePending; return WithLockGates(report); }
+    if(wait_ms>2000) wait_ms=2000;
+    // The held value takes effect on the next tick whether or not this call waits for it.
+    leader_clear.store(xuid==0,std::memory_order_release);
+    leader_xuid.store(xuid,std::memory_order_release);
+    const uint64_t ticket=++leader_sequence;
+    uint64_t idle=0;
+    if(!leader_request.compare_exchange_strong(idle,ticket)) { report.code=CodeBusy; return WithLockGates(report); }
+    const ULONGLONG deadline=GetTickCount64()+wait_ms;
+    while(leader_completed.load(std::memory_order_acquire)!=ticket && GetTickCount64()<deadline) Sleep(5);
+    uint64_t waiting=ticket;
+    if(leader_completed.load(std::memory_order_acquire)!=ticket && !leader_request.compare_exchange_strong(waiting,0))
+        for(unsigned i=0;i<100 && leader_completed.load(std::memory_order_acquire)!=ticket;++i) Sleep(5);
+    report=commands.Status();
+    report.code=leader_completed.load(std::memory_order_acquire)==ticket ? leader_code.load(std::memory_order_acquire) : uint16_t(CodePending);
+    return WithLockGates(report);
+}
+uint32_t BackendTeamPolicy(uint32_t flags,uint32_t mode,uint32_t count,uint32_t size) noexcept {
+    if((flags&~uint32_t(TeamGuardFfa|TeamBalance)) || mode>TeamModeShuffle || count>kMaxTeams || size>kMaxTeamSize)
+        return ERROR_INVALID_PARAMETER;
+    team_mode.store(mode); team_count.store(count); team_size.store(size);
+    team_policy.store(flags,std::memory_order_release);
+    return ERROR_SUCCESS;
 }
 uint32_t BackendServerOwned(uint32_t mode) noexcept {
     if(mode>ServerOwnedFilterOnly) return ERROR_INVALID_PARAMETER;

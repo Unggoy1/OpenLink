@@ -3,6 +3,7 @@ package hostctl
 import (
 	"bytes"
 	"encoding/binary"
+	"io"
 	"strings"
 	"testing"
 )
@@ -216,3 +217,97 @@ func TestSetNameRequest(t *testing.T) {
 	}
 }
 
+func TestSetLeaderRequest(t *testing.T) {
+	for _, xuid := range []uint64{0, 2533274962600518, ^uint64(0)} {
+		var w bytes.Buffer
+		if err := EncodeRequest(&w, Request{Op: OpSetLeader, ID: 2, XUID: xuid}); err != nil {
+			t.Fatal(err)
+		}
+		if w.Len() != 4+56 {
+			t.Fatalf("set-leader frame is %d bytes", w.Len())
+		}
+		got, err := DecodeRequest(&w)
+		if err != nil || got.Op != OpSetLeader || got.XUID != xuid {
+			t.Fatalf("round trip %d: %+v %v", xuid, got, err)
+		}
+	}
+}
+
+// Version 4 replies add the lobby leader XUID at 176 and re-asserts at 184.
+func TestReplyVersion4Leader(t *testing.T) {
+	b := make([]byte, 192)
+	copy(b, "HICR")
+	binary.LittleEndian.PutUint16(b[4:], 4)
+	binary.LittleEndian.PutUint64(b[8:], 9)
+	binary.LittleEndian.PutUint32(b[16:], 70)
+	binary.LittleEndian.PutUint32(b[112:], LobbyValid|LobbyLeaderValid|LobbyLeaderHeld)
+	binary.LittleEndian.PutUint32(b[116:], 2)
+	binary.LittleEndian.PutUint64(b[176:], 2533274962600518)
+	binary.LittleEndian.PutUint32(b[184:], 3)
+	var w bytes.Buffer
+	writeFrame(&w, b)
+	got, err := DecodeReply(&w)
+	l := got.Lobby
+	if err != nil || got.Version != 4 || l.Connected != 2 || l.Leader != 2533274962600518 || l.LeaderSets != 3 ||
+		l.Flags != LobbyValid|LobbyLeaderValid|LobbyLeaderHeld {
+		t.Fatalf("v4 decode: %+v %v", got, err)
+	}
+	var short bytes.Buffer
+	writeFrame(&short, b[:176])
+	if _, err := DecodeReply(&short); err == nil {
+		t.Fatal("accepted v4 header on a v3-length frame")
+	}
+}
+
+// Version 5 replies add team diagnostics at 192.
+func TestReplyVersion5Teams(t *testing.T) {
+	b := make([]byte, 256)
+	copy(b, "HICR")
+	binary.LittleEndian.PutUint16(b[4:], 5)
+	binary.LittleEndian.PutUint64(b[8:], 9)
+	binary.LittleEndian.PutUint32(b[16:], 70)
+	binary.LittleEndian.PutUint32(b[112:], LobbyValid)
+	binary.LittleEndian.PutUint32(b[124:], 0b101)
+	binary.LittleEndian.PutUint64(b[176:], 7)
+	b[192], b[193], b[194], b[195] = 1, 0xff, 1, 2
+	binary.LittleEndian.PutUint32(b[196:], 8)
+	binary.LittleEndian.PutUint32(b[204:], 3)
+	for i := 208; i < 256; i++ {
+		b[i] = 0xff
+	}
+	b[208], b[209], b[210] = 0xff, 0, 0  // peer 0
+	b[214], b[215], b[216] = 31, 1, 0xff // peer 2
+	var w bytes.Buffer
+	writeFrame(&w, b)
+	got, err := DecodeReply(&w)
+	l := got.Lobby
+	if err != nil || got.Version != 5 || l.Leader != 7 || l.LobbyVariantTeams != 1 || l.GameVariantTeams != -1 ||
+		l.LastTeamsEnabled != 1 || l.TeamFixes != 2 || l.LastTeamCount != 8 || l.GameState != 3 || l.PeerTeams[2] != [3]int8{31, 1, -1} {
+		t.Fatalf("v5 decode: %+v %v", l, err)
+	}
+	if s := l.TeamSummary(); s != "0:-1/0/0 2:31/1/-1" {
+		t.Fatalf("summary %q", s)
+	}
+}
+
+func TestTeamPolicyRequest(t *testing.T) {
+	for _, p := range []TeamPolicy{{}, {Flags: TeamGuardFFA}, {Flags: TeamGuardFFA | TeamBalance, Mode: TeamModeShuffle, Count: 4, Size: 3},
+		{Flags: TeamBalance, Count: MaxTeams, Size: MaxTeamSize}} {
+		var w bytes.Buffer
+		if err := EncodeRequest(&w, Request{Op: OpTeamPolicy, ID: 2, Teams: p}); err != nil {
+			t.Fatal(err)
+		}
+		if w.Len() != 4+64 {
+			t.Fatalf("team-policy frame is %d bytes", w.Len())
+		}
+		got, err := DecodeRequest(&w)
+		if err != nil || got.Op != OpTeamPolicy || got.Teams != p {
+			t.Fatalf("round trip %+v: %+v %v", p, got, err)
+		}
+	}
+	for _, bad := range []TeamPolicy{{Flags: 4}, {Mode: 2}, {Count: MaxTeams + 1}, {Size: MaxTeamSize + 1}} {
+		if err := EncodeRequest(io.Discard, Request{Op: OpTeamPolicy, ID: 2, Teams: bad}); err == nil {
+			t.Fatalf("invalid team policy %+v accepted", bad)
+		}
+	}
+}

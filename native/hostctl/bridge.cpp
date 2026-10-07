@@ -74,8 +74,9 @@ int read_frame(SOCKET s,uint8_t* p,unsigned capacity,unsigned& size,bool allow_i
     return read_all(s,p,size);
 }
 bool reply(SOCKET s,uint16_t code,uint64_t id,const hostctl::BackendReport* report=nullptr) {
-    // v3: v2 layout (lifecycle state, match count, backend flags) plus the lobby probe at 112.
-    uint8_t b[176]={}; std::memcpy(b,"HICR",4); p16(b+4,3); p16(b+6,code);
+    // v5: v2 layout (lifecycle state, match count, backend flags), the lobby probe at 112,
+    // lobby leader XUID at 176 and leader re-asserts at 184, team diagnostics at 192.
+    uint8_t b[256]={}; std::memcpy(b,"HICR",4); p16(b+4,5); p16(b+6,code);
     p64(b+8,id); p32(b+16,GetCurrentProcessId());
     if(report) {
         p32(b+20,report->gates); p64(b+24,report->generation);
@@ -89,7 +90,12 @@ bool reply(SOCKET s,uint16_t code,uint64_t id,const hostctl::BackendReport* repo
         b[150]=l.blocked_start; b[151]=l.blocked_end;
         p32(b+152,uint32_t(l.users_required)); p32(b+156,uint32_t(l.game_type)); p32(b+160,uint32_t(l.session_kind));
         p32(b+164,uint32_t(l.end_game_table)); p32(b+168,uint32_t(l.end_game));
-    }
+        p64(b+176,l.leader); p32(b+184,l.leader_sets);
+        b[192]=uint8_t(l.lobby_variant_teams); b[193]=uint8_t(l.game_variant_teams); b[194]=l.last_teams_enabled; b[195]=l.team_fixes;
+        p32(b+196,uint32_t(l.last_team_count)); p32(b+200,uint32_t(l.forced_team_count)); p32(b+204,uint32_t(l.game_state));
+        std::memcpy(b+208,l.peer_team,sizeof(l.peer_team));
+        static_assert(sizeof(l.peer_team)==48,"peer team bytes fill 208-255");
+    } else std::memset(b+192,0xff,64);
     return send_frame(s,b,sizeof(b));
 }
 
@@ -179,6 +185,26 @@ DWORD session(SOCKET s) {
                 if(launch.version==2) {
                     if(backend_result!=ERROR_SUCCESS) code=1;
                     else { report=hostctl::BackendSetName(units,2000); code=report.code; have_report=true; }
+                }
+            }
+        }
+        // 9 SetLeader: u64 lobby leader XUID the server holds; 0 releases it.
+        if(op==9 && size==56) {
+            code=2;
+            if(launch.version==2) {
+                if(backend_result!=ERROR_SUCCESS) code=1;
+                else { report=hostctl::BackendSetLeader(u64(request+48),2000); code=report.code; have_report=true; }
+            }
+        }
+        // 10 TeamPolicy: u32 TeamPolicyFlag bits, u32 TeamMode, u32 team count, u32 team size (team_guard.h).
+        if(op==10 && size==64) {
+            code=2;
+            if(launch.version==2) {
+                if(backend_result!=ERROR_SUCCESS) code=1;
+                else {
+                    const DWORD changed=hostctl::BackendTeamPolicy(u32(request+48),u32(request+52),u32(request+56),u32(request+60));
+                    report=hostctl::BackendStatus(); have_report=true;
+                    code=changed==ERROR_SUCCESS ? 0 : 4;
                 }
             }
         }

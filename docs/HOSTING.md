@@ -48,7 +48,7 @@ Within about a minute openlink-server logs either `the directory reached your se
 ## 3. Set up the config and playlist, then run
 
 1. Copy `openlink-server.example.json` to `openlink-server.json` next to the program and fill in `name`, `description` (optional), `region` and `public_port` (`register_key` is only for listing a tunnel address; see the settings below). It already points `playlist` at `playlist.json`. Keep `openlink-control.dll` and `openlink-loader.exe` in the same folder: the server finds them there (the program refuses to start if they are missing).
-2. Copy `playlist.example.json` to `playlist.json` and list your map/mode pairs (format and limits: [HOST-CONTROL.md](HOST-CONTROL.md)).
+2. Copy `playlist.example.json` to `playlist.json` and list your map/mode pairs (format and limits: [HOST-CONTROL.md](HOST-CONTROL.md)). For a mode made for more than two teams, give its entry `teams` (`{"count": 4}` or `{"size": 2}`); team modes otherwise use two teams. The server evens out the teams before every match (`team_balance`, default `"even"`; `"shuffle"` or `"off"` also possible) and keeps every player on their own team in free-for-all modes; see [Server-owned lobby and automatic start](HOST-CONTROL.md#server-owned-lobby-and-automatic-start).
 3. Check it, then run:
 
 ```

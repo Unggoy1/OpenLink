@@ -18,6 +18,7 @@ type lobbyFake struct {
 	polls     int
 	starts    int
 	mode      uint32
+	leaders   []uint64
 	startMode int32
 	done      chan struct{}
 }
@@ -43,6 +44,32 @@ func (f *lobbyFake) Start(context.Context) (hostctl.Reply, error) {
 func (f *lobbyFake) ServerOwned(_ context.Context, mode uint32) (hostctl.Reply, error) {
 	f.mode = mode
 	return hostctl.Reply{Version: 3, Code: hostctl.CodeOK}, nil
+}
+
+// SetLeader answers Pending once (no tick yet), then OK.
+func (f *lobbyFake) SetLeader(_ context.Context, xuid uint64) (hostctl.Reply, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.leaders = append(f.leaders, xuid)
+	if len(f.leaders) == 1 {
+		return hostctl.Reply{Version: 4, Code: hostctl.CodeNativePending}, nil
+	}
+	return hostctl.Reply{Version: 4, Code: hostctl.CodeOK}, nil
+}
+
+func TestServerOwnedHoldsLeaderOnlyWithoutPlayerOwner(t *testing.T) {
+	for owner, want := range map[string][]uint64{"": {defaultLobbyLeader, defaultLobbyLeader}, "first_player": nil} {
+		f := &lobbyFake{connected: []int32{0}, done: make(chan struct{})}
+		a := &agent{cfg: config{ServerOwned: true, LobbyOwner: owner}, log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+		ctx, cancel := context.WithCancel(context.Background())
+		go func() { <-f.done; cancel() }()
+		a.runLobby(ctx, f, time.Millisecond)
+		f.mu.Lock()
+		if len(f.leaders) != len(want) || (len(want) > 0 && (f.leaders[0] != want[0] || f.leaders[1] != want[1])) {
+			t.Errorf("lobby_owner %q: SetLeader calls %v, want %v", owner, f.leaders, want)
+		}
+		f.mu.Unlock()
+	}
 }
 
 func TestAutoStartWaitsForPlayersThenStartsOnce(t *testing.T) {

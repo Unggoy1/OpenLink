@@ -31,7 +31,29 @@ type Entry struct {
 	Map     Content `json:"map"`
 	Mode    Content `json:"mode"`
 	Enabled *bool   `json:"enabled,omitempty"` // default true
+	// Teams, optional, for team modes (custom games allow up to 8 teams): how
+	// the server spreads players over teams at the start of each match. Without
+	// it a team mode uses two teams (Eagle and Cobra). FFA modes ignore it.
+	Teams *Teams `json:"teams,omitempty"`
 }
+
+// Teams is a playlist entry's team setup. Count is the number of teams
+// (MinTeams-MaxTeams); Size the players per team (MinTeamSize-MaxTeamSize),
+// used to work out the number of teams when Count is not given. At least one
+// must be set.
+type Teams struct {
+	Count int `json:"count,omitempty"`
+	Size  int `json:"size,omitempty"`
+}
+
+// Team setup limits (custom games: up to 8 teams, 32 players; a team mode has
+// at least two teams of at least two).
+const (
+	MinTeams    = 2
+	MaxTeams    = 8
+	MinTeamSize = 2
+	MaxTeamSize = 32
+)
 
 // ThumbRef is the entry's map thumbnail reference for vote ballots
 // (vote.ThumbURLs builds the URLs from the map's asset and version IDs).
@@ -95,6 +117,16 @@ func Parse(b []byte) (*File, error) {
 		} {
 			if !canonicalUUID(id.value) {
 				return nil, fmt.Errorf("playlist: entry %q %s %q is not a canonical nonzero UUID", e.ID, id.name, id.value)
+			}
+		}
+		if t := e.Teams; t != nil {
+			switch {
+			case t.Count == 0 && t.Size == 0:
+				return nil, fmt.Errorf("playlist: entry %q teams needs count or size", e.ID)
+			case t.Count != 0 && (t.Count < MinTeams || t.Count > MaxTeams):
+				return nil, fmt.Errorf("playlist: entry %q teams.count %d must be %d-%d", e.ID, t.Count, MinTeams, MaxTeams)
+			case t.Size != 0 && (t.Size < MinTeamSize || t.Size > MaxTeamSize):
+				return nil, fmt.Errorf("playlist: entry %q teams.size %d must be %d-%d", e.ID, t.Size, MinTeamSize, MaxTeamSize)
 			}
 		}
 		if e.enabled() {

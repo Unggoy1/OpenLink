@@ -10,5 +10,6 @@
   "stop_server": true,
   "playlist": "playlist.json",
   "server_owned": true,
+  "team_balance": "even",
   "vote": {"seconds": 30, "options": 4, "start_delay_seconds": 5}
 }

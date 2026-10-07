@@ -15,9 +15,11 @@ const (
 	OpPrepare              uint16 = 3
 	OpPrepareEngine        uint16 = 4
 	OpInitialize           uint16 = 5
-	OpStart                uint16 = 6 // start the lobby's match (start mode 1), HostPreGame only
-	OpServerOwned          uint16 = 7 // lobby control mode (ServerOwned* constants)
-	OpSetName              uint16 = 8 // name in the in-game server list (ValidName)
+	OpStart                uint16 = 6  // start the lobby's match (start mode 1), HostPreGame only
+	OpServerOwned          uint16 = 7  // lobby control mode (ServerOwned* constants)
+	OpSetName              uint16 = 8  // name in the in-game server list (ValidName)
+	OpSetLeader            uint16 = 9  // lobby leader XUID the server holds (0 releases it)
+	OpTeamPolicy           uint16 = 10 // server team rules (TeamGuardFFA, TeamBalance)
 	CodeOK                 uint16 = 0
 	CodeUnsupported        uint16 = 1
 	CodeNativePending      uint16 = 2
@@ -62,8 +64,33 @@ type Request struct {
 	Token [32]byte
 	PID   uint32
 	Pair  AssetPair
-	Mode  uint32 // OpServerOwned
-	Name  string // OpSetName
+	Mode  uint32     // OpServerOwned
+	Name  string     // OpSetName
+	XUID  uint64     // OpSetLeader
+	Teams TeamPolicy // OpTeamPolicy
+}
+
+// TeamPolicy is the server's team rules for the coming match (OpTeamPolicy).
+type TeamPolicy struct {
+	Flags uint32 // TeamGuardFFA, TeamBalance
+	Mode  uint32 // TeamModeEven or TeamModeShuffle
+	Count uint32 // teams for team modes, 1-MaxTeams; 0 = from Size, else 2
+	Size  uint32 // players per team, 1-MaxTeamSize; 0 = not given
+}
+
+// TeamPolicy flags and modes.
+const (
+	TeamGuardFFA      uint32 = 1 // FFA modes: every player on its own team (on in the DLL by default)
+	TeamBalance       uint32 = 2 // team modes: even teams once per match, carried-over picks cleared
+	knownTeamPolicies        = TeamGuardFFA | TeamBalance
+	TeamModeEven      uint32 = 0 // keep players on their current team where the counts allow
+	TeamModeShuffle   uint32 = 1 // random even teams every match
+	MaxTeams                 = 8
+	MaxTeamSize              = 32
+)
+
+func (p TeamPolicy) valid() bool {
+	return p.Flags&^knownTeamPolicies == 0 && p.Mode <= TeamModeShuffle && p.Count <= MaxTeams && p.Size <= MaxTeamSize
 }
 
 // MaxNameLength is the longest in-game server name (api.GameName).
@@ -83,7 +110,6 @@ func ValidName(s string) bool {
 	return true
 }
 
-
 // OpServerOwned modes.
 const (
 	ServerOwnedOff         uint32 = 0 // stock lobby: owner assigned, player requests applied
@@ -94,15 +120,18 @@ const (
 
 // Lobby flags (Reply.Lobby.Flags).
 const (
-	LobbyValid       uint32 = 1  // session membership was readable
-	LobbyStartMode   uint32 = 2  // StartMode holds the validated start-mode value
-	LobbyHandler     uint32 = 4  // pregame handler bytes are live
-	LobbyServerOwned uint32 = 8  // join-time lobby-owner assignment is disabled
-	LobbyStartSent   uint32 = 16 // a Start succeeded since the last match began
-	LobbyNoOwner     uint32 = 32 // join-time lobby-owner assignment is disabled
+	LobbyValid       uint32 = 1   // session membership was readable
+	LobbyStartMode   uint32 = 2   // StartMode holds the validated start-mode value
+	LobbyHandler     uint32 = 4   // pregame handler bytes are live
+	LobbyServerOwned uint32 = 8   // join-time lobby-owner assignment is disabled
+	LobbyStartSent   uint32 = 16  // a Start succeeded since the last match began
+	LobbyNoOwner     uint32 = 32  // join-time lobby-owner assignment is disabled
+	LobbyLeaderValid uint32 = 64  // Leader holds the validated leader component value
+	LobbyLeaderHeld  uint32 = 128 // the XUID sent with OpSetLeader is the current leader
 )
 
-// Lobby is the DLL's per-tick lobby observation (version 3 replies).
+// Lobby is the DLL's per-tick lobby observation (version 3 and 4 replies;
+// Leader and LeaderSets only in version 4).
 type Lobby struct {
 	Flags         uint32 `json:"flags"`
 	Connected     int32  `json:"connected"`      // peers in the connected state
@@ -125,6 +154,20 @@ type Lobby struct {
 	SessionKind   int32  `json:"session_kind"`
 	EndGameTable  int32  `json:"end_game_table"` // RVA of the end-game component table
 	EndGame       int32  `json:"end_game"`       // end-game request value, -1 unknown
+	Leader        uint64 `json:"leader"`         // lobby leader XUID, 0 none or unknown
+	LeaderSets    uint32 `json:"leader_sets"`    // times the server re-asserted its leader (OpSetLeader)
+	// Version 5 team diagnostics. Teams-enabled values are 0/1, -1 when that
+	// variant is absent: the lobby's (simulation game-variant component) and the
+	// loaded game's. LastTeamsEnabled/LastTeamCount are what the server's team
+	// assignment last used; ForcedTeamCount > 0 forces team = peer % count.
+	LobbyVariantTeams int8        `json:"lobby_variant_teams"`
+	GameVariantTeams  int8        `json:"game_variant_teams"`
+	LastTeamsEnabled  uint8       `json:"last_teams_enabled"`
+	TeamFixes         uint8       `json:"team_fixes"` // FFA team guard corrections (saturating)
+	LastTeamCount     int32       `json:"last_team_count"`
+	ForcedTeamCount   int32       `json:"forced_team_count"`
+	GameState         int32       `json:"game_state"`
+	PeerTeams         [16][3]int8 `json:"peer_teams"` // per peer: requested, assigned, selected (-1 none)
 }
 
 type Reply struct {
@@ -167,6 +210,13 @@ func requestSize(r Request) (int, error) {
 			return 0, errors.New("server name must be 1-47 printable ASCII characters")
 		}
 		return 48 + MaxNameLength + 1, nil
+	case OpSetLeader:
+		return 56, nil
+	case OpTeamPolicy:
+		if !r.Teams.valid() {
+			return 0, errors.New("invalid team policy")
+		}
+		return 64, nil
 	case OpPrepare, OpPrepareEngine, OpInitialize:
 		if !r.Pair.Valid() {
 			return 0, errors.New("map and mode require nonzero asset and version IDs")
@@ -199,6 +249,14 @@ func EncodeRequest(w io.Writer, r Request) error {
 	}
 	if r.Op == OpSetName {
 		copy(b[48:], r.Name) // zero-padded; the last byte stays the terminator
+	}
+	if r.Op == OpSetLeader {
+		binary.LittleEndian.PutUint64(b[48:], r.XUID)
+	}
+	if r.Op == OpTeamPolicy {
+		for i, v := range []uint32{r.Teams.Flags, r.Teams.Mode, r.Teams.Count, r.Teams.Size} {
+			binary.LittleEndian.PutUint32(b[48+4*i:], v)
+		}
 	}
 	return writeFrame(w, b)
 }
@@ -247,6 +305,17 @@ func DecodeRequest(rd io.Reader) (Request, error) {
 			}
 		}
 		r.Name = string(field[:n])
+	case OpSetLeader:
+		if len(b) != 56 {
+			return r, errors.New("invalid set-leader size")
+		}
+		r.XUID = binary.LittleEndian.Uint64(b[48:])
+	case OpTeamPolicy:
+		if len(b) != 64 {
+			return r, errors.New("invalid team-policy size")
+		}
+		u := func(i int) uint32 { return binary.LittleEndian.Uint32(b[48+4*i:]) }
+		r.Teams = TeamPolicy{Flags: u(0), Mode: u(1), Count: u(2), Size: u(3)}
 	case OpPrepare, OpPrepareEngine, OpInitialize:
 		if len(b) != 112 {
 			return r, errors.New("invalid prepare size")
@@ -277,7 +346,7 @@ func EncodeReply(w io.Writer, r Reply) error {
 
 func DecodeReply(rd io.Reader) (Reply, error) {
 	var r Reply
-	b, err := readFrame(rd, 176)
+	b, err := readFrame(rd, 256)
 	if err != nil {
 		return r, err
 	}
@@ -287,12 +356,20 @@ func DecodeReply(rd io.Reader) (Reply, error) {
 	r.Version = binary.LittleEndian.Uint16(b[4:])
 	switch {
 	case r.Version == 1 && len(b) == 96:
-	case r.Version == 2 && len(b) == 112, r.Version == 3 && len(b) == 176:
+	case r.Version == 2 && len(b) == 112, r.Version == 3 && len(b) == 176, r.Version == 4 && len(b) == 192,
+		r.Version == 5 && len(b) == 256:
 		r.State = int32(binary.LittleEndian.Uint32(b[96:]))
 		r.Matches = binary.LittleEndian.Uint32(b[100:])
 		r.Flags = binary.LittleEndian.Uint32(b[104:])
-		if r.Version == 3 {
+		if r.Version >= 3 {
 			r.Lobby = decodeLobby(b[112:])
+		}
+		if r.Version >= 4 {
+			r.Lobby.Leader = binary.LittleEndian.Uint64(b[176:])
+			r.Lobby.LeaderSets = binary.LittleEndian.Uint32(b[184:])
+		}
+		if r.Version == 5 {
+			decodeTeams(&r.Lobby, b[192:])
 		}
 	default:
 		return r, errors.New("invalid bridge reply header")
@@ -319,6 +396,35 @@ func decodeLobby(b []byte) Lobby {
 		UsersRequired: i32(40), GameType: i32(44), EndGameTable: i32(52), EndGame: i32(56),
 		SessionKind: i32(48),
 	}
+}
+
+func decodeTeams(l *Lobby, b []byte) {
+	l.LobbyVariantTeams, l.GameVariantTeams, l.LastTeamsEnabled, l.TeamFixes = int8(b[0]), int8(b[1]), b[2], b[3]
+	l.LastTeamCount = int32(binary.LittleEndian.Uint32(b[4:]))
+	l.ForcedTeamCount = int32(binary.LittleEndian.Uint32(b[8:]))
+	l.GameState = int32(binary.LittleEndian.Uint32(b[12:]))
+	for i := range l.PeerTeams {
+		for j := range l.PeerTeams[i] {
+			l.PeerTeams[i][j] = int8(b[16+3*i+j])
+		}
+	}
+}
+
+// TeamSummary renders the per-peer team bytes of the peers in PeerMask as
+// "peer:requested/assigned/selected" for logs.
+func (l Lobby) TeamSummary() string {
+	var s []byte
+	for i := range l.PeerTeams {
+		if l.PeerMask>>i&1 == 0 {
+			continue
+		}
+		if len(s) > 0 {
+			s = append(s, ' ')
+		}
+		t := l.PeerTeams[i]
+		s = fmt.Appendf(s, "%d:%d/%d/%d", i, t[0], t[1], t[2])
+	}
+	return string(s)
 }
 
 func readFrame(rd io.Reader, max uint32) ([]byte, error) {

@@ -26,7 +26,9 @@ enum LobbyFlag : uint32_t {
     LobbyHandler=4,      // pregame handler validated; handler bytes are live
     LobbyServerOwned=8,  // player start/end-game requests are dropped (BackendServerOwned mode 1 or 2)
     LobbyStartSent=16,   // a Start command set start mode in the current lobby
-    LobbyNoOwner=32      // join-time lobby-owner assignment is disabled (mode 1)
+    LobbyNoOwner=32,     // join-time lobby-owner assignment is disabled (mode 1)
+    LobbyLeaderValid=64, // leader component validated and set; leader is its value
+    LobbyLeaderHeld=128  // the server's BackendSetLeader XUID is the current leader
 };
 // BackendServerOwned modes. FilterOnly keeps the game's own owner (first joiner,
 // handed to the longest-present player by 142e1c454 when the owner leaves): that
@@ -56,6 +58,20 @@ struct LobbyProbe {
     int32_t session_kind; // *(144c253b0)+8; selects the host-init content branch in 142fbc7c8
     int32_t end_game_table; // RVA of simulation+0xb4c4b0's table (end-game request), 0 unknown
     int32_t end_game;       // its value (+0xc8 byte), -1 unknown
+    uint64_t leader;        // lobby leader XUID (simulation+0xb4ba60 +0xc8), 0 none/unknown
+    uint32_t leader_sets;   // times the tick re-asserted the server's leader (saturating)
+    // Team diagnostics (read-only, FFA/team investigation). Teams-enabled bytes are
+    // variant+0x10bc: -1 when that variant is absent. lobby = simulation+0x542c0
+    // component (+0xd0), game = loaded game globals (*145121d28 + idx*0x1134f0 + 0x28).
+    int8_t lobby_variant_teams,game_variant_teams;
+    uint8_t last_teams_enabled; // 144dcf9ac: teams-enabled the last team assignment used (140c82890)
+    uint8_t team_fixes;         // FFA team guard corrections (TickTeamGuard), saturating
+    int32_t last_team_count;    // 144dcf9b0: team count it used
+    int32_t forced_team_count;  // 144dc340c: >0 forces team = peer % count at start (142fc426c)
+    int32_t game_state;         // loaded game globals +0 (1404f178c tests 3), -1 unknown
+    // Per peer 0-15 (session + i*0x1470): requested team +0x2505, assigned +0x2cf5,
+    // host/selected +0x2cf6 (142ebfcbc). -1 also when the peer is absent.
+    int8_t peer_team[16][3];
 };
 
 struct BackendReport {
@@ -113,6 +129,28 @@ uint32_t BackendServerOwned(uint32_t mode) noexcept;
 // before the beacon started, Unsupported if the object differs, Pending if no
 // tick ran within wait_ms (at most 2000).
 BackendReport BackendSetName(const uint16_t* units,uint32_t wait_ms) noexcept;
+// Holds the LAN lobby leader (FN027). Clients treat themselves as leader (lobby
+// options, map/mode menus, Play/End Game) only when their XUID equals the qword
+// component at simulation+0xb4ba60 (table 143d45040); the server gives it to the
+// first joiner (142ebebdc, only while it is unset or 0) and passes it on when that
+// player leaves (142e0e348). A nonzero xuid that no player has keeps every player
+// a non-leader: every engine tick re-asserts it with the component's authoritative
+// Set (142e1d39c) whenever the game's value differs. xuid 0 stops holding it and
+// clears the component once, so the next joiner becomes leader again.
+// OK when a tick holds (or cleared) it, Busy while no lobby simulation exists
+// (it is still applied later), Unsupported if the component differs, Pending
+// if no tick ran within wait_ms (at most 2000).
+BackendReport BackendSetLeader(uint64_t xuid,uint32_t wait_ms) noexcept;
+// Server team rules (team_guard.h TeamPolicyFlag), applied on the engine tick:
+// TeamGuardFfa (on by default) keeps every player on its own team in FFA modes;
+// TeamBalance spreads the non-observers of a team mode evenly over the match's
+// teams once per match before spawn and clears carried-over team requests.
+// mode is TeamModeEven or TeamModeShuffle; count (0-8) and size (0-32) are the
+// playlist entry's team count / team size, 0 when not given (TeamCount). They
+// apply to the next match only (cleared at its prep), so send them with every
+// selection; flags and mode persist.
+// ERROR_INVALID_PARAMETER for unknown flags or out-of-range values.
+uint32_t BackendTeamPolicy(uint32_t flags,uint32_t mode,uint32_t count,uint32_t size) noexcept;
 // Cancels pending work and restores our table slot; module remains pinned so
 // a callback already fetched by another thread still has a valid target.
 uint32_t StopGameBackend() noexcept;

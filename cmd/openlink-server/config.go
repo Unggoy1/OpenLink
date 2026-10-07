@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"halocommunity/internal/api"
+	"halocommunity/internal/hostctl"
+	"halocommunity/internal/playlist"
 )
 
 // config is the agent's settings. Every field can be set in openlink-server.json;
@@ -61,6 +63,18 @@ type config struct {
 	// or "first_player" (the game's own owner; only that player sees the inert
 	// Play/End Game, other players see none).
 	LobbyOwner string `json:"lobby_owner,omitempty"`
+	// LobbyLeaderXUID, with ServerOwned and lobby owner "none": the XUID the
+	// server keeps as LAN lobby leader so that no player is leader (no lobby
+	// options, map/mode menus, Play or End Game). 0 = defaultLobbyLeader.
+	LobbyLeaderXUID uint64 `json:"lobby_leader_xuid,omitempty"`
+	// TeamBalance, for team modes at the start of every match: "even" (default:
+	// even teams, players stay on their current team where the counts allow),
+	// "shuffle" (random even teams) or "off" (players keep their own picks).
+	// A playlist entry's "teams" sets the number of teams (default 2) and is
+	// always applied, as "even" when this is "off", so every player ends up on
+	// one of that entry's teams. FFA modes always keep every player on their
+	// own team.
+	TeamBalance string `json:"team_balance,omitempty"`
 	// AutoStart: the server starts each match itself.
 	AutoStart *autoStart `json:"auto_start,omitempty"`
 	// Vote, with a playlist and proxy mode: players vote in the OpenLink app
@@ -242,6 +256,12 @@ func loadConfig(fs *flag.FlagSet, args []string) (config, error) {
 	if c.LobbyOwner != "" && c.LobbyOwner != "none" && c.LobbyOwner != "first_player" {
 		return c, errors.New("lobby_owner must be none or first_player")
 	}
+	if c.LobbyLeaderXUID != 0 && (!c.ServerOwned || c.lobbyOwner() != "none") {
+		return c, errors.New(`lobby_leader_xuid needs "server_owned": true and lobby_owner "none"`)
+	}
+	if c.TeamBalance != "" && c.TeamBalance != "even" && c.TeamBalance != "shuffle" && c.TeamBalance != "off" {
+		return c, errors.New(`team_balance must be "even", "shuffle" or "off"`)
+	}
 	return c, nil
 }
 
@@ -250,6 +270,43 @@ func (c config) lobbyOwner() string {
 		return "none"
 	}
 	return c.LobbyOwner
+}
+
+// teamPolicy is the server's team rules for a match of entry (nil: no playlist
+// entry, two teams).
+func (c config) teamPolicy(entry *playlist.Entry) hostctl.TeamPolicy {
+	p := hostctl.TeamPolicy{Flags: hostctl.TeamGuardFFA}
+	teams := entry != nil && entry.Teams != nil
+	switch {
+	case c.TeamBalance == "off" && !teams:
+		return p
+	case c.TeamBalance == "shuffle":
+		p.Mode = hostctl.TeamModeShuffle
+	}
+	// "off" with an entry's teams still balances (even), so nobody stays on a
+	// team the entry does not have.
+	p.Flags |= hostctl.TeamBalance
+	if teams {
+		p.Count, p.Size = uint32(entry.Teams.Count), uint32(entry.Teams.Size)
+	}
+	return p
+}
+
+// defaultLobbyLeader is the placeholder lobby leader XUID: Xbox user format
+// (0x0009 prefix, like 2533274962600518), but far above any issued XUID, so no
+// player matches it.
+const defaultLobbyLeader uint64 = 0x0009_ffff_ffff_ffff
+
+// lobbyLeader is the XUID the server holds as lobby leader, or 0 when players
+// keep the game's own leader (first joiner).
+func (c config) lobbyLeader() uint64 {
+	if !c.ServerOwned || c.lobbyOwner() != "none" {
+		return 0
+	}
+	if c.LobbyLeaderXUID != 0 {
+		return c.LobbyLeaderXUID
+	}
+	return defaultLobbyLeader
 }
 
 // resolve makes a path relative to the config file's folder (or the working directory).

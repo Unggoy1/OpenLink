@@ -7,6 +7,7 @@ Status as of 2026-10-05. Tick items as they are done and note the date and how i
 Tested live (one player, one PC, unless noted):
 
 - Player detection, server auto start, no lobby leader (`server_owned`), the server blocks a player's Play / End Game, natural match end, last player leaving (R019).
+- Server-held lobby leader (`server_owned`, default lobby owner): players get no lobby options, map/mode menus or Play, and no End Game or Restart Match in the pause menu; holds through a full match cycle (R025, FN027). More players not needed (user decision).
 - Playlist voting end to end with one voter, the chime, the Windows notification (held by Windows' do-not-disturb while gaming), taskbar flash (R021, user).
 - Remote players on Windows and Linux/Proton played several matches through a tunnel (older test, before lobby control and voting).
 - Server name in Halo's in-game list: shown in capitals, cut after about 38 characters (R022).
@@ -89,6 +90,10 @@ Run a voting server with the local directory (as in R023) and join it with the O
 
 ## 4. Work still to do
 
+- [x] **FFA modes: players cannot kill each other** (R024): scoreboard correct, team modes fine on the same build. With bots, FFA damage works on OpenLink (R026), and one player gets their own team (R027). Fixed by the server's FFA team guard (every player on their own team): two players damaged and killed each other in an FFA King of the Hill mode (user, 2026-10-06). Other FFA modes (Infection, FFA Slayer, minigames) not rechecked yet.
+- [ ] **Team balance** (`team_balance`, default on): works for one player (R028: moved to Eagle at match prep, Hades from the previous match did not carry over, in-match changes still work). Now `"even"` (default, keeps current teams where possible), `"shuffle"` and `"off"`, plus the playlist entry `teams` (`count`/`size`) for multi-team modes; the new version is not yet run live. Check with two or more players: even split, a pair on the same team stays together under `"even"`, `"shuffle"` mixes teams, a `teams` entry (e.g. size 2) makes the expected number of teams.
+- [ ] **Block Restart Match on the server** under `server_owned` (backstop): players no longer see Restart Match since the server holds the lobby leader (R025), but the server still applies a restart request (simulation event 0x58, FN026); only start and end game are dropped today.
+- [x] **Lobby map/mode picker**: fixed by the server-held lobby leader; Map and Mode Editor are greyed for every player (R025).
 - [ ] **Docs pass**:
   - [ ] README "Status and known limitations": lobby control, voting, the overlay and the Linux app now exist.
   - [ ] A playlist.json reference for hosts (limits below).
@@ -121,6 +126,7 @@ Run a voting server with the local directory (as in R023) and join it with the O
 - `map` / `mode` `asset_id` and `version_id`: full 36-character UUIDs, not all zeros. Map thumbnails come from the map IDs; there is no field for them.
 - Ballot size: 4 options in a 1200-byte message, thumbnails included; a playlist that could exceed it is rejected. The check assumes the worst case (longest entries, largest numbers). 80-byte IDs with 80-byte names come to 1197 bytes with default settings and fail with `max_players` 0 or very long vote timers; with IDs of about 32 bytes there is plenty of room.
 - With voting: at least 2 enabled entries.
+- Optional `teams` per entry, for team modes: `{"count": N}` (2-8 teams) and/or `{"size": N}` (2-32 players per team); an empty object is an error. Fill it only when the mode is made for more than two teams (for example from a "Teams of 4" description).
 - The entry just played is not offered again straight away, so 5 or more entries keeps every ballot full. Once the lobby empties, the next vote can offer every entry again.
 
 ## Not needed for the alpha
@@ -132,3 +138,5 @@ Run a voting server with the local directory (as in R023) and join it with the O
 - Sending `& < >` unescaped in ballots.
 - Cosmetic: hide the thumbnail box until it loads.
 - Offline preservation (a later phase).
+- Blocking in-match team changes outside a playlist entry's team count (looked into 2026-10-06, left for now; the next match's balance fixes it anyway). The server sees each request (peer `requested` byte) before the game applies it. Option 1, simple: the DLL puts a player who moves to a team outside the count back on their previous team (Change Teams still lists all 8; the pick just snaps back). Option 2, cleaner but needs research: clear the "enabled" bit of team slots beyond the count in the mode data (lobby variant and loaded game variant), so the game itself rejects those teams and the menu probably lists only valid ones; the change must reach clients.
+- Mid-match rebalance (idea, user 2026-10-06; next after the friend test passes, or after its issues are debugged). Decided: **always a vote, never an automatic move** (yes/no ballot through the app overlay, a new ballot type on the existing vote system, with a cooldown; players without the app cannot vote). Open decision: does the vote start by itself when the server sees teams differ by 2 or more (for about 30–60 s, since imbalance mostly comes from players leaving), or only when a player asks for it in the app, or either (a server config setting)? If the vote passes, move as few players as possible (most recent joiners or players who switched) and tell them through the overlay. First check with players what a server-made team change does mid-match (death/respawn, score, weapons, a carried flag).

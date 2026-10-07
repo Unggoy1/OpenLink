@@ -20,7 +20,10 @@ Setup
      (asset and version IDs from the game's content browser; "name" is what
      players see when they vote). A playlist is required: openlink-server will not
      start without a valid one. Limits: "id" and "name" at most 80 bytes
-     (UTF-8 bytes, not characters).
+     (UTF-8 bytes, not characters). For a mode made for more than two
+     teams, add "teams" to its entry: {"count": 4} (2-8 teams) or
+     {"size": 2} (players per team; the server makes as many teams as the
+     players need, at least two). Without it a team mode uses two teams.
   4. Check it: openlink-server.exe check-playlist
   5. Run openlink-server.exe from a normal (not administrator) terminal.
      Ctrl+C stops it and the game server. The playlist is read once at
@@ -30,6 +33,14 @@ What the example config does
   - "playlist": the server decides the map and mode of every match.
   - "server_owned": no player becomes lobby leader, and the server ignores
     players' Play and pause-menu End Game. Matches end on their own limits.
+  - "team_balance": "even" (the default): in team modes the server evens
+    out the teams before every match, moving as few players as it can, so
+    friends on the same team stay together. "shuffle" deals random even
+    teams every match; "off" lets players keep their own picks (an entry's
+    "teams" is still applied). Players can change teams during a match. In
+    free-for-all modes every player always gets their own team.
+  - The third playlist entry has "teams": {"size": 2}: Fiesta Slayer in
+    teams of 2 (8 players get 4 teams).
   - "vote": when the lobby gets its first player, and after every match,
     players vote in the OpenLink app between up to 4 random playlist entries
     (30 s). The winner starts 5 s later; with no votes, a random one.

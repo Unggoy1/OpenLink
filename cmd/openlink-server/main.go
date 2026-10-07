@@ -77,12 +77,14 @@ type agent struct {
 	waitNoted    bool // the host was told the listing awaits confirmation
 	control      hostController
 	controlError string
-	playlist     *playlist.File // checked at start; nil only with -simulate
-	rotation     *rotationInfo  // nil until rotation runs
-	lobby        *lobbyInfo     // nil until the native backend connects
-	voter        *voter         // nil unless voting runs
-	vote         *voteInfo      // nil unless voting runs
-	portForward  string         // auto_port_forward result for the admin API
+	playlist     *playlist.File  // checked at start; nil only with -simulate
+	rotation     *rotationInfo   // nil until rotation runs
+	lobby        *lobbyInfo      // nil until the native backend connects
+	voter        *voter          // nil unless voting runs
+	vote         *voteInfo       // nil unless voting runs
+	portForward  string          // auto_port_forward result for the admin API
+	teamEntry    *playlist.Entry // entry whose team rules were sent last (teams.go)
+	teamWarned   map[string]bool // entries already reported as FFA with teams
 }
 
 func (a *agent) setStatus(s string) {

@@ -2,6 +2,7 @@ package playlist
 
 import (
 	"math/rand/v2"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -108,6 +109,9 @@ func TestPackagedExample(t *testing.T) {
 	f, err := Load("../../packaging/host/playlist.example.json")
 	if err != nil || len(f.Entries) == 0 {
 		t.Fatalf("packaged playlist example: %v", err)
+	}
+	if !slices.ContainsFunc(f.Entries, func(e Entry) bool { return e.Teams != nil }) {
+		t.Error("packaged playlist example has no entry with teams")
 	}
 }
 

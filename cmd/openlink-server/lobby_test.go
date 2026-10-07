@@ -57,16 +57,16 @@ func (f *lobbyFake) SetLeader(_ context.Context, xuid uint64) (hostctl.Reply, er
 	return hostctl.Reply{Version: 4, Code: hostctl.CodeOK}, nil
 }
 
-func TestServerOwnedHoldsLeaderOnlyWithoutPlayerOwner(t *testing.T) {
-	for owner, want := range map[string][]uint64{"": {defaultLobbyLeader, defaultLobbyLeader}, "first_player": nil} {
+func TestServerOwnsLobbyAndHoldsLeader(t *testing.T) {
+	for xuid, want := range map[uint64]uint64{0: defaultLobbyLeader, 2533274962600518: 2533274962600518} {
 		f := &lobbyFake{connected: []int32{0}, done: make(chan struct{})}
-		a := &agent{cfg: config{ServerOwned: true, LobbyOwner: owner}, log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+		a := &agent{cfg: config{LobbyLeaderXUID: xuid}, log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 		ctx, cancel := context.WithCancel(context.Background())
 		go func() { <-f.done; cancel() }()
 		a.runLobby(ctx, f, time.Millisecond)
 		f.mu.Lock()
-		if len(f.leaders) != len(want) || (len(want) > 0 && (f.leaders[0] != want[0] || f.leaders[1] != want[1])) {
-			t.Errorf("lobby_owner %q: SetLeader calls %v, want %v", owner, f.leaders, want)
+		if f.mode != hostctl.ServerOwnedNoOwner || len(f.leaders) != 2 || f.leaders[0] != want || f.leaders[1] != want {
+			t.Errorf("lobby_leader_xuid %d: mode %d, SetLeader calls %v, want %d twice", xuid, f.mode, f.leaders, want)
 		}
 		f.mu.Unlock()
 	}
@@ -74,7 +74,7 @@ func TestServerOwnedHoldsLeaderOnlyWithoutPlayerOwner(t *testing.T) {
 
 func TestAutoStartWaitsForPlayersThenStartsOnce(t *testing.T) {
 	f := &lobbyFake{connected: []int32{0, 0, 1, 1, 1, 1}, done: make(chan struct{})}
-	a := &agent{cfg: config{ServerOwned: true, AutoStart: &autoStart{MinPlayers: 1, DelaySeconds: -1}},
+	a := &agent{cfg: config{AutoStart: &autoStart{MinPlayers: 1, DelaySeconds: -1}},
 		log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() { <-f.done; cancel() }()

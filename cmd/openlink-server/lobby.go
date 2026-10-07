@@ -88,29 +88,21 @@ func (a *agent) holdLeader(ctx context.Context, controller lobbyController, xuid
 	}
 }
 
-// runLobby makes the server own its lobby (no player becomes leader) when
-// configured, logs lobby changes, and with auto_start starts each match once
-// enough players stay connected for the delay.
+// runLobby makes the server own its lobby (no player becomes leader), logs
+// lobby changes, and with auto_start starts each match once enough players
+// stay connected for the delay.
 func (a *agent) runLobby(ctx context.Context, controller lobbyController, poll time.Duration) {
 	a.setLobby(func(l *lobbyInfo) { l.AutoStart = a.cfg.AutoStart != nil })
-	if a.cfg.ServerOwned {
-		mode := hostctl.ServerOwnedNoOwner
-		if a.cfg.LobbyOwner == "first_player" {
-			mode = hostctl.ServerOwnedFilterOnly
-		}
-		request, cancel := context.WithTimeout(ctx, 4*time.Second)
-		reply, err := controller.ServerOwned(request, mode)
-		cancel()
-		if err != nil || reply.Code != hostctl.CodeOK {
-			a.log.Error("server-owned lobby unavailable; players keep lobby control", "err", err, "code", reply.Code)
-			a.setLobby(func(l *lobbyInfo) { l.Error = "server_owned failed" })
-		} else {
-			a.log.Info("server owns the lobby: player start and end-game requests are dropped", "lobby_owner", a.cfg.lobbyOwner())
-			a.setLobby(func(l *lobbyInfo) { l.ServerOwned = true })
-			if xuid := a.cfg.lobbyLeader(); xuid != 0 {
-				a.holdLeader(ctx, controller, xuid, poll)
-			}
-		}
+	request, cancel := context.WithTimeout(ctx, 4*time.Second)
+	reply, err := controller.ServerOwned(request, hostctl.ServerOwnedNoOwner)
+	cancel()
+	if err != nil || reply.Code != hostctl.CodeOK {
+		a.log.Error("server-owned lobby unavailable; players keep lobby control", "err", err, "code", reply.Code)
+		a.setLobby(func(l *lobbyInfo) { l.Error = "server-owned lobby failed" })
+	} else {
+		a.log.Info("server owns the lobby: player start and end-game requests are dropped")
+		a.setLobby(func(l *lobbyInfo) { l.ServerOwned = true })
+		a.holdLeader(ctx, controller, a.cfg.lobbyLeader(), poll)
 	}
 	var last hostctl.Lobby
 	var lastState int32 = -2

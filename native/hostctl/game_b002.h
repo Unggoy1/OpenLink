@@ -24,17 +24,15 @@ enum LobbyFlag : uint32_t {
     LobbyValid=1,        // session/membership readable this tick
     LobbyStartMode=2,    // start-mode component validated; start_mode is its value
     LobbyHandler=4,      // pregame handler validated; handler bytes are live
-    LobbyServerOwned=8,  // player start/end-game requests are dropped (BackendServerOwned mode 1 or 2)
+    LobbyServerOwned=8,  // player start/end-game requests are dropped (BackendServerOwned mode 1)
     LobbyStartSent=16,   // a Start command set start mode in the current lobby
-    LobbyNoOwner=32,     // join-time lobby-owner assignment is disabled (mode 1)
+    LobbyNoOwner=32,     // join-time lobby-owner assignment is disabled (BackendServerOwned mode 1)
     LobbyLeaderValid=64, // leader component validated and set; leader is its value
     LobbyLeaderHeld=128  // the server's BackendSetLeader XUID is the current leader
 };
-// BackendServerOwned modes. FilterOnly keeps the game's own owner (first joiner,
-// handed to the longest-present player by 142e1c454 when the owner leaves): that
-// player's client still shows Play/End Game (inert), other clients hide them
-// because an owner exists that is not them (O071, user report).
-enum ServerOwnedMode : uint32_t { ServerOwnedOff=0,ServerOwnedNoOwner=1,ServerOwnedFilterOnly=2 };
+// BackendServerOwned modes. NoOwner drops players' start/end-game requests and
+// disables the join-time lobby owner; Off restores the stock lobby.
+enum ServerOwnedMode : uint32_t { ServerOwnedOff=0,ServerOwnedNoOwner=1 };
 // Read on the engine tick. B002 offsets (session = context+0x78): membership at
 // session+0x60 (peer count +0xa0, mask +0xa4, owner +0x6c, host peer +0x70, peer
 // state session+0xb0+i*0xc0, 8 = connected, as 142ded82c counts); session+0x18a8

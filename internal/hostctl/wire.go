@@ -114,8 +114,7 @@ func ValidName(s string) bool {
 const (
 	ServerOwnedOff         uint32 = 0 // stock lobby: owner assigned, player requests applied
 	ServerOwnedNoOwner     uint32 = 1 // no owner; player start/end-game requests dropped
-	ServerOwnedFilterOnly  uint32 = 2 // game assigns the owner; player start/end-game requests dropped
-	serverOwnedHighestMode        = ServerOwnedFilterOnly
+	serverOwnedHighestMode        = ServerOwnedNoOwner
 )
 
 // Lobby flags (Reply.Lobby.Flags).
@@ -123,7 +122,7 @@ const (
 	LobbyValid       uint32 = 1   // session membership was readable
 	LobbyStartMode   uint32 = 2   // StartMode holds the validated start-mode value
 	LobbyHandler     uint32 = 4   // pregame handler bytes are live
-	LobbyServerOwned uint32 = 8   // join-time lobby-owner assignment is disabled
+	LobbyServerOwned uint32 = 8   // player start/end-game requests are dropped
 	LobbyStartSent   uint32 = 16  // a Start succeeded since the last match began
 	LobbyNoOwner     uint32 = 32  // join-time lobby-owner assignment is disabled
 	LobbyLeaderValid uint32 = 64  // Leader holds the validated leader component value

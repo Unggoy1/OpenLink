@@ -681,19 +681,19 @@ uint32_t BackendTeamPolicy(uint32_t flags,uint32_t mode,uint32_t count,uint32_t 
     return ERROR_SUCCESS;
 }
 uint32_t BackendServerOwned(uint32_t mode) noexcept {
-    if(mode>ServerOwnedFilterOnly) return ERROR_INVALID_PARAMETER;
+    if(mode>ServerOwnedNoOwner) return ERROR_INVALID_PARAMETER;
     AcquireSRWLockExclusive(&installation);
     const auto base=image.load(); DWORD result=ERROR_NOT_READY;
     if(running.load() && base) {
-        const bool filter=mode!=ServerOwnedOff,no_owner=mode==ServerOwnedNoOwner;
-        result=SetRequestFilter(base,filter);
+        const bool owned=mode==ServerOwnedNoOwner;
+        result=SetRequestFilter(base,owned);
         if(result==ERROR_SUCCESS) {
-            result=no_owner ? SwapOwnerSite(base,kOwnerNative,kOwnerPatched) : SwapOwnerSite(base,kOwnerPatched,kOwnerNative);
-            if(result!=ERROR_SUCCESS && filter && !server_owned.load()) SetRequestFilter(base,false);
+            result=owned ? SwapOwnerSite(base,kOwnerNative,kOwnerPatched) : SwapOwnerSite(base,kOwnerPatched,kOwnerNative);
+            if(result!=ERROR_SUCCESS && owned && !server_owned.load()) SetRequestFilter(base,false);
         }
         if(result==ERROR_SUCCESS) {
-            server_owned.store(filter,std::memory_order_release);
-            owner_patched.store(no_owner,std::memory_order_release);
+            server_owned.store(owned,std::memory_order_release);
+            owner_patched.store(owned,std::memory_order_release);
         }
     }
     ReleaseSRWLockExclusive(&installation); return result;

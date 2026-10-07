@@ -149,7 +149,7 @@ func TestReplyVersion3Lobby(t *testing.T) {
 }
 
 func TestServerOwnedRequest(t *testing.T) {
-	for _, mode := range []uint32{ServerOwnedOff, ServerOwnedNoOwner, ServerOwnedFilterOnly} {
+	for _, mode := range []uint32{ServerOwnedOff, ServerOwnedNoOwner} {
 		var w bytes.Buffer
 		if err := EncodeRequest(&w, Request{Op: OpServerOwned, ID: 2, Mode: mode}); err != nil {
 			t.Fatal(err)
@@ -159,19 +159,19 @@ func TestServerOwnedRequest(t *testing.T) {
 			t.Fatalf("round trip %v: %+v %v", mode, got, err)
 		}
 	}
-	if err := EncodeRequest(&bytes.Buffer{}, Request{Op: OpServerOwned, ID: 2, Mode: 3}); err == nil {
-		t.Fatal("encoded server-owned mode 3")
+	if err := EncodeRequest(&bytes.Buffer{}, Request{Op: OpServerOwned, ID: 2, Mode: 2}); err == nil {
+		t.Fatal("encoded server-owned mode 2")
 	}
 	b := make([]byte, 52)
 	copy(b, "HICT")
 	binary.LittleEndian.PutUint16(b[4:], 1)
 	binary.LittleEndian.PutUint16(b[6:], OpServerOwned)
 	binary.LittleEndian.PutUint64(b[8:], 2)
-	binary.LittleEndian.PutUint32(b[48:], 3)
+	binary.LittleEndian.PutUint32(b[48:], 2)
 	var w bytes.Buffer
 	writeFrame(&w, b)
 	if _, err := DecodeRequest(&w); err == nil {
-		t.Fatal("accepted server-owned mode 3")
+		t.Fatal("accepted server-owned mode 2")
 	}
 }
 

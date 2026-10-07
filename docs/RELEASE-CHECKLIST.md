@@ -6,8 +6,8 @@ Status as of 2026-10-05. Tick items as they are done and note the date and how i
 
 Tested live (one player, one PC, unless noted):
 
-- Player detection, server auto start, no lobby leader (`server_owned`), the server blocks a player's Play / End Game, natural match end, last player leaving (R019).
-- Server-held lobby leader (`server_owned`, default lobby owner): players get no lobby options, map/mode menus or Play, and no End Game or Restart Match in the pause menu; holds through a full match cycle (R025, FN027). More players not needed (user decision).
+- Player detection, server auto start, no lobby leader, the server blocks a player's Play / End Game, natural match end, last player leaving (R019).
+- Server-held lobby leader (always on since 2026-10-06; the `server_owned` and `lobby_owner` settings are gone): players get no lobby options, map/mode menus or Play, and no End Game or Restart Match in the pause menu; holds through a full match cycle (R025, FN027). More players not needed (user decision).
 - Playlist voting end to end with one voter, the chime, the Windows notification (held by Windows' do-not-disturb while gaming), taskbar flash (R021, user).
 - Remote players on Windows and Linux/Proton played several matches through a tunnel (older test, before lobby control and voting).
 - Server name in Halo's in-game list: shown in capitals, cut after about 38 characters (R022).
@@ -71,15 +71,27 @@ Run a voting server with the local directory (as in R023) and join it with the O
 - [ ] Autostart: `openlink-server autostart enable`, log off and on; the server starts and the log file shows it.
 - [ ] Long unattended run: several hours and many matches; note host CPU and memory.
 
+### Mode families and match flow
+
+These could quietly break the way FFA did (R024): each is a kind of match the server's selection, lifecycle and team code has not run yet (listed 2026-10-06).
+
+- [ ] **Multi-round modes** (3-round CTF, Oddball, Strongholds with rounds, Last Spartan Standing): no vote opens and team balance does not run again between rounds; the next vote opens only after the whole match. Watch the lifecycle `state` in the `lobby` log lines at each round change.
+- [ ] **Map or mode that cannot load**: a playlist entry with a made-up or deleted version ID. The server should skip to another entry (or report it) instead of hanging in loading; note what the log and the players see.
+- [ ] **Crash recovery**: end the game server process (Task Manager) in the lobby and again mid-match. OpenLink Server should start it again, load the DLL, select an entry, hold the lobby leader and list the server again, and players should be able to rejoin.
+- [ ] **Bot and AI modes** (a Fiesta mode with bots, a Firefight-style mode): match starts, bots spawn, the FFA guard and team balance leave bots alone.
+- [ ] **Scripted Forge modes** (node-graph scripts that set teams, scores or rounds): the script still runs and is not undone by team balance.
+
 ## 2. Tests that need a second player
 
 - [ ] Both players join through the app and see the server in Custom Game → Create Match → Server, with the configured name, at least one of them remote over the internet.
-- [ ] `lobby_owner: first_player` gives the first player the controls, and only them.
-- [ ] `server_owned`: no player can start or end a match.
 - [ ] Voting with several voters: counts update for everyone, a tie, nobody votes (random pick), a player changes their vote.
 - [ ] A player joins mid-vote and gets the ballot; a player leaves mid-vote.
 - [ ] Two players from the same home (one public IP) are both counted and can both vote.
 - [ ] Linux app (the CI build) on a real Linux or Proton machine: join, vote in the app panel, overlay settings hidden.
+- [ ] **Infection**: the mode's own team script (one or more infected, survivors turning into infected) still works; team balance and the FFA guard do not move players back. Play at least two rounds.
+- [ ] **Other FFA modes** with two players: FFA Slayer, a minigame and Last Spartan Standing; players damage and kill each other (only FFA King of the Hill is confirmed).
+- [ ] **Late joiner mid-match**: the player gets a valid team (balanced in a team mode, their own team in FFA), can play, and gets the ballot at the end of the match.
+- [ ] **Big lobby** with as many players as you can get, ideally a Big Team Battle–sized mode with vehicles: start, play, end, next vote.
 
 ## 3. Tests that need another network or setup
 
@@ -92,8 +104,9 @@ Run a voting server with the local directory (as in R023) and join it with the O
 
 - [x] **FFA modes: players cannot kill each other** (R024): scoreboard correct, team modes fine on the same build. With bots, FFA damage works on OpenLink (R026), and one player gets their own team (R027). Fixed by the server's FFA team guard (every player on their own team): two players damaged and killed each other in an FFA King of the Hill mode (user, 2026-10-06). Other FFA modes (Infection, FFA Slayer, minigames) not rechecked yet.
 - [ ] **Team balance** (`team_balance`, default on): works for one player (R028: moved to Eagle at match prep, Hades from the previous match did not carry over, in-match changes still work). Now `"even"` (default, keeps current teams where possible), `"shuffle"` and `"off"`, plus the playlist entry `teams` (`count`/`size`) for multi-team modes; the new version is not yet run live. Check with two or more players: even split, a pair on the same team stays together under `"even"`, `"shuffle"` mixes teams, a `teams` entry (e.g. size 2) makes the expected number of teams.
-- [ ] **Block Restart Match on the server** under `server_owned` (backstop): players no longer see Restart Match since the server holds the lobby leader (R025), but the server still applies a restart request (simulation event 0x58, FN026); only start and end game are dropped today.
+- [x] **Block Restart Match on the server**: not needed (user, 2026-10-06). Players never get Restart Match because the server always holds the lobby leader (R025); the server would still apply a restart request (simulation event 0x58, FN026) if a client sent one.
 - [x] **Lobby map/mode picker**: fixed by the server-held lobby leader; Map and Mode Editor are greyed for every player (R025).
+- [ ] **A player can rename the server** (static finding 2026-10-06, FN030; not tested): the game server applies the `EditLobbyName` network message (type 0x2e) from any player and copies it into the server name shown in the LAN server menu. The stock game probably sends it only for the lobby leader (the server now), but a modified client could rename the server. Fix options: the DLL drops message 0x2e from players (like the start and end-game requests), or OpenLink Server re-applies its name regularly.
 - [ ] **Docs pass**:
   - [ ] README "Status and known limitations": lobby control, voting, the overlay and the Linux app now exist.
   - [ ] A playlist.json reference for hosts (limits below).
@@ -140,3 +153,18 @@ Run a voting server with the local directory (as in R023) and join it with the O
 - Offline preservation (a later phase).
 - Blocking in-match team changes outside a playlist entry's team count (looked into 2026-10-06, left for now; the next match's balance fixes it anyway). The server sees each request (peer `requested` byte) before the game applies it. Option 1, simple: the DLL puts a player who moves to a team outside the count back on their previous team (Change Teams still lists all 8; the pick just snaps back). Option 2, cleaner but needs research: clear the "enabled" bit of team slots beyond the count in the mode data (lobby variant and loaded game variant), so the game itself rejects those teams and the menu probably lists only valid ones; the change must reach clients.
 - Mid-match rebalance (idea, user 2026-10-06; next after the friend test passes, or after its issues are debugged). Decided: **always a vote, never an automatic move** (yes/no ballot through the app overlay, a new ballot type on the existing vote system, with a cooldown; players without the app cannot vote). Open decision: does the vote start by itself when the server sees teams differ by 2 or more (for about 30–60 s, since imbalance mostly comes from players leaving), or only when a player asks for it in the app, or either (a server config setting)? If the vote passes, move as few players as possible (most recent joiners or players who switched) and tell them through the overlay. First check with players what a server-made team change does mid-match (death/respawn, score, weapons, a carried flag).
+
+## Future ideas (not started)
+
+Ideas collected 2026-10-06 so they are not lost. None is decided or researched beyond the leads given; addresses are for Halo build B002 (see the field notes in the discovery kit). Ideas listed elsewhere in this file: mid-match rebalance and blocking team changes (above), the `end-match` admin command and the Docker host (section 4).
+
+- **Bot backfill** (user 2026-10-06: wanted; settle the design first. Static research done: FN029; bots can be added only in a match, the mode must have bots enabled, the game has its own backfill manager for team modes; next: a read-only DLL probe, then one bot add and remove. Open design questions: server setting, playlist entry setting or both; how to avoid maps and modes without bot navigation (navmesh), which cannot easily be told apart): with few players, fill empty slots with bots and remove one each time a human joins. Bots already work on an OpenLink server (R026, a bot Fiesta mode). Leads: the game's network messages `BotAdd`, `BotRemove`, `BotUpdateConfig`, `BotAck` (message table, `cand_RegisterNetMessageTypes`); find the server-side path that adds a bot and whether a bot's team and difficulty can be set.
+- **Show the real next match in the game lobby** (user 2026-10-06: fine as it is for now, a stale map name is acceptable; the lobby-name fallback is not wanted, since the server name shows only in the LAN menu, not in game. Static research: FN030; each player's lobby copies the server's map and mode only if they are in content lists the client downloaded, so 343 modes show but playlist maps such as Interference stay stale; no server write fixes the map; fallback: set the server name to "NEXT: <mode> - <map>" after each selection; next: a live test with one classic 343 map and one Forge map): today the lobby shows the player's own default map and mode until the match loads (cosmetic, FN023). Leads: the `EditLobbyName` network message and the lobby UI model's `LobbyName`/`MapName`/`ModeName` (FN027); the server could set the lobby name to "Next: <mode> – <map>" or push the selected map and mode into the lobby state players see.
+- **Moderation by Xbox user ID instead of IP**: bans that follow a player (IPs change, homes share one), friends-only servers (allow list), reserved slots, a clean in-game kick instead of dropping the connection, and later a vote-kick. Leads: the server reads each joiner's XUID (join record +0x48, FN027); network messages `join-refuse`, `player-refuse`, `player-remove`, `session-boot`.
+- **Per-entry game settings**: score limit, time limit and similar options per playlist entry without publishing a new mode. Lead: the `VariantRuntimeOverridesUpdate` network message; find what it can override and whether the server can send it.
+- **Faster pacing**: shorter post-game wait and pre-game countdown. Leads: session-state components `intermission-timer`, `ready-room-timer`, `countdown-timer`, `intro-timer` (name table at 1409cf3c0, FN028).
+- **Player-requested votes from the app and overlay**: end the match, shuffle teams, rebalance, as yes/no ballots on the existing vote channel with a cooldown. Chat commands such as `!endgame` are not possible: the server never sees chat (FN028). The end-game switch is already known to the DLL (sim+0xb4c4b0).
+- **In-game announcements** (parked by the user 2026-10-06): server-to-client network messages `server_output_message` (up to 192 bytes) and `NotificationDialogWindow` (20 bytes); what clients display for them is unknown (FN028).
+- **Spectator slots** for casters and small tournaments: Allow Observers is the session byte sim+0xb4bb38 and the game accepts team 31 (O083, O084); check what an observer sees and whether they count toward the player limit.
+- **Playlist entries with a player range** (no game research): offer an entry only when the lobby has at least or at most N players, for example Big Team Battle only with 12 or more.
+- **Stuck-state watchdog** (no game research): restart the game server when it stays in loading or starting for too long, or when a match never ends.

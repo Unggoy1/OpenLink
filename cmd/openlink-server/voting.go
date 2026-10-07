@@ -393,7 +393,7 @@ func (v *voter) run(ctx context.Context) {
 			}
 		case phaseVoting, phaseStarting:
 			if st.Matches > baseline && !lobby {
-				// A match began without our Start (only possible without server_owned).
+				// A match began without our Start (players cannot start one; kept as a fallback).
 				v.setPhase(phasePlaying, "")
 				baseline = st.Matches
 				break

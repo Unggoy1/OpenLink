@@ -160,7 +160,7 @@ DWORD session(SOCKET s) {
                 else { report=hostctl::BackendStatus(); code=report.code; have_report=true; }
             }
         }
-        // 6 Start: set start mode 1 on the next lobby tick. 7 ServerOwned(u32 mode 0/1/2).
+        // 6 Start: set start mode 1 on the next lobby tick. 7 ServerOwned(u32 mode 0/1).
         if((op==6 && size==48) || (op==7 && size==52)) {
             code=2;
             if(launch.version==2) {
@@ -168,7 +168,7 @@ DWORD session(SOCKET s) {
                 else if(op==6) { report=hostctl::BackendStart(2000); code=report.code; have_report=true; }
                 else {
                     const uint32_t mode=u32(request+48);
-                    if(mode>hostctl::ServerOwnedFilterOnly) code=4;
+                    if(mode>hostctl::ServerOwnedNoOwner) code=4;
                     else {
                         const DWORD changed=hostctl::BackendServerOwned(mode);
                         report=hostctl::BackendStatus(); have_report=true;

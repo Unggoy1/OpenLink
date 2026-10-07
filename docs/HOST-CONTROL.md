@@ -77,17 +77,13 @@ Every server needs a playlist in openlink-server.json; the program refuses to st
 
 ## Server-owned lobby and automatic start
 
-By default the first player to join becomes lobby leader, and any player's Play or pause-menu End Game is applied by the server, whether or not that player leads. With a v3 DLL, two options hand the lobby to the server:
+In a stock LAN lobby the first player to join becomes lobby leader, and any player's Play or pause-menu End Game is applied by the server, whether or not that player leads. OpenLink Server always takes the lobby away from players; there is no setting to turn this off:
 
-```json
-{"server_owned": true, "auto_start": {"min_players": 1, "delay_seconds": 30}}
-```
-
-- `server_owned`: no player becomes lobby leader, and the server drops players' start and end-game requests. Players still see Play and End Game, but they do nothing (Play shows a local 3-2-1 countdown, then nothing happens). Matches still end on their own time or score limit.
-- `lobby_owner` (with `server_owned`): `"none"` (default) means no player becomes lobby owner, and the server also keeps the LAN lobby leader role for itself (below), so no player gets lobby options, map/mode menus, Play or End Game. `"first_player"` keeps the game's own leader: the first joiner, handed to the longest-present player when they leave. Only that player sees the (inert) buttons; the others see none. Not yet tested with two players.
-- `lobby_leader_xuid` (with `server_owned` and lobby owner `"none"`, optional): on LAN, a player counts as lobby leader only when their Xbox user ID (XUID) equals the leader XUID the server sends to everyone. The game gives it to the first player who joins. openlink-server instead sets it to a placeholder no player has (default 2814749767106559, Xbox XUID format), and the control DLL keeps it there. Set another value only for testing. Not yet tested with players. The agent log line `lobby` shows `leader` and `leader_held`.
+- No player becomes lobby owner or lobby leader, so nobody gets lobby options, map/mode menus, Play, or End Game and Restart Match in the pause menu (R025). Matches end on their own time or score limit, and the server starts each one itself: after the vote (`vote`), or with `auto_start`.
+- On LAN, a player counts as lobby leader only when their Xbox user ID (XUID) equals the leader XUID the server sends to everyone. The game gives it to the first player who joins. OpenLink Server instead sets it to a placeholder no player has (default 2814749767106559, Xbox XUID format), and the control DLL keeps it there. `lobby_leader_xuid` sets another value; use it only for testing. The agent log line `lobby` shows `leader` and `leader_held`.
+- As a backstop, the server also drops players' start and end-game requests (`blocked_start`, `blocked_end`).
 - `team_balance` (default `"even"`): in team modes, when each match is prepared, the server spreads every player except observers evenly over the match's teams (two, or the playlist entry's `teams`). `"even"` keeps players on the team they are on where the counts allow and moves only as many as needed, so friends who picked the same team stay together; a team that does not exist in this match (for example Hades from an earlier Slayer match) is reset. `"shuffle"` deals random even teams every match. `"off"` keeps the game's own behaviour (players keep their picks). Players can still change teams during the match. In free-for-all modes the server always keeps every player on their own team, whatever `team_balance` says (with it, two players damaged and killed each other in an FFA King of the Hill mode, 2026-10-06; without it they could not, R024). The `lobby` log line shows each player's team bytes (`peer_teams`: requested/assigned/selected) and `team_fixes` (changes the server made). Even split, shuffle and entry `teams` with several players are not yet tested.
-- `auto_start`: once at least `min_players` players are connected (default 1) and have stayed for `delay_seconds` (default 10), the agent starts the match, as a leader's Play would. This repeats in the lobby after every match. Without `server_owned`, a player's Play can still start the match earlier.
+- `auto_start` (for example `{"min_players": 1, "delay_seconds": 30}`): once at least `min_players` players are connected (default 1) and have stayed for `delay_seconds` (default 10), the agent starts the match, as a leader's Play would. This repeats in the lobby after every match. A server without `vote` always uses it, with the defaults when it is not set.
 - `GET /status` shows `host_control.lobby`: `lobby.connected` (connected players), `lobby.owner` (leader peer, -1 none), `lobby.start_mode` (1 once a start was requested), `blocked_start` and `blocked_end` (dropped player requests), `starts` and `error`. The agent log line `lobby` records each change.
 - Like selection, this changes the running server process (a code patch and two table hooks, removed when control stops). Operators carry the terms-of-service risk of modifying their server. Clients are not modified.
 
@@ -104,7 +100,7 @@ The game lists a LAN server under its PC name, read once at start-up into the se
 With a playlist, proxy mode (the default) and the native backend, players can vote for the next match in the OpenLink app:
 
 ```json
-{"playlist": "playlist.json", "server_owned": true, "vote": {"seconds": 30, "options": 4, "start_delay_seconds": 5}}
+{"playlist": "playlist.json", "vote": {"seconds": 30, "options": 4, "start_delay_seconds": 5}}
 ```
 
 - A vote opens when the lobby gets its first player, and again each time a match ends. It offers up to `options` (1-4, default 4) entries drawn at random from the playlist, leaving out the one just played, unless the lobby emptied since: players who arrive at an empty server can get any entry. Give entries a `name`: the app shows it.

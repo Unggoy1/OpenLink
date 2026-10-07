@@ -9,7 +9,6 @@
   "server_ip": "127.0.0.2",
   "stop_server": true,
   "playlist": "playlist.json",
-  "server_owned": true,
   "team_balance": "even",
   "vote": {"seconds": 30, "options": 4, "start_delay_seconds": 5}
 }

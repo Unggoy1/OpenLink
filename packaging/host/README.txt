@@ -29,10 +29,12 @@ Setup
      Ctrl+C stops it and the game server. The playlist is read once at
      start: restart openlink-server after editing it.
 
+The server always owns its lobby: no player becomes lobby leader, so nobody
+gets Play, the map/mode menus or the pause-menu End Game. The server starts
+every match itself, and matches end on their own limits.
+
 What the example config does
   - "playlist": the server decides the map and mode of every match.
-  - "server_owned": no player becomes lobby leader, and the server ignores
-    players' Play and pause-menu End Game. Matches end on their own limits.
   - "team_balance": "even" (the default): in team modes the server evens
     out the teams before every match, moving as few players as it can, so
     friends on the same team stay together. "shuffle" deals random even
@@ -44,8 +46,9 @@ What the example config does
   - "vote": when the lobby gets its first player, and after every match,
     players vote in the OpenLink app between up to 4 random playlist entries
     (30 s). The winner starts 5 s later; with no votes, a random one.
-    Remove "vote" and add "auto_start": {"min_players": 1, "delay_seconds": 30}
-    to start matches without voting, in playlist order.
+    Without "vote", matches start in playlist order 10 s after a player
+    joins; "auto_start": {"min_players": 2, "delay_seconds": 30} changes
+    the player count and the wait.
 
 The log should show "host control transport connected", "playlist voting on"
 and, once someone joins, "vote open". The lobby screen may show another map

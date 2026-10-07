@@ -158,22 +158,39 @@ func TestConfigLobbyLeader(t *testing.T) {
 		return loadConfig(flag.NewFlagSet("t", flag.ContinueOnError), []string{"-config", path})
 	}
 	for doc, want := range map[string]uint64{
-		`{"name": "x"}`:                       0,
-		`{"name": "x", "server_owned": true}`: defaultLobbyLeader,
-		`{"name": "x", "server_owned": true, "lobby_owner": "first_player"}`:         0,
-		`{"name": "x", "server_owned": true, "lobby_leader_xuid": 2533274962600518}`: 2533274962600518,
+		`{"name": "x"}`: defaultLobbyLeader,
+		`{"name": "x", "lobby_leader_xuid": 2533274962600518}`: 2533274962600518,
 	} {
 		c, err := load(doc)
 		if err != nil || c.lobbyLeader() != want {
 			t.Errorf("%s: leader %d, want %d (%v)", doc, c.lobbyLeader(), want, err)
 		}
 	}
-	for _, doc := range []string{
-		`{"name": "x", "lobby_leader_xuid": 5}`,
-		`{"name": "x", "server_owned": true, "lobby_owner": "first_player", "lobby_leader_xuid": 5}`,
-	} {
-		if _, err := load(doc); err == nil {
-			t.Errorf("%s accepted", doc)
+}
+
+// The server owns the lobby, so a real server without a vote starts matches
+// itself.
+func TestConfigDefaultsToAutoStart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "openlink-server.json")
+	load := func(doc string, args ...string) config {
+		t.Helper()
+		os.WriteFile(path, []byte(doc), 0o600)
+		c, err := loadConfig(flag.NewFlagSet("t", flag.ContinueOnError), append([]string{"-config", path}, args...))
+		if err != nil {
+			t.Fatalf("%s: %v", doc, err)
 		}
+		return c
+	}
+	if c := load(`{"name": "x"}`); c.AutoStart == nil || c.AutoStart.minPlayers() != 1 || c.AutoStart.delay() != 10*time.Second {
+		t.Errorf("no vote: auto_start %+v, want defaults", c.AutoStart)
+	}
+	if c := load(`{"name": "x", "auto_start": {"min_players": 2}}`); c.AutoStart == nil || c.AutoStart.minPlayers() != 2 {
+		t.Errorf("auto_start %+v, want min_players 2", c.AutoStart)
+	}
+	if c := load(`{"name": "x", "vote": {"seconds": 30}}`); c.AutoStart != nil {
+		t.Errorf("vote: auto_start %+v, want none", c.AutoStart)
+	}
+	if c := load(`{"name": "x"}`, "-simulate"); c.AutoStart != nil {
+		t.Errorf("simulate: auto_start %+v, want none", c.AutoStart)
 	}
 }

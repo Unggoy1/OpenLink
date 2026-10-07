@@ -56,16 +56,9 @@ type config struct {
 	HostControlNative bool   `json:"-"` // always on for a real server
 	// Playlist: map/mode rotation file (internal/playlist), required for a real server.
 	Playlist string `json:"playlist,omitempty"`
-	// ServerOwned: no player becomes lobby leader, so nobody gets Play or the
-	// end-game option. Pair it with AutoStart or Vote.
-	ServerOwned bool `json:"server_owned,omitempty"`
-	// LobbyOwner, with ServerOwned: "none" (default, no player is lobby owner)
-	// or "first_player" (the game's own owner; only that player sees the inert
-	// Play/End Game, other players see none).
-	LobbyOwner string `json:"lobby_owner,omitempty"`
-	// LobbyLeaderXUID, with ServerOwned and lobby owner "none": the XUID the
-	// server keeps as LAN lobby leader so that no player is leader (no lobby
-	// options, map/mode menus, Play or End Game). 0 = defaultLobbyLeader.
+	// LobbyLeaderXUID: the XUID the server keeps as LAN lobby leader so that no
+	// player is leader (no lobby options, map/mode menus, Play or End Game).
+	// A real server always owns its lobby. 0 = defaultLobbyLeader.
 	LobbyLeaderXUID uint64 `json:"lobby_leader_xuid,omitempty"`
 	// TeamBalance, for team modes at the start of every match: "even" (default:
 	// even teams, players stay on their current team where the counts allow),
@@ -75,7 +68,8 @@ type config struct {
 	// one of that entry's teams. FFA modes always keep every player on their
 	// own team.
 	TeamBalance string `json:"team_balance,omitempty"`
-	// AutoStart: the server starts each match itself.
+	// AutoStart: the server starts each match itself. A real server without
+	// Vote gets the defaults, since no player can press Play.
 	AutoStart *autoStart `json:"auto_start,omitempty"`
 	// Vote, with a playlist and proxy mode: players vote in the OpenLink app
 	// for the next match, which then starts by itself. Replaces AutoStart.
@@ -222,7 +216,7 @@ func loadConfig(fs *flag.FlagSet, args []string) (config, error) {
 		// No game: the control DLL, playlist and match settings do not apply,
 		// so a full config file can still be used for the reachability check.
 		c.HostControlDLL, c.HostControlNative = "", false
-		c.Playlist, c.ServerOwned, c.AutoStart, c.Vote = "", false, nil, nil
+		c.Playlist, c.AutoStart, c.Vote = "", nil, nil
 	} else {
 		// A real server always runs from a playlist through the control DLL.
 		if !c.Manage {
@@ -253,23 +247,14 @@ func loadConfig(fs *flag.FlagSet, args []string) (config, error) {
 	if c.Vote != nil && c.AutoStart != nil {
 		return c, errors.New("use vote or auto_start, not both: vote starts each match after the vote")
 	}
-	if c.LobbyOwner != "" && c.LobbyOwner != "none" && c.LobbyOwner != "first_player" {
-		return c, errors.New("lobby_owner must be none or first_player")
-	}
-	if c.LobbyLeaderXUID != 0 && (!c.ServerOwned || c.lobbyOwner() != "none") {
-		return c, errors.New(`lobby_leader_xuid needs "server_owned": true and lobby_owner "none"`)
+	if !c.Simulate && c.Vote == nil && c.AutoStart == nil {
+		// The server owns the lobby, so a match starts only from the server.
+		c.AutoStart = &autoStart{}
 	}
 	if c.TeamBalance != "" && c.TeamBalance != "even" && c.TeamBalance != "shuffle" && c.TeamBalance != "off" {
 		return c, errors.New(`team_balance must be "even", "shuffle" or "off"`)
 	}
 	return c, nil
-}
-
-func (c config) lobbyOwner() string {
-	if c.LobbyOwner == "" {
-		return "none"
-	}
-	return c.LobbyOwner
 }
 
 // teamPolicy is the server's team rules for a match of entry (nil: no playlist
@@ -297,12 +282,8 @@ func (c config) teamPolicy(entry *playlist.Entry) hostctl.TeamPolicy {
 // player matches it.
 const defaultLobbyLeader uint64 = 0x0009_ffff_ffff_ffff
 
-// lobbyLeader is the XUID the server holds as lobby leader, or 0 when players
-// keep the game's own leader (first joiner).
+// lobbyLeader is the XUID the server holds as lobby leader.
 func (c config) lobbyLeader() uint64 {
-	if !c.ServerOwned || c.lobbyOwner() != "none" {
-		return 0
-	}
 	if c.LobbyLeaderXUID != 0 {
 		return c.LobbyLeaderXUID
 	}

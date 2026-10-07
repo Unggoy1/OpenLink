@@ -118,9 +118,9 @@ func (b *Bridge) Start(ctx context.Context) (Reply, error) {
 	return b.exchange(ctx, OpStart, AssetPair{})
 }
 
-// ServerOwned sets the lobby control mode (ServerOwned* constants). Both
-// non-zero modes drop players' start and end-game requests; ServerOwnedNoOwner
-// also stops the first joiner becoming lobby owner. Send it before players
+// ServerOwned sets the lobby control mode (ServerOwned* constants).
+// ServerOwnedNoOwner drops players' start and end-game requests and
+// stops the first joiner becoming lobby owner. Send it before players
 // join. CodeOK on success; CodeUnsupported if the code bytes differ.
 func (b *Bridge) ServerOwned(ctx context.Context, mode uint32) (Reply, error) {
 	return b.send(ctx, Request{Op: OpServerOwned, Mode: mode})

@@ -82,6 +82,9 @@
     if (theirs.every((n) => n > mine)) return 'Your Halo Infinite is older than every listed server. Update it in Steam to join them.';
     return 'No listed server runs your game version.';
   });
+  // Servers that need a newer app. The update banner links the download when
+  // the update check got through; otherwise this notice says what to do.
+  const needUpdateCount = $derived(servers.filter((s) => s.needsUpdate).length);
 
   async function refresh() {
     if (!settings?.directory) return;
@@ -141,6 +144,7 @@
 
   function joinBlockedReason(s: main.ServerView): string {
     if (!s.joinable) return s.status === 'ready' ? 'Not advertising right now' : `Server is ${s.status}`;
+    if (s.needsUpdate) return 'Update OpenLink to join';
     if (localBuild && !s.buildMatch) return 'Different game version';
     if (s.reachability === 'unreachable') return "Host's port is closed";
     return '';
@@ -245,6 +249,12 @@
         </p>
       {/if}
       {#if versionNotice}<p class="notice warn">{versionNotice}</p>{/if}
+      {#if needUpdateCount && !update}
+        <p class="notice warn">
+          {needUpdateCount === 1 ? 'One server needs' : `${needUpdateCount} servers need`} a newer version of the OpenLink
+          app. Download the latest version to join {needUpdateCount === 1 ? 'it' : 'them'}.
+        </p>
+      {/if}
       {#if listError}<p class="notice warn">{listError}</p>{/if}
       {#if actionError}<p class="notice warn">{actionError}</p>{/if}
 
@@ -307,7 +317,7 @@
                       </div>
                     {/if}
                     <div class="server-text">
-                      <div>{s.name}</div>
+                      <div title={s.version ? `OpenLink Server ${s.version}` : undefined}>{s.name}</div>
                       {#if s.description}<div class="desc" title={s.description}>{s.description}</div>{/if}
                       {#if s.match}<div class="match" class:live={s.match.phase === 'in_game'}>{matchText(s.match)}</div>{/if}
                     </div>

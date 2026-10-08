@@ -66,6 +66,8 @@ type ServerView struct {
 	Joinable     bool       `json:"joinable"`
 	Build        string     `json:"build"`
 	BuildMatch   bool       `json:"buildMatch"`   // false also when the local build is unknown
+	Version      string     `json:"version"`      // OpenLink Server version; "" when not reported
+	NeedsUpdate  bool       `json:"needsUpdate"`  // the server needs a newer OpenLink app (api.AppProtocol)
 	Players      int        `json:"players"`      // -1 = unknown
 	Reachability string     `json:"reachability"` // unknown, ok, unreachable (directory's check)
 	PingMS       int        `json:"pingMs"`       // -1 = no answer (host not in proxy mode)
@@ -196,7 +198,8 @@ func (a *App) ListServers() ([]ServerView, error) {
 	for i, sv := range servers {
 		key := net.JoinHostPort(sv.Host, strconv.Itoa(sv.Port))
 		out[i] = ServerView{ID: sv.ID, Key: key, Name: sv.Name, Description: sv.Description, Region: sv.Region, Status: sv.Status,
-			Joinable: sv.Joinable, Build: sv.Build, BuildMatch: local != "" && sv.Build == local, Players: sv.Players,
+			Joinable: sv.Joinable, Build: sv.Build, BuildMatch: local != "" && sv.Build == local,
+			Version: sv.Version, NeedsUpdate: needsNewerApp(sv), Players: sv.Players,
 			Reachability: sv.Reachability, PingMS: -1, Favorite: slices.Contains(s.Favorites, key), Match: matchView(sv.Match)}
 		if !sv.Proxy {
 			continue // only proxy-mode hosts answer probes
@@ -224,13 +227,17 @@ func (a *App) ListServers() ([]ServerView, error) {
 	return out, nil
 }
 
+// needsNewerApp reports whether a server needs a higher app protocol level
+// than this app speaks. A server that does not report one needs nothing.
+func needsNewerApp(sv connect.Server) bool { return sv.AppProtocol > api.AppProtocol }
+
 func rank(s ServerView) int {
 	r := 0
 	if !s.Favorite {
 		r += 4
 	}
 	switch {
-	case s.Joinable && s.BuildMatch:
+	case s.Joinable && s.BuildMatch && !s.NeedsUpdate:
 	case s.Joinable:
 		r++
 	default:
@@ -259,6 +266,9 @@ func (a *App) Join(id string) error {
 	}
 	if target == nil {
 		return errors.New("that server is no longer listed")
+	}
+	if needsNewerApp(*target) {
+		return errors.New("this server needs a newer version of OpenLink: update the app to join it")
 	}
 	a.Leave() // free UDP 1343 before taking it again
 	// With a server on this PC, it holds the discovery port and loopback

@@ -123,6 +123,16 @@ Requires Go 1.27+. On Windows:
 
 This runs the tests and writes `bin\openlink-server.exe`, `bin\openlink-directory.exe` and `bin\linux-amd64\openlink-directory`. These use only the Go standard library. The player app is built separately in `browser/` (see its README).
 
+## Versions and releases
+
+The programs share one version series (`v0.8.0`, `v0.8.1`, …), but a release carries only the programs that changed. A server-only fix ships OpenLink Server and the directory, and the app keeps its version, so the app's version can skip numbers (for example `v0.8.0`, then `v0.9.0`).
+
+- **Players** update the app when it says a newer version is out. It only says so for releases that contain the app.
+- **Hosts** run the newest OpenLink Server. Its log warns at startup when a newer one is out.
+- **Compatibility** between the two is one number, `api.AppProtocol`. OpenLink Server lists the level it needs; an app below that level shows the server as "Update OpenLink to join". Raise it only when a server change needs new app code.
+
+Releasing: push an annotated tag (`git tag -a v0.8.3 -m "..."`). The release workflow builds the app and the server only if something they compile from changed since the last release that carried them, and names the release after what it contains. To override, put `[app]` / `[no-app]` or `[server]` / `[no-server]` in the tag message.
+
 ## Status and known limitations
 
 - **Tested:** remote players on Windows and on Linux/Proton listed a hosted server through the command-line connector (since retired in favour of the app) and played several full matches in a row. In that test the host's UDP 1343 was exposed through a tunnel rather than a router port forward. A direct port-forwarded host should behave the same, but it has not been tested yet.

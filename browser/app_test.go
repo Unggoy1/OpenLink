@@ -8,6 +8,7 @@ import (
 
 	"halocommunity/connect"
 	"halocommunity/internal/api"
+	"halocommunity/internal/dirclient"
 	"halocommunity/internal/directory"
 	"halocommunity/internal/sim"
 )
@@ -24,7 +25,7 @@ func TestAppListFavoritesSettings(t *testing.T) {
 
 	ts := httptest.NewServer(directory.New(directory.Config{RegisterKey: "k", ShowUnconfirmed: true, AllowPrivateHosts: true}))
 	defer ts.Close()
-	dc := directory.NewClient(ts.URL, "k")
+	dc := dirclient.NewClient(ts.URL, "k")
 
 	echo, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
 	if err != nil {

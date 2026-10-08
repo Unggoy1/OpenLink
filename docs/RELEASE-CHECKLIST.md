@@ -52,6 +52,7 @@ Run a voting server with the local directory (as in R023) and join it with the O
 
 ### Vote overlay (Windows)
 
+- [ ] **New default position and size** (2026-10-08): the panel now opens top left (over the lobby's map preview, which can show another map than the vote's) and is sized by the monitor's height (browser/overlay_scale.go: 25% above its design size at 1440 pixels high, in proportion elsewhere, never below 80% of the display-scaling size), so it takes the same share of the screen height on 1080p, 1440p and 4K. Looks right on a 3440x1440 ultrawide, before and after the height scaling (user, 2026-10-08, R031). Still to check: a 1080p and a 4K screen.
 - [ ] **Passive** (the default): the panel shows by itself; Ctrl+Alt+1–4 vote while Halo has focus. Check whether Halo also reacts to Ctrl (crouch), Alt or the number keys.
 - [ ] Passive with a controller connected: rows show both labels, for example `Ctrl+Alt+1 · View+↑`.
 - [ ] **Interactive**: Ctrl+Alt+V opens the panel. Check whether Halo releases the mouse, any audio cut, pause or stutter, and that focus returns to Halo after voting or Esc.
@@ -81,14 +82,14 @@ These could quietly break the way FFA did (R024): each is a kind of match the se
 - [ ] **Bot and AI modes** (a Fiesta mode with bots, a Firefight-style mode): match starts, bots spawn, the FFA guard and team balance leave bots alone.
 - [ ] **Scripted Forge modes** (node-graph scripts that set teams, scores or rounds): the script still runs and is not undone by team balance.
 
-### Bot backfill (built 2026-10-06, branch bot-backfill-research; never run with the game)
+### Bot backfill (branch bot-backfill-research; tested alone 2026-10-08, R030)
 
 Set `"bot_backfill": {}` in openlink-server.json and `"bots": true` on the playlist entries to test; watch the `bots` log lines (HOST-CONTROL.md, Bot backfill).
 
-- [ ] **Probe first** (decides what comes next): the `bots` line says `supported=true` after start. For each mode tried, note `mode_bots_enabled`, `mode_spawns_bots`, `mode_difficulties`, `navmesh`/`nav_faces` and `thread_role`. Try the bot Fiesta mode (expected: `mode_bots_enabled=1`, `state=mode_bots`, some difficulties, `thread_role=1`), a normal Slayer or Fiesta mode (expected: no `bots` line changes in the match, since the bot tick runs only in bot modes), a 343 map and a Forge map.
-- [ ] **One player, a mode with bots enabled, registered difficulties and no built-in bots** (if the probe finds one): bots appear one by one after the match starts until players plus bots reach `fill_to`; `added` counts up; no crash, no stutter. If `refused` counts up instead, note the log.
-- [ ] **Bot difficulty**: `"difficulty": "spartan"` vs `"recruit"` feels different (only difficulties the mode registered can be used).
-- [ ] **Navmesh check**: on a 343 map `navmesh=yes` with `nav_faces` well above 0; on a Forge map without bot navigation `navmesh=none` and no bots are added. Note what bots do if one gets in anyway.
+- [x] **Probe** (R030, 2026-10-08): `supported=true`, `thread_role=1` (main thread). The BOT8 Fiesta mode reports its own FFA bots (`mode_spawns_bots=4`, `state=mode_bots`) and is left alone. Regular Fiesta Slayer and CTF Arena have bots enabled with no built-in bots and all four difficulties registered.
+- [x] **One player, regular modes** (R030): Fiesta Slayer on Interference and CTF Arena on Kusini Bay each filled to `fill_to` 4 with 3 bots added one by one; CTF split 2 against 2 (player + 1 bot vs 2 bots); a whole CTF match played; nothing refused; when the player left, bots started leaving.
+- [ ] **Bot difficulty**: Marine played poorly (user); ODST was used for the CTF match, how it felt not noted yet. Try `"spartan"`.
+- [ ] **Navmesh check**: Forge maps with bot navigation read `navmesh=yes` (Interference 521 faces, Kusini Bay 3063; R030). Still to try: a 343 map, and a Forge map without bot navigation (`navmesh=none`, no bots added).
 
 ## 2. Tests that need a second player
 
@@ -116,7 +117,7 @@ Set `"bot_backfill": {}` in openlink-server.json and `"bots": true` on the playl
 - [ ] **Team balance** (`team_balance`, default on): works for one player (R028: moved to Eagle at match prep, Hades from the previous match did not carry over, in-match changes still work). Now `"even"` (default, keeps current teams where possible), `"shuffle"` and `"off"`, plus the playlist entry `teams` (`count`/`size`) for multi-team modes; the new version is not yet run live. Check with two or more players: even split, a pair on the same team stays together under `"even"`, `"shuffle"` mixes teams, a `teams` entry (e.g. size 2) makes the expected number of teams.
 - [x] **Block Restart Match on the server**: not needed (user, 2026-10-06). Players never get Restart Match because the server always holds the lobby leader (R025); the server would still apply a restart request (simulation event 0x58, FN026) if a client sent one.
 - [x] **Lobby map/mode picker**: fixed by the server-held lobby leader; Map and Mode Editor are greyed for every player (R025).
-- [ ] **Bot backfill** (built 2026-10-06 on branch bot-backfill-research, FN029; untested): server `bot_backfill` plus per-entry `bots`, DLL op 11 BotPolicy and a hook on the game's own bot job. Tests in sections 1 and 2. Backfill works only in modes that enable bots and register bot difficulties (A075: the server cannot switch bots on late; the authoritative lobby-variant rewrite before launch is the only route for other modes and needs the probe first). Maps without navigation are detected (A074, unconfirmed live). Entries are opt-in until the probe confirms the navmesh check.
+- [ ] **Bot backfill** (built 2026-10-06 on branch bot-backfill-research, FN029; works alone in regular modes, R030 2026-10-08; joiner, no-navmesh map and difficulty still to test): server `bot_backfill` plus per-entry `bots`, DLL op 11 BotPolicy and a hook on the game's own bot job. Tests in sections 1 and 2. Backfill works only in modes that enable bots and register bot difficulties (A075: the server cannot switch bots on late; the authoritative lobby-variant rewrite before launch is the only route for other modes and needs the probe first). Maps without navigation are detected (A074, unconfirmed live). Entries are opt-in until the probe confirms the navmesh check.
 - [ ] **A player can rename the server** (static finding 2026-10-06, FN030; not tested): the game server applies the `EditLobbyName` network message (type 0x2e) from any player and copies it into the server name shown in the LAN server menu. The stock game probably sends it only for the lobby leader (the server now), but a modified client could rename the server. Fix options: the DLL drops message 0x2e from players (like the start and end-game requests), or OpenLink Server re-applies its name regularly.
 - [ ] **Docs pass**:
   - [ ] README "Status and known limitations": lobby control, voting, the overlay and the Linux app now exist.

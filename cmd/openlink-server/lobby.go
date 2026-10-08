@@ -37,6 +37,7 @@ type lobbyController interface {
 	Start(context.Context) (hostctl.Reply, error)
 	ServerOwned(context.Context, uint32) (hostctl.Reply, error)
 	SetLeader(context.Context, uint64) (hostctl.Reply, error)
+	EndMatch(context.Context) (hostctl.Reply, error)
 }
 
 // lobbyInfo is the lobby state shown by the admin API.
@@ -59,6 +60,42 @@ func (a *agent) setLobby(update func(*lobbyInfo)) {
 }
 
 const lobbyPoll = time.Second
+
+// guardView is what the DLL reports about player requests it overrode.
+type guardView struct {
+	RestartGuard, EndMatch                bool
+	NameFixes, BlockedRestart, RejoinTeam uint16
+}
+
+// logGuards logs the DLL's guards once, then each time a player's request was
+// overridden: a server rename undone, a Restart Match dropped, or a rejoining
+// player put back on their team.
+func (a *agent) logGuards(l hostctl.Lobby, last **guardView) {
+	v := guardView{l.RestartGuard, l.EndMatch, l.NameFixes, l.BlockedRestart, l.RejoinTeams}
+	if *last == nil {
+		if !v.RestartGuard && l.Flags&hostctl.LobbyServerOwned != 0 {
+			a.log.Warn("the Restart Match guard is not installed: a modified client could restart a match")
+		}
+		if !v.EndMatch {
+			a.log.Warn("End Match is unavailable in this game build: the end-match command and the watchdog's match limit do nothing")
+		}
+	} else {
+		p := **last
+		if !p.RestartGuard && v.RestartGuard {
+			a.log.Info("Restart Match guard installed")
+		}
+		if v.NameFixes > p.NameFixes {
+			a.log.Warn("a player renamed the server; the name was put back", "times", v.NameFixes)
+		}
+		if v.BlockedRestart > p.BlockedRestart {
+			a.log.Warn("dropped a player's Restart Match request (only a modified client sends one)", "times", v.BlockedRestart)
+		}
+		if v.RejoinTeam > p.RejoinTeam {
+			a.log.Info("a rejoining player was put back on their team", "times", v.RejoinTeam)
+		}
+	}
+	*last = &v
+}
 
 // holdLeader makes the server keep the LAN lobby leader role with a placeholder
 // XUID, so no player is leader. The DLL keeps re-asserting it on every engine
@@ -100,12 +137,17 @@ func (a *agent) runLobby(ctx context.Context, controller lobbyController, poll t
 		a.log.Error("server-owned lobby unavailable; players keep lobby control", "err", err, "code", reply.Code)
 		a.setLobby(func(l *lobbyInfo) { l.Error = "server-owned lobby failed" })
 	} else {
-		a.log.Info("server owns the lobby: player start and end-game requests are dropped")
+		a.log.Info("server owns the lobby: player start, end-game and Restart Match requests are dropped")
 		a.setLobby(func(l *lobbyInfo) { l.ServerOwned = true })
 		a.holdLeader(ctx, controller, a.cfg.lobbyLeader(), poll)
 	}
+	var dog *watchdog // only when a stuck server gets restarted
+	if a.cfg.Restart {
+		dog = newWatchdog(a.cfg.Watchdog)
+	}
 	var last hostctl.Lobby
 	var lastBots botView
+	var lastGuards *guardView
 	var lastState int32 = -2
 	var since time.Time // when the lobby first had enough players
 	for ctx.Err() == nil && !controller.Closed() {
@@ -123,15 +165,22 @@ func (a *agent) runLobby(ctx context.Context, controller lobbyController, poll t
 		}
 		l := st.Lobby
 		a.setLobby(func(info *lobbyInfo) { info.Lobby, info.State = l, st.State })
+		if act, reason := dog.observe(time.Now(), st.State, l.Flags&hostctl.LobbyStartMode != 0 && l.StartMode == 1,
+			l.Ticks, st.Version >= 7); act != watchNone {
+			a.watchdogAct(ctx, controller, act, reason)
+		}
 		if st.Version >= 5 {
 			a.warnFFATeams(l.LobbyVariantTeams)
 		}
 		if st.Version >= 6 {
 			a.logBots(l, &lastBots)
 		}
-		l.BotTicks = 0 // counts every game tick; logged in the bots line
+		if st.Version >= 7 {
+			a.logGuards(l, &lastGuards)
+		}
+		l.BotTicks, l.Ticks = 0, 0 // count every tick; not a lobby change
 		if l != last || st.State != lastState {
-			a.log.Info("lobby", "state", st.State, "connected", l.Connected, "peers", l.Peers, "mask", l.PeerMask,
+			a.log.Info("lobby", "state", st.State, "connected", l.Connected, "peers", l.Peers, "mask", l.PeerMask, "player_mask", l.PlayerMask,
 				"owner", l.Owner, "host_peer", l.HostPeer, "players", l.Players, "start_mode", l.StartMode,
 				"allowed", l.Allowed, "prepared", l.Prepared, "prep", [2]int{int(l.PrepStarted), int(l.PrepDone)},
 				"loading", l.Loading, "start", l.Start, "users_required", l.UsersRequired,

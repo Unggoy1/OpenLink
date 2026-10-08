@@ -74,11 +74,13 @@ int read_frame(SOCKET s,uint8_t* p,unsigned capacity,unsigned& size,bool allow_i
     return read_all(s,p,size);
 }
 bool reply(SOCKET s,uint16_t code,uint64_t id,const hostctl::BackendReport* report=nullptr) {
-    // v6: v2 layout (lifecycle state, match count, backend flags), the lobby probe at 112,
+    // v7: v2 layout (lifecycle state, match count, backend flags), the lobby probe at 112,
     // lobby leader XUID at 176 and leader re-asserts at 184, team diagnostics at 192,
     // bot backfill at 256 (bots enabled, mode bots, bots, players, state, thread role,
-    // adds, removes, refused, ticks, supported, navigation state/source/faces).
-    uint8_t b[320]={}; std::memcpy(b,"HICR",4); p16(b+4,6); p16(b+6,code);
+    // adds, removes, refused, ticks, supported, navigation state/source/faces), and at
+    // 320 the player mask, server ticks, name rewrites, dropped restarts, rejoin team
+    // restores, restart guard and end-match availability.
+    uint8_t b[352]={}; std::memcpy(b,"HICR",4); p16(b+4,7); p16(b+6,code);
     p64(b+8,id); p32(b+16,GetCurrentProcessId());
     if(report) {
         p32(b+20,report->gates); p64(b+24,report->generation);
@@ -103,6 +105,9 @@ bool reply(SOCKET s,uint16_t code,uint64_t id,const hostctl::BackendReport* repo
         p32(b+268,l.bot_ticks); b[272]=l.bot_supported;
         b[273]=uint8_t(l.nav_state); b[274]=l.nav_from_variant; p32(b+276,uint32_t(l.nav_faces));
         p16(b+280,l.bot_difficulties);
+        p32(b+320,l.player_mask); p32(b+324,l.ticks);
+        p16(b+328,l.name_fixes); p16(b+330,l.blocked_restart); p16(b+332,l.rejoin_teams);
+        b[334]=l.restart_guard; b[335]=l.end_match;
     } else std::memset(b+192,0xff,128);
     return send_frame(s,b,sizeof(b));
 }
@@ -169,11 +174,13 @@ DWORD session(SOCKET s) {
             }
         }
         // 6 Start: set start mode 1 on the next lobby tick. 7 ServerOwned(u32 mode 0/1).
-        if((op==6 && size==48) || (op==7 && size==52)) {
+        // 12 EndMatch: end the running match on the next in-game tick.
+        if((op==6 && size==48) || (op==7 && size==52) || (op==12 && size==48)) {
             code=2;
             if(launch.version==2) {
                 if(backend_result!=ERROR_SUCCESS) code=1;
                 else if(op==6) { report=hostctl::BackendStart(2000); code=report.code; have_report=true; }
+                else if(op==12) { report=hostctl::BackendEndMatch(2000); code=report.code; have_report=true; }
                 else {
                     const uint32_t mode=u32(request+48);
                     if(mode>hostctl::ServerOwnedNoOwner) code=4;

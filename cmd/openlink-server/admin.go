@@ -16,6 +16,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"halocommunity/internal/hostctl"
 	"halocommunity/internal/relay"
 )
 
@@ -92,6 +93,7 @@ func (a *agent) serveAdmin(ctx context.Context) {
 	mux.HandleFunc("GET /status", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, 200, a.adminSnapshot()) })
 	mux.HandleFunc("GET /host-control", a.handleControlStatus)
 	mux.HandleFunc("POST /host-control/select", a.handleControlSelect)
+	mux.HandleFunc("POST /end-match", a.handleEndMatch)
 	mux.HandleFunc("GET /bans", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, 200, a.bans.List()) })
 	mux.HandleFunc("POST /kick", func(w http.ResponseWriter, r *http.Request) { a.handleBan(w, r, true) })
 	mux.HandleFunc("POST /ban", func(w http.ResponseWriter, r *http.Request) { a.handleBan(w, r, false) })
@@ -151,6 +153,33 @@ func (a *agent) handleBan(w http.ResponseWriter, r *http.Request, kick bool) {
 	writeJSON(w, 200, map[string]any{"banned": ip.String(), "sessions_closed": dropped})
 }
 
+// handleEndMatch ends the running match, as a lobby leader's End Game would.
+func (a *agent) handleEndMatch(w http.ResponseWriter, r *http.Request) {
+	controller, ok := a.getControl().(interface {
+		EndMatch(context.Context) (hostctl.Reply, error)
+	})
+	if !ok {
+		writeJSON(w, 503, map[string]string{"error": "host control is not connected"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
+	defer cancel()
+	reply, err := controller.EndMatch(ctx)
+	switch {
+	case err != nil:
+		writeJSON(w, 503, map[string]string{"error": err.Error()})
+	case reply.Code == hostctl.CodeOK:
+		a.log.Info("admin: match ended")
+		writeJSON(w, 200, map[string]any{"ended": true})
+	case reply.Code == hostctl.CodeBusy:
+		writeJSON(w, 409, map[string]string{"error": "no match is running"})
+	case reply.Code == hostctl.CodeUnsupported:
+		writeJSON(w, 501, map[string]string{"error": "End Match is unavailable in this game build"})
+	default:
+		writeJSON(w, 503, map[string]any{"error": "the server did not end the match", "code": reply.Code})
+	}
+}
+
 func decodeIP(w http.ResponseWriter, r *http.Request, req *banRequest) (net.IP, bool) {
 	if err := json.NewDecoder(r.Body).Decode(req); err != nil {
 		writeJSON(w, 400, map[string]string{"error": "bad json"})
@@ -199,7 +228,7 @@ func adminCall(addr, method, path string, body any, out any) error {
 	return json.NewDecoder(resp.Body).Decode(out)
 }
 
-// runAdminCommand handles: status, kick, ban, unban, bans.
+// runAdminCommand handles: status, kick, ban, unban, bans, end-match.
 func runAdminCommand(addr string, args []string) error {
 	minutes := func(i int, def int) int {
 		if len(args) > i {
@@ -255,6 +284,13 @@ func runAdminCommand(addr string, args []string) error {
 			return err
 		}
 		fmt.Printf("%s: %v (connections closed: %v)\n", args[0], out["banned"], out["sessions_closed"])
+		return nil
+	case "end-match":
+		var out map[string]any
+		if err := adminCall(addr, "POST", "/end-match", nil, &out); err != nil {
+			return err
+		}
+		fmt.Println("match ended")
 		return nil
 	case "unban":
 		if len(args) < 2 {

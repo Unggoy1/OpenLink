@@ -76,6 +76,8 @@ type config struct {
 	Vote *voteConfig `json:"vote,omitempty"`
 	// BotBackfill: top matches up with bots (bots.go); off when absent.
 	BotBackfill *botBackfill `json:"bot_backfill,omitempty"`
+	// Watchdog: restart a stuck game server (watchdog.go); on by default.
+	Watchdog *watchdogConfig `json:"watchdog,omitempty"`
 
 	Simulate     bool          `json:"-"`
 	Loopback     bool          `json:"-"`
@@ -258,6 +260,11 @@ func loadConfig(fs *flag.FlagSet, args []string) (config, error) {
 	}
 	if c.BotBackfill != nil {
 		if err := c.BotBackfill.validate(); err != nil {
+			return c, err
+		}
+	}
+	if c.Watchdog != nil {
+		if err := c.Watchdog.validate(); err != nil {
 			return c, err
 		}
 	}

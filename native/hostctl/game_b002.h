@@ -67,8 +67,9 @@ struct LobbyProbe {
     int32_t last_team_count;    // 144dcf9b0: team count it used
     int32_t forced_team_count;  // 144dc340c: >0 forces team = peer % count at start (142fc426c)
     int32_t game_state;         // loaded game globals +0 (1404f178c tests 3), -1 unknown
-    // Per peer 0-15 (session + i*0x1470): requested team +0x2505, assigned +0x2cf5,
-    // host/selected +0x2cf6 (142ebfcbc). -1 also when the peer is absent.
+    // Per session player 0-15 (session + i*0x1470, present in player_mask):
+    // requested team +0x2505, assigned +0x2cf5, host/selected +0x2cf6 (142ebfcbc).
+    // -1 also when the player is absent.
     int8_t peer_team[16][3];
     // Bot backfill (FN029). Variant bytes are the loaded game options (+0x229
     // botsEnabled, -1 unknown); mode_bots is set when the mode spawns or backfills
@@ -88,6 +89,16 @@ struct LobbyProbe {
     uint8_t nav_from_variant; // 144708629: navigation came from the map variant (Forge)
     int32_t nav_faces;      // navmesh faces, -1 unreadable
     uint16_t bot_difficulties; // bit i: difficulty code i registered by the mode (9,6,7,8 = recruit..spartan)
+    // Session players (A082): the player mask session+0x18ac, which the game's
+    // own team rules iterate (1404e67a8); player i's record is session + i*0x1470.
+    // A player's slot can differ from its connection (peer_mask) slot.
+    uint32_t player_mask;
+    uint32_t ticks;            // server ticks seen by the hook (saturating), for the stuck-server watchdog
+    uint16_t name_fixes;       // times the tick rewrote a changed server name (EditLobbyName), saturating
+    uint16_t blocked_restart;  // player Restart Match requests dropped (event 0x58), saturating
+    uint16_t rejoin_teams;     // rejoining players put back on their team this match, saturating
+    uint8_t restart_guard;     // 1: the Restart Match handler is hooked (server-owned lobby)
+    uint8_t end_match;         // 1: BackendEndMatch is available (end-game Set verified)
 };
 enum BotModeFlag : uint8_t { BotModeBackfill=1,BotModeTeams=2,BotModeFfa=4 };
 enum BotTickState : uint8_t {
@@ -147,14 +158,28 @@ BackendReport BackendStart(uint32_t wait_ms) noexcept;
 // +0x78 apply (int 143d44a80 -> 142e0d870, byte 143e06a20 -> 142e0dcb8); while
 // enabled, applies to those two components are dropped. Server code uses Set
 // (+0xb0), as BackendStart does, so server starts and natural ends still work.
+// A player's Restart Match (pause menu, client simulation event 0x58, A080c/O099)
+// reaches the server as the event's apply function 142ef7394 (descriptor table
+// 143d09ba8 +0x78, next to its 1-byte payload reader 142ef8b5c); the server's own
+// restart calls 1429f1a4c directly. While enabled, that slot holds a hook that
+// drops the request. The hook is optional: if the slot or function bytes differ,
+// the rest still works and LobbyProbe::restart_guard stays 0.
 // Returns ERROR_SUCCESS, ERROR_INVALID_FUNCTION (bytes differ) or a Win32 error.
 // StopGameBackend restores the original bytes.
 uint32_t BackendServerOwned(uint32_t mode) noexcept;
+// Ends the running match the way a lobby leader's pause-menu End Game does
+// (simulation+0xb4c4b0 = 1), through the byte component's authoritative Set
+// (142e1d548) on the next HostInGame engine tick. OK when Set accepted it and
+// the value reads back, Busy outside HostInGame, Unsupported if the component
+// differs, Pending if no tick ran within wait_ms (at most 2000).
+BackendReport BackendEndMatch(uint32_t wait_ms) noexcept;
 // Sets the name in the in-game server list (beacon_name.h): on the next engine
 // tick the 48 zero-filled UTF-16 units replace the beacon object's PC name,
 // after the object's fields are checked. OK when written and read back, Busy
 // before the beacon started, Unsupported if the object differs, Pending if no
-// tick ran within wait_ms (at most 2000).
+// tick ran within wait_ms (at most 2000). Once set, every tick puts the name
+// back if it changed: the server applies any player's EditLobbyName (LAN
+// message 0x2e) to the beacon name (FN030, O099).
 BackendReport BackendSetName(const uint16_t* units,uint32_t wait_ms) noexcept;
 // Holds the LAN lobby leader (FN027). Clients treat themselves as leader (lobby
 // options, map/mode menus, Play/End Game) only when their XUID equals the qword

@@ -14,6 +14,10 @@ export function Diagnostics() {
   return window['go']['main']['App']['Diagnostics']();
 }
 
+export function DismissNotice() {
+  return window['go']['main']['App']['DismissNotice']();
+}
+
 export function GetSettings() {
   return window['go']['main']['App']['GetSettings']();
 }
@@ -24,6 +28,10 @@ export function Join(arg1) {
 
 export function Leave() {
   return window['go']['main']['App']['Leave']();
+}
+
+export function LeftNotice() {
+  return window['go']['main']['App']['LeftNotice']();
 }
 
 export function ListServers() {

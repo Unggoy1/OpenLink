@@ -25,7 +25,7 @@ func TestAdvertiseToCapture(t *testing.T) {
 	var src, got Store
 	want := bytes.Repeat([]byte{0xab}, 79)
 	src.Put(want, time.Now())
-	go Capture(ctx, rx, func(a *net.UDPAddr) bool { return a.IP.IsLoopback() }, &got)
+	go Capture(ctx, rx, func(a *net.UDPAddr, _ []byte) bool { return a.IP.IsLoopback() }, &got)
 	go Advertise(ctx, tx, rx.LocalAddr().(*net.UDPAddr), &src, 20*time.Millisecond, time.Second, nil)
 
 	deadline := time.Now().Add(2 * time.Second)
@@ -47,7 +47,7 @@ func TestCaptureRejectsUnacceptedSource(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var got Store
-	go Capture(ctx, rx, func(*net.UDPAddr) bool { return false }, &got)
+	go Capture(ctx, rx, func(*net.UDPAddr, []byte) bool { return false }, &got)
 	tx.WriteToUDP(make([]byte, 79), rx.LocalAddr().(*net.UDPAddr))
 	time.Sleep(200 * time.Millisecond)
 	if _, _, n := got.Latest(); n != 0 {

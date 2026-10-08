@@ -50,6 +50,7 @@ usage:
   openlink-server kick <ip> [minutes]      disconnect a player and keep them out (default 10 min)
   openlink-server ban <ip> [minutes]       ban a player (default: permanent)
   openlink-server unban <ip> | bans        remove a ban | list bans
+  openlink-server end-match                end the running match (as End Game would)
   openlink-server select <selection.json> select pinned map/mode descriptors (loading/start unverified)
   openlink-server check-playlist [file]    check a playlist (default: the configured one) and exit
   openlink-server diagnostics              write a report to send when asking for help (keys and public IPs removed)
@@ -63,6 +64,7 @@ type agent struct {
 	log     *slog.Logger
 	build   string
 	beacons beacon.Store
+	owner   *beacon.Owner // this server's beacons among other local servers'; nil keeps every local beacon
 	bans    *banList
 	fwd     *relay.Forwarder // nil without proxy mode
 	// onLaunch, when set, receives each managed launch's original process
@@ -184,7 +186,7 @@ func runCommand(c config, args []string) error {
 		return nil
 	case "autostart":
 		return runAutostart(c, args)
-	case "status", "kick", "ban", "unban", "bans":
+	case "status", "kick", "ban", "unban", "bans", "end-match":
 		return runAdminCommand(c.Admin, args)
 	case "select":
 		if len(args) != 2 {
@@ -226,6 +228,12 @@ func (a *agent) run(ctx context.Context) error {
 		a.log.Info("game install", "root", in.Root, "build", a.build)
 		if err := checkGameBuild(in, a.build, supportedBuild, supportedGameSHA256); err != nil {
 			return err
+		}
+		// Tells this server's beacons from other servers' on the same PC.
+		if key, err := beacon.LoadKey(filepath.Join(in.Root, "game", "HaloInfinite.exe")); err != nil {
+			a.log.Warn("cannot read the beacon key; with several servers on this PC the list may show another server's name", "err", err)
+		} else {
+			a.owner = &beacon.Owner{Key: key, Name: api.GameName(a.cfg.Name)}
 		}
 
 		existing := a.serverAlreadyRunning()
@@ -343,7 +351,7 @@ func (a *agent) startSimulation(ctx context.Context, wg *sync.WaitGroup) error {
 	go func() { defer wg.Done(); sim.Echo(ctx, echo.(*net.UDPConn)) }()
 	go func() {
 		defer wg.Done()
-		beacon.Capture(ctx, capConn, func(src *net.UDPAddr) bool { return local[src.IP.String()] }, &a.beacons)
+		beacon.Capture(ctx, capConn, func(src *net.UDPAddr, _ []byte) bool { return local[src.IP.String()] }, &a.beacons)
 	}()
 	go func() {
 		defer wg.Done()

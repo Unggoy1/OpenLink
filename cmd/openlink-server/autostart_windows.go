@@ -9,7 +9,23 @@ import (
 	"strings"
 )
 
-const taskName = "OpenLink Server"
+// taskName is the autostart task for config c: "OpenLink Server" for the
+// config next to the program, and "OpenLink Server (<folder>)" for a config in
+// another folder, so several servers on one PC (one config folder each) can
+// each start at logon.
+func taskName(c config) string {
+	dir := filepath.Dir(c.path)
+	if c.path == "" || strings.EqualFold(dir, exeDir()) {
+		return "OpenLink Server"
+	}
+	name := strings.Map(func(r rune) rune {
+		if r < 0x20 || strings.ContainsRune(`\/:*?"<>|`, r) {
+			return '_'
+		}
+		return r
+	}, filepath.Base(dir))
+	return "OpenLink Server (" + name + ")"
+}
 
 // runAutostart manages a Task Scheduler task that starts the agent when the
 // user logs on. A logon task runs in the user's own session, with their Steam
@@ -32,7 +48,7 @@ func runAutostart(c config, args []string) error {
 		}
 		exe, _ = filepath.Abs(exe)
 		tr := fmt.Sprintf(`"%s" -config "%s"`, exe, c.path)
-		out, err := exec.Command("schtasks", "/Create", "/TN", taskName, "/TR", tr,
+		out, err := exec.Command("schtasks", "/Create", "/TN", taskName(c), "/TR", tr,
 			"/SC", "ONLOGON", "/RL", "LIMITED", "/F").CombinedOutput()
 		if err != nil {
 			return fmt.Errorf("schtasks: %v: %s", err, strings.TrimSpace(string(out)))
@@ -40,14 +56,14 @@ func runAutostart(c config, args []string) error {
 		fmt.Printf("OpenLink Server will start when you log on, using %s.\n", c.path)
 		return nil
 	case "disable":
-		out, err := exec.Command("schtasks", "/Delete", "/TN", taskName, "/F").CombinedOutput()
+		out, err := exec.Command("schtasks", "/Delete", "/TN", taskName(c), "/F").CombinedOutput()
 		if err != nil {
 			return fmt.Errorf("schtasks: %v: %s", err, strings.TrimSpace(string(out)))
 		}
 		fmt.Println("Autostart removed.")
 		return nil
 	case "status":
-		out, err := exec.Command("schtasks", "/Query", "/TN", taskName, "/V", "/FO", "LIST").CombinedOutput()
+		out, err := exec.Command("schtasks", "/Query", "/TN", taskName(c), "/V", "/FO", "LIST").CombinedOutput()
 		if err != nil {
 			fmt.Println("Autostart is off.")
 			return nil
@@ -65,8 +81,8 @@ func runAutostart(c config, args []string) error {
 }
 
 // autostartSummary is the autostart task's state for diagnostics.
-func autostartSummary() string {
-	out, err := exec.Command("schtasks", "/Query", "/TN", taskName, "/V", "/FO", "LIST").CombinedOutput()
+func autostartSummary(c config) string {
+	out, err := exec.Command("schtasks", "/Query", "/TN", taskName(c), "/V", "/FO", "LIST").CombinedOutput()
 	if err != nil {
 		return "off"
 	}

@@ -21,6 +21,7 @@ const (
 	OpSetLeader            uint16 = 9  // lobby leader XUID the server holds (0 releases it)
 	OpTeamPolicy           uint16 = 10 // server team rules (TeamGuardFFA, TeamBalance)
 	OpBotPolicy            uint16 = 11 // bot backfill for the coming match (BotPolicy)
+	OpEndMatch             uint16 = 12 // end the running match, HostInGame only
 	CodeOK                 uint16 = 0
 	CodeUnsupported        uint16 = 1
 	CodeNativePending      uint16 = 2
@@ -224,6 +225,21 @@ type Lobby struct {
 	// BotDifficulties: bit i set when the mode registered difficulty code i
 	// (9 recruit, 6 marine, 7 odst, 8 spartan); bots need at least one.
 	BotDifficulties uint16 `json:"bot_difficulties"`
+	// Version 7. PlayerMask is the session player mask; from this version
+	// PeerTeams is indexed by player slot, which can differ from the peer
+	// (connection) slot. Ticks counts server ticks (the watchdog checks that it
+	// moves). NameFixes counts server-name rewrites after a player renamed the
+	// server, BlockedRestart dropped Restart Match requests, RejoinTeams players
+	// put back on their team after rejoining. RestartGuard and EndMatch report
+	// whether the Restart Match guard is installed and End Match is available.
+	PlayerMask     uint32 `json:"player_mask"`
+	Ticks          uint32 `json:"-"`
+	NameFixes      uint16 `json:"name_fixes"`
+	BlockedRestart uint16 `json:"blocked_restart"`
+	RejoinTeams    uint16 `json:"rejoin_teams"`
+	RestartGuard   bool   `json:"restart_guard"`
+	EndMatch       bool   `json:"end_match"`
+	teamMask       uint32 // the mask PeerTeams is indexed by (PeerMask before version 7)
 }
 
 // Lobby.ModeBots bits and Lobby.BotState values (native game_b002.h).
@@ -270,7 +286,7 @@ func requestSize(r Request) (int, error) {
 			return 0, errors.New("zero server PID")
 		}
 		return 52, nil
-	case OpStatus, OpStart:
+	case OpStatus, OpStart, OpEndMatch:
 		return 48, nil
 	case OpServerOwned:
 		if r.Mode > serverOwnedHighestMode {
@@ -361,7 +377,7 @@ func DecodeRequest(rd io.Reader) (Request, error) {
 			return r, errors.New("invalid hello size")
 		}
 		r.PID = binary.LittleEndian.Uint32(b[48:])
-	case OpStatus, OpStart:
+	case OpStatus, OpStart, OpEndMatch:
 		if len(b) != 48 {
 			return r, errors.New("invalid status size")
 		}
@@ -434,7 +450,7 @@ func EncodeReply(w io.Writer, r Reply) error {
 
 func DecodeReply(rd io.Reader) (Reply, error) {
 	var r Reply
-	b, err := readFrame(rd, 320)
+	b, err := readFrame(rd, 352)
 	if err != nil {
 		return r, err
 	}
@@ -445,7 +461,7 @@ func DecodeReply(rd io.Reader) (Reply, error) {
 	switch {
 	case r.Version == 1 && len(b) == 96:
 	case r.Version == 2 && len(b) == 112, r.Version == 3 && len(b) == 176, r.Version == 4 && len(b) == 192,
-		r.Version == 5 && len(b) == 256, r.Version == 6 && len(b) == 320:
+		r.Version == 5 && len(b) == 256, r.Version == 6 && len(b) == 320, r.Version == 7 && len(b) == 352:
 		r.State = int32(binary.LittleEndian.Uint32(b[96:]))
 		r.Matches = binary.LittleEndian.Uint32(b[100:])
 		r.Flags = binary.LittleEndian.Uint32(b[104:])
@@ -461,6 +477,9 @@ func DecodeReply(rd io.Reader) (Reply, error) {
 		}
 		if r.Version >= 6 {
 			decodeBots(&r.Lobby, b[256:])
+		}
+		if r.Version >= 7 {
+			decodeGuards(&r.Lobby, b[320:])
 		}
 	default:
 		return r, errors.New("invalid bridge reply header")
@@ -494,6 +513,7 @@ func decodeTeams(l *Lobby, b []byte) {
 	l.LastTeamCount = int32(binary.LittleEndian.Uint32(b[4:]))
 	l.ForcedTeamCount = int32(binary.LittleEndian.Uint32(b[8:]))
 	l.GameState = int32(binary.LittleEndian.Uint32(b[12:]))
+	l.teamMask = l.PeerMask
 	for i := range l.PeerTeams {
 		for j := range l.PeerTeams[i] {
 			l.PeerTeams[i][j] = int8(b[16+3*i+j])
@@ -514,12 +534,21 @@ func decodeBots(l *Lobby, b []byte) {
 	l.BotDifficulties = binary.LittleEndian.Uint16(b[24:])
 }
 
-// TeamSummary renders the per-peer team bytes of the peers in PeerMask as
-// "peer:requested/assigned/selected" for logs.
+func decodeGuards(l *Lobby, b []byte) {
+	l.PlayerMask, l.Ticks = binary.LittleEndian.Uint32(b[0:]), binary.LittleEndian.Uint32(b[4:])
+	l.NameFixes = binary.LittleEndian.Uint16(b[8:])
+	l.BlockedRestart = binary.LittleEndian.Uint16(b[10:])
+	l.RejoinTeams = binary.LittleEndian.Uint16(b[12:])
+	l.RestartGuard, l.EndMatch = b[14] != 0, b[15] != 0
+	l.teamMask = l.PlayerMask
+}
+
+// TeamSummary renders the team bytes of the players present as
+// "slot:requested/assigned/selected" for logs.
 func (l Lobby) TeamSummary() string {
 	var s []byte
 	for i := range l.PeerTeams {
-		if l.PeerMask>>i&1 == 0 {
+		if l.teamMask>>i&1 == 0 {
 			continue
 		}
 		if len(s) > 0 {

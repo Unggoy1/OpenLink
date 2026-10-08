@@ -158,10 +158,12 @@ func (a *agent) followLog(ctx context.Context, in game.Install, pid int) {
 
 // captureLoop listens for the server's beacons only while the server is ready,
 // and releases the shared beacon port whenever the server is not ready or
-// beacons stop, so a (re)starting server can always bind it.
+// beacons stop, so a (re)starting server can always bind it. Every server on
+// this PC broadcasts from the same address, so with several servers a.owner
+// keeps only the beacons that carry this server's name.
 func (a *agent) captureLoop(ctx context.Context) {
 	local := udpx.LocalIPv4s()
-	accept := func(src *net.UDPAddr) bool { return local[src.IP.String()] }
+	accept := func(src *net.UDPAddr, b []byte) bool { return local[src.IP.String()] && a.owner.Keep(b) }
 	for ctx.Err() == nil {
 		if a.getStatus() != "ready" {
 			sleep(ctx, time.Second)
@@ -171,6 +173,7 @@ func (a *agent) captureLoop(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
+		a.owner.Reset() // a restarted server shows the PC name until the DLL renames it
 		conn, err := udpx.ListenShared("udp4", fmt.Sprintf("0.0.0.0:%d", api.DiscoveryPort))
 		if err != nil {
 			a.log.Warn("cannot listen for beacons; retrying", "err", err)
@@ -301,6 +304,8 @@ func (a *agent) report(ctx context.Context) {
 		if n > 0 {
 			age = time.Since(at).Round(time.Second).String()
 		}
-		a.log.Info("status", "server", a.getStatus(), "players", a.players(), "beacons_captured", n, "last_beacon_age", age)
+		identified, others := a.owner.State()
+		a.log.Info("status", "server", a.getStatus(), "players", a.players(), "beacons_captured", n, "last_beacon_age", age,
+			"beacon_identified", identified, "other_server_beacons", others)
 	}
 }

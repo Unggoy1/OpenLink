@@ -44,9 +44,9 @@ func (s *Store) Latest() ([]byte, time.Time, uint64) {
 // envelope (nonce + header) and not larger than the stored limit.
 func Valid(b []byte) bool { return len(b) >= 16 && len(b) <= api.MaxBeaconBytes }
 
-// Capture reads datagrams from conn and stores those accepted by accept until
-// ctx ends or conn is closed.
-func Capture(ctx context.Context, conn *net.UDPConn, accept func(*net.UDPAddr) bool, st *Store) error {
+// Capture reads datagrams from conn and stores those accepted by accept (given
+// the source and the datagram) until ctx ends or conn is closed.
+func Capture(ctx context.Context, conn *net.UDPConn, accept func(*net.UDPAddr, []byte) bool, st *Store) error {
 	go func() { <-ctx.Done(); conn.Close() }()
 	buf := make([]byte, 2048)
 	for {
@@ -57,7 +57,7 @@ func Capture(ctx context.Context, conn *net.UDPConn, accept func(*net.UDPAddr) b
 			}
 			continue // transient (e.g. Windows ICMP reset); keep reading
 		}
-		if accept(src) && Valid(buf[:n]) {
+		if Valid(buf[:n]) && accept(src, buf[:n]) {
 			st.Put(buf[:n], time.Now())
 		}
 	}

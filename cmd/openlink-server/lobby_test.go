@@ -46,6 +46,10 @@ func (f *lobbyFake) ServerOwned(_ context.Context, mode uint32) (hostctl.Reply, 
 	return hostctl.Reply{Version: 3, Code: hostctl.CodeOK}, nil
 }
 
+func (f *lobbyFake) EndMatch(context.Context) (hostctl.Reply, error) {
+	return hostctl.Reply{Version: 7, Code: hostctl.CodeOK}, nil
+}
+
 // SetLeader answers Pending once (no tick yet), then OK.
 func (f *lobbyFake) SetLeader(_ context.Context, xuid uint64) (hostctl.Reply, error) {
 	f.mu.Lock()

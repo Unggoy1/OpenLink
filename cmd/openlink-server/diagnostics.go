@@ -71,7 +71,7 @@ func diagnosticsCommand(c config) error {
 			r.Section("Running agent", string(b))
 		}
 	}
-	r.Section("Autostart", autostartSummary())
+	r.Section("Autostart", autostartSummary(c))
 
 	logPath := filepath.Join(c.logDir(), logName)
 	if b, err := os.ReadFile(logPath); err != nil {

@@ -30,8 +30,8 @@ Setup
      start: restart openlink-server after editing it.
 
 The server always owns its lobby: no player becomes lobby leader, so nobody
-gets Play, the map/mode menus or the pause-menu End Game. The server starts
-every match itself, and matches end on their own limits.
+gets Play, the map/mode menus or the pause-menu End Game and Restart Match.
+The server starts every match itself, and matches end on their own limits.
 
 What the example config does
   - "playlist": the server decides the map and mode of every match.
@@ -63,6 +63,9 @@ Notes
   - Playing on the hosting PC: the OpenLink app switches to LAN broadcast by
     itself when it sees the server running on the same PC.
   - Check status: openlink-server.exe status
+  - End the running match: openlink-server.exe end-match
+  - If the game server freezes, or stays stuck starting or ending a match
+    for 10 minutes, openlink-server restarts it ("watchdog" in the config).
   - The log is openlink-server.log next to openlink-server.json. When you ask
     for help, run openlink-server.exe diagnostics and attach the file it
     writes (public IPs and keys are removed).

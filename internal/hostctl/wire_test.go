@@ -366,3 +366,55 @@ func TestBotPolicyRequest(t *testing.T) {
 		}
 	}
 }
+
+// Version 7 replies add the player mask, ticks and the request guards at 320;
+// team bytes are then per player slot.
+func TestReplyVersion7Guards(t *testing.T) {
+	b := make([]byte, 352)
+	copy(b, "HICR")
+	binary.LittleEndian.PutUint16(b[4:], 7)
+	binary.LittleEndian.PutUint64(b[8:], 9)
+	binary.LittleEndian.PutUint32(b[16:], 70)
+	binary.LittleEndian.PutUint32(b[112:], LobbyValid)
+	binary.LittleEndian.PutUint32(b[124:], 0b011) // peers 0 and 1
+	for i := 208; i < 256; i++ {
+		b[i] = 0xff
+	}
+	b[208], b[209], b[210] = 0xff, 0, 0 // player 0
+	b[214], b[215], b[216] = 0xff, 1, 1 // player 2
+	binary.LittleEndian.PutUint32(b[320:], 0b101)
+	binary.LittleEndian.PutUint32(b[324:], 4321)
+	binary.LittleEndian.PutUint16(b[328:], 2)
+	binary.LittleEndian.PutUint16(b[330:], 3)
+	binary.LittleEndian.PutUint16(b[332:], 1)
+	b[334], b[335] = 1, 1
+	var w bytes.Buffer
+	writeFrame(&w, b)
+	got, err := DecodeReply(&w)
+	l := got.Lobby
+	if err != nil || got.Version != 7 || l.PlayerMask != 0b101 || l.Ticks != 4321 || l.NameFixes != 2 || l.BlockedRestart != 3 ||
+		l.RejoinTeams != 1 || !l.RestartGuard || !l.EndMatch {
+		t.Fatalf("v7 decode: %+v %v", l, err)
+	}
+	if s := l.TeamSummary(); s != "0:-1/0/0 2:-1/1/1" {
+		t.Fatalf("summary %q, want the players in PlayerMask", s)
+	}
+	var short bytes.Buffer
+	writeFrame(&short, b[:320])
+	if _, err := DecodeReply(&short); err == nil {
+		t.Fatal("accepted v7 header on a v6-length frame")
+	}
+}
+
+func TestEndMatchRequest(t *testing.T) {
+	var w bytes.Buffer
+	if err := EncodeRequest(&w, Request{Op: OpEndMatch, ID: 3}); err != nil {
+		t.Fatal(err)
+	}
+	if w.Len() != 4+48 {
+		t.Fatalf("end-match frame is %d bytes", w.Len())
+	}
+	if got, err := DecodeRequest(&w); err != nil || got.Op != OpEndMatch || got.ID != 3 {
+		t.Fatalf("round trip: %+v %v", got, err)
+	}
+}

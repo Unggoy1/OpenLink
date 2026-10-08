@@ -118,9 +118,17 @@ func (b *Bridge) Start(ctx context.Context) (Reply, error) {
 	return b.exchange(ctx, OpStart, AssetPair{})
 }
 
+// EndMatch ends the running match as a lobby leader's End Game does: on the
+// next in-game engine tick the end-game component's authoritative Set receives
+// 1. CodeOK when Set accepted it; CodeBusy outside a match; CodeUnsupported if
+// the DLL could not verify the component.
+func (b *Bridge) EndMatch(ctx context.Context) (Reply, error) {
+	return b.exchange(ctx, OpEndMatch, AssetPair{})
+}
+
 // ServerOwned sets the lobby control mode (ServerOwned* constants).
-// ServerOwnedNoOwner drops players' start and end-game requests and
-// stops the first joiner becoming lobby owner. Send it before players
+// ServerOwnedNoOwner drops players' start, end-game and Restart Match requests
+// and stops the first joiner becoming lobby owner. Send it before players
 // join. CodeOK on success; CodeUnsupported if the code bytes differ.
 func (b *Bridge) ServerOwned(ctx context.Context, mode uint32) (Reply, error) {
 	return b.send(ctx, Request{Op: OpServerOwned, Mode: mode})

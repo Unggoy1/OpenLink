@@ -34,6 +34,7 @@ type App struct {
 	autoMode   bool         // this session uses broadcast because a server runs on this PC
 	lastPhase  string       // session phase last recorded in events
 	lastListOK string       // last listing result recorded in events
+	leftNotice string       // why the app left the last session by itself; "" after a join
 }
 
 // NewApp creates the app with saved settings.
@@ -288,9 +289,57 @@ func (a *App) Join(id string) error {
 	}
 	a.events.Add("joined %q (build %s, mode %s%s)", target.Name, target.Build, mode, note)
 	a.mu.Lock()
-	a.sess, a.autoMode, a.lastPhase = sess, auto, ""
+	a.sess, a.autoMode, a.lastPhase, a.leftNotice = sess, auto, "", ""
 	a.mu.Unlock()
+	go a.watchSession(sess, time.Second)
 	return nil
+}
+
+// watchSession leaves sess by itself once its server is gone: no longer in the
+// directory and silent (connect.Session.Gone). It ends when sess is left.
+func (a *App) watchSession(sess *connect.Session, every time.Duration) {
+	for {
+		time.Sleep(every)
+		a.mu.Lock()
+		current := a.sess == sess
+		a.mu.Unlock()
+		if !current {
+			return
+		}
+		if sess.Gone() {
+			a.leaveGone(sess)
+			return
+		}
+	}
+}
+
+// leaveGone leaves sess because its server went offline, and keeps a notice for the window.
+func (a *App) leaveGone(sess *connect.Session) {
+	name := sess.Status().Server.Name
+	a.mu.Lock()
+	if a.sess != sess {
+		a.mu.Unlock()
+		return
+	}
+	a.sess = nil
+	a.leftNotice = fmt.Sprintf("%s went offline and is no longer in the server list, so OpenLink left it.", name)
+	a.mu.Unlock()
+	sess.Stop()
+	a.events.Add("left %q: the server is no longer listed and stopped answering", name)
+}
+
+// LeftNotice returns why the app last left a session by itself, or "".
+func (a *App) LeftNotice() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.leftNotice
+}
+
+// DismissNotice clears LeftNotice.
+func (a *App) DismissNotice() {
+	a.mu.Lock()
+	a.leftNotice = ""
+	a.mu.Unlock()
 }
 
 // noteList records listing results in the event log when they change.

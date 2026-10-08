@@ -8,11 +8,15 @@ export function CheckUpdate():Promise<main.UpdateInfo>;
 
 export function Diagnostics():Promise<string>;
 
+export function DismissNotice():Promise<void>;
+
 export function GetSettings():Promise<main.Settings>;
 
 export function Join(arg1:string):Promise<void>;
 
 export function Leave():Promise<void>;
+
+export function LeftNotice():Promise<string>;
 
 export function ListServers():Promise<Array<main.ServerView>>;
 

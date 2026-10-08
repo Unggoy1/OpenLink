@@ -3,9 +3,11 @@
   import {
     Ballot,
     CheckUpdate,
+    DismissNotice,
     GetSettings,
     Join,
     Leave,
+    LeftNotice,
     ListServers,
     LocalBuild,
     SaveSettings,
@@ -30,6 +32,7 @@
   let ballot = $state<main.BallotView | null>(null);
   let listError = $state('');
   let actionError = $state('');
+  let leftNotice = $state(''); // the app left a server that went offline
   let loading = $state(false);
   let joiningId = $state('');
   let showSettings = $state(false);
@@ -104,6 +107,7 @@
     joiningId = s.id;
     try {
       await Join(s.id);
+      leftNotice = '';
       status = await Status();
     } catch (err) {
       actionError = String(err);
@@ -197,6 +201,7 @@
     const statusTimer = setInterval(async () => {
       status = await Status();
       ballot = status ? await Ballot() : null;
+      if (!status) leftNotice = await LeftNotice();
     }, 1000);
     // Faster while a vote is on screen, so the countdown and tallies stay live.
     const ballotTimer = setInterval(async () => {
@@ -257,6 +262,12 @@
       {/if}
       {#if listError}<p class="notice warn">{listError}</p>{/if}
       {#if actionError}<p class="notice warn">{actionError}</p>{/if}
+      {#if leftNotice}
+        <p class="notice warn">
+          {leftNotice}
+          <button class="link dim" onclick={async () => { await DismissNotice(); leftNotice = ''; }}>Dismiss</button>
+        </p>
+      {/if}
 
       <div class="filters">
         <label>

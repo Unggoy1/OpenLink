@@ -102,6 +102,7 @@ openlink-server kick 203.0.113.7    disconnect and keep them out for 10 minutes
 openlink-server ban 203.0.113.7     permanent ban (add minutes for a temporary one)
 openlink-server unban 203.0.113.7
 openlink-server bans
+openlink-server end-match           end the running match, as a lobby leader's End Game would
 ```
 
 Bans are stored in `bans.json` next to the config. Players are identified by IP address only. The game's own player names are inside its encrypted traffic, which OpenLink never reads.
@@ -119,9 +120,11 @@ Each server needs its own private address and public port:
 | `public_port` | 1343 | 1344 |
 | `admin` | 127.0.0.1:7180 | 127.0.0.1:7181 |
 
-Use one config file per server (`openlink-server -config serverB.json`) and forward both ports.
+Use one folder per server, each with its own `openlink-server.json`, `playlist.json` and `bans.json` (`openlink-server -config D:\servers\B\openlink-server.json`), and forward both ports. Each server keeps its log in its own folder, and `autostart enable` creates a separate task per folder ("OpenLink Server (B)").
 
-Known limitation: every LAN server on a PC broadcasts its beacon from the same address, so each OpenLink Server may relay another server's beacon. Players still connect to the right server (the connection goes through that agent's port), but the in-game list could show another server's status. This has not been tested yet.
+**Give every server a different `name`.** Every LAN server on a PC broadcasts its beacon from the same address, so each OpenLink Server hears all of them. It opens each beacon (with the game's own beacon key, read from your game files) and keeps only those that carry its server's name. Until its own name has appeared once, for example in the first seconds while the game still shows the PC name, it keeps every local beacon, as before. The log's `status` line shows `beacon_identified` and how many other servers' beacons were dropped (`other_server_beacons`).
+
+Not tested yet: two servers running together, how much CPU, memory and GPU each needs, and whether the game servers mind sharing the install's `server_disk_cache` folder.
 
 ## Settings reference (`openlink-server.json`)
 
@@ -145,3 +148,4 @@ Known limitation: every LAN server on a PC broadcasts its beacon from the same a
 | `bind_ip` | | without proxy: the server's `-bindip` |
 | `admin` | 127.0.0.1:7180 | local admin API ("" = off) |
 | `bans_file` | bans.json | ban list |
+| `watchdog` | on | restarts a stuck game server: `{"stuck_minutes": 10, "max_match_minutes": 0}`, or `{"off": true}`; see [Watchdog](HOST-CONTROL.md#watchdog) |

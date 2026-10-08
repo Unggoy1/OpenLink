@@ -82,11 +82,27 @@ In a stock LAN lobby the first player to join becomes lobby leader, and any play
 
 - No player becomes lobby owner or lobby leader, so nobody gets lobby options, map/mode menus, Play, or End Game and Restart Match in the pause menu (R025). Matches end on their own time or score limit, and the server starts each one itself: after the vote (`vote`), or with `auto_start`.
 - On LAN, a player counts as lobby leader only when their Xbox user ID (XUID) equals the leader XUID the server sends to everyone. The game gives it to the first player who joins. OpenLink Server instead sets it to a placeholder no player has (default 2814749767106559, Xbox XUID format), and the control DLL keeps it there. `lobby_leader_xuid` sets another value; use it only for testing. The agent log line `lobby` shows `leader` and `leader_held`.
-- As a backstop, the server also drops players' start and end-game requests (`blocked_start`, `blocked_end`).
-- `team_balance` (default `"even"`): in team modes, when each match is prepared, the server spreads every player except observers evenly over the match's teams (two, or the playlist entry's `teams`). `"even"` keeps players on the team they are on where the counts allow and moves only as many as needed, so friends who picked the same team stay together; a team that does not exist in this match (for example Hades from an earlier Slayer match) is reset. `"shuffle"` deals random even teams every match. `"off"` keeps the game's own behaviour (players keep their picks). Players can still change teams during the match. In free-for-all modes the server always keeps every player on their own team, whatever `team_balance` says (with it, two players damaged and killed each other in an FFA King of the Hill mode, 2026-10-06; without it they could not, R024). The `lobby` log line shows each player's team bytes (`peer_teams`: requested/assigned/selected) and `team_fixes` (changes the server made). Even split, shuffle and entry `teams` with several players are not yet tested.
+- As a backstop, the server also drops players' start and end-game requests (`blocked_start`, `blocked_end`) and their Restart Match requests (`blocked_restart`). No stock player can send these, since nobody is leader; a modified client could (FN033). The restart guard replaces the restart request's handler in the game (client event 0x58, handler 142ef7394), and the log line `dropped a player's Restart Match request` reports each one. If the game's code differs, the guard is not installed and the log says so.
+- A player cannot change another player's team, kick anyone or take the leader: the server applies a player's own requests only to that player (FN033). Players can, however, rename the server in the in-game list (see [Server name](#server-name-in-the-in-game-list)).
+- `team_balance` (default `"even"`): in team modes, when each match is prepared, the server spreads every player except observers evenly over the match's teams (two, or the playlist entry's `teams`). `"even"` keeps players on the team they are on where the counts allow and moves only as many as needed, so friends who picked the same team stay together; a team that does not exist in this match (for example Hades from an earlier Slayer match) is reset. `"shuffle"` deals random even teams every match. `"off"` keeps the game's own behaviour (players keep their picks). Players can still change teams during the match. In free-for-all modes the server always keeps every player on their own team, whatever `team_balance` says (with it, two players damaged and killed each other in an FFA King of the Hill mode, 2026-10-06; without it they could not, R024). A player who leaves a team match and rejoins it goes back to the team they had (the game keeps their score but would put them on the smallest team; log line `a rejoining player was put back on their team`). The `lobby` log line shows each player's team bytes (`peer_teams`: slot:requested/assigned/selected, by player slot from `player_mask`) and `team_fixes` (changes the server made). Even split, shuffle, entry `teams` with several players, and rejoining are not yet tested.
 - `auto_start` (for example `{"min_players": 1, "delay_seconds": 30}`): once at least `min_players` players are connected (default 1) and have stayed for `delay_seconds` (default 10), the agent starts the match, as a leader's Play would. This repeats in the lobby after every match. A server without `vote` always uses it, with the defaults when it is not set.
 - `GET /status` shows `host_control.lobby`: `lobby.connected` (connected players), `lobby.owner` (leader peer, -1 none), `lobby.start_mode` (1 once a start was requested), `blocked_start` and `blocked_end` (dropped player requests), `starts` and `error`. The agent log line `lobby` records each change.
-- Like selection, this changes the running server process (a code patch and two table hooks, removed when control stops). Operators carry the terms-of-service risk of modifying their server. Clients are not modified.
+- `openlink-server end-match` (admin API `POST /end-match`) ends the running match as a lobby leader's End Game would: the DLL writes the game's end-game value through its own setter on the next in-game tick (hostctl operation 12). It answers "no match is running" outside a match. Not yet tested live.
+- Like selection, this changes the running server process (a code patch and three table hooks, removed when control stops). Operators carry the terms-of-service risk of modifying their server. Clients are not modified.
+
+## Watchdog
+
+OpenLink Server restarts a game server that stopped working. It uses the lobby report it already reads every second, so it costs nothing extra.
+
+- **Frozen:** the game's server tick has not run for 2 minutes.
+- **Stuck:** the server stays starting a match, ending one, tearing down, setting up, or in the lobby with a start that never happens, for `stuck_minutes` (default 10).
+- **Match limit (off by default):** with `max_match_minutes`, a match that runs that long is ended as with `end-match`, and the server restarts if it has still not ended 2 minutes later.
+
+```json
+{"watchdog": {"stuck_minutes": 10, "max_match_minutes": 60}}
+```
+
+`{"watchdog": {"off": true}}` turns it off; it is also off with `"restart": false`. A restart ends the game server process, and OpenLink Server starts it again as after a crash. The log line `restarting the game server` gives the reason. Not yet tested live.
 
 ## Bot backfill (experimental; tested with one player)
 
@@ -111,6 +127,7 @@ The game lists a LAN server under its PC name, read once at start-up into the se
 
 - The name is sanitized first: only printable ASCII is kept, spaces at the ends are trimmed, and it is cut to 47 characters (the beacon holds 48 UTF-16 units with the terminator). If nothing is left, the PC name stays. The log line `in-game server name set` shows the name used.
 - The game shows it in capitals, and about 38 characters fit before the list cuts the name off (R022, one 47-character name).
+- The server applies any player's rename request (LAN message 0x2e) straight to this name (FN030). The DLL therefore checks the name on every engine tick and puts the configured one back; the log line `a player renamed the server` counts each time (`name_fixes`).
 - Not changed: the game's own `system_set_machine_name` override, which the beacon ignores.
 
 ## Playlist voting

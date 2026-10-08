@@ -39,6 +39,16 @@ const (
 	playerPPS      = 500
 )
 
+// A session counts its server as gone once the directory has not listed it
+// for goneAfter and the server has sent no game traffic for that long either.
+// A directory that lost its listings (a restart) gets them back within seconds
+// from the hosts' heartbeats, under new IDs, which the session follows by
+// address. Variables so tests can shorten them.
+var (
+	goneAfter  = 10 * time.Second
+	beaconPoll = 2 * time.Second
+)
+
 // LocalBuild returns the build of the local game install, or "" if none is found.
 // installDir may be empty to search the usual Steam libraries.
 func LocalBuild(installDir string) string {
@@ -92,6 +102,7 @@ type Session struct {
 	beacons beacon.Store
 	fwd     *relay.Forwarder
 	adverts atomic.Int64
+	gone    atomic.Bool
 
 	mu       sync.Mutex
 	lastErr  string
@@ -214,29 +225,49 @@ func (ss *Session) Status() Status {
 		age = time.Since(at)
 	}
 	ss.mu.Lock()
-	errText := ss.lastErr
+	errText, server := ss.lastErr, ss.server
 	ss.mu.Unlock()
-	return Status{Server: ss.server, Local: ss.local, Mode: ss.mode, BeaconAge: age, Adverts: ss.adverts.Load(),
+	return Status{Server: server, Local: ss.local, Mode: ss.mode, BeaconAge: age, Adverts: ss.adverts.Load(),
 		UpPackets: st.UpPackets, UpBytes: st.UpBytes, DownPackets: st.DownPackets, DownBytes: st.DownBytes,
 		LastDown: st.LastDown, Err: errText}
 }
 
+// Gone reports that the server left the directory and stopped answering: the
+// session is no use any more and should be left.
+func (ss *Session) Gone() bool { return ss.gone.Load() }
+
 // pollBeacons fetches the server's latest beacon every 2 s (hosts send a new
 // one every 2 s). The stored time is when the host captured it, so a stalled
-// host goes stale here too.
+// host goes stale here too. When the directory no longer has the listing, the
+// session looks for the same server under a new ID and otherwise marks itself
+// gone (goneAfter).
 func (ss *Session) pollBeacons(ctx context.Context, dc *dirclient.Client) {
 	var last []byte
+	var missing time.Time // when the listing was first not found
 	for ctx.Err() == nil {
-		b, err := dc.Beacon(ctx, ss.server.ID)
+		ss.mu.Lock()
+		id := ss.server.ID
+		ss.mu.Unlock()
+		b, err := dc.Beacon(ctx, id)
+		var se *dirclient.StatusError
 		switch {
-		case err != nil && ctx.Err() == nil:
-			msg := err.Error()
-			var se *dirclient.StatusError
-			if errors.As(err, &se) && se.Code == 404 {
-				msg = "server is no longer listed"
+		case err != nil && errors.As(err, &se) && se.Code == 404:
+			if ss.relocate(ctx, dc) {
+				missing = time.Time{}
+				continue
 			}
-			ss.setErr(msg)
+			if missing.IsZero() {
+				missing = time.Now()
+			}
+			ss.setErr("server is no longer listed")
+			lastDown := ss.fwd.Stats.Snapshot().LastDown
+			if time.Since(missing) >= goneAfter && (lastDown.IsZero() || time.Since(lastDown) >= goneAfter) {
+				ss.gone.Store(true)
+			}
+		case err != nil && ctx.Err() == nil:
+			ss.setErr(err.Error()) // the directory may be down; that alone is no reason to leave
 		case err == nil:
+			missing = time.Time{}
 			ss.setErr("")
 			if beacon.Valid(b.Beacon) && string(b.Beacon) != string(last) {
 				ss.beacons.Put(b.Beacon, time.Now().Add(-time.Duration(b.AgeMS)*time.Millisecond))
@@ -245,9 +276,27 @@ func (ss *Session) pollBeacons(ctx context.Context, dc *dirclient.Client) {
 		}
 		select {
 		case <-ctx.Done():
-		case <-time.After(2 * time.Second):
+		case <-time.After(beaconPoll):
 		}
 	}
+}
+
+// relocate finds the session's server listed under another ID (the same
+// address and port) and switches to it.
+func (ss *Session) relocate(ctx context.Context, dc *dirclient.Client) bool {
+	servers, err := dc.List(ctx, "")
+	if err != nil {
+		return false
+	}
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+	for _, s := range servers {
+		if s.ID != ss.server.ID && s.Host == ss.server.Host && s.Port == ss.server.Port {
+			ss.server = s
+			return true
+		}
+	}
+	return false
 }
 
 func (ss *Session) setErr(s string) {

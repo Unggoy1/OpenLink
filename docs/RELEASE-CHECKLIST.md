@@ -1,6 +1,6 @@
 # Release checklist (first public alpha)
 
-Status as of 2026-10-05. Tick items as they are done and note the date and how it was checked. "Tested" means checked with the real game unless it says otherwise. Tests are grouped by what they need, so one session can cover a whole group.
+Status as of 2026-10-08 (latest release v0.7.6: bot backfill came in v0.7.5, server hardening, the watchdog, end-match, several servers per PC and the app leaving offline servers in v0.7.6; both lightly tested). Tick items as they are done and note the date and how it was checked. "Tested" means checked with the real game unless it says otherwise. Tests are grouped by what they need, so one session can cover a whole group.
 
 ## Done
 
@@ -82,7 +82,7 @@ These could quietly break the way FFA did (R024): each is a kind of match the se
 - [ ] **Bot and AI modes** (a Fiesta mode with bots, a Firefight-style mode): match starts, bots spawn, the FFA guard and team balance leave bots alone.
 - [ ] **Scripted Forge modes** (node-graph scripts that set teams, scores or rounds): the script still runs and is not undone by team balance.
 
-### Bot backfill (branch bot-backfill-research; tested alone 2026-10-08, R030)
+### Bot backfill (released in v0.7.5; tested alone 2026-10-08, R030)
 
 Set `"bot_backfill": {}` in openlink-server.json and `"bots": true` on the playlist entries to test; watch the `bots` log lines (HOST-CONTROL.md, Bot backfill).
 
@@ -91,7 +91,7 @@ Set `"bot_backfill": {}` in openlink-server.json and `"bots": true` on the playl
 - [ ] **Bot difficulty**: Marine played poorly (user); ODST was used for the CTF match, how it felt not noted yet. Try `"spartan"`.
 - [ ] **Navmesh check**: Forge maps with bot navigation read `navmesh=yes` (Interference 521 faces, Kusini Bay 3063; R030). Still to try: a 343 map, and a Forge map without bot navigation (`navmesh=none`, no bots added).
 
-### Server hardening (branch server-hardening, built 2026-10-08, not run live)
+### Server hardening (released in v0.7.6, 2026-10-08; not run live yet)
 
 For the first three, set `"lobby_leader_xuid"` to your own XUID so you get the leader's menus, and remove it afterwards.
 
@@ -103,6 +103,30 @@ For the first three, set `"lobby_leader_xuid"` to your own XUID so you get the l
 - [ ] **App leaves a server that went away**: join in the app, play, then stop OpenLink Server (Ctrl+C). Within about 15 s the app leaves by itself (no session bar) and shows "… went offline and is no longer in the server list, so OpenLink left it." Then restart only the game server (watchdog or Task Manager) while OpenLink Server keeps running: the app stays joined, since the listing remains, and you can rejoin once the server is back.
 
 ## 2. Tests that need a second player
+
+**Group session plan** (for the larger lobby the user is gathering). Claude starts the directory and OpenLink Server and watches the logs; players only join with the app (memory: live test roles). Use one voting server with a curated playlist holding:
+- a team Slayer mode;
+- a multi-round mode (3-round CTF or Oddball);
+- Infection;
+- FFA Slayer;
+- a minigame;
+- Last Spartan Standing;
+- a Big Team Battle–sized mode;
+- an entry with `"bots": true` (Fiesta Slayer or CTF);
+- an entry with `"teams": {"size": 2}`.
+
+Use `team_balance` `"even"` and `bot_backfill` with `fill_to` about 8. Suggested order, so one sitting covers most of the list:
+
+1. Everyone joins through the app (at least one remote, two from one home if possible): the name in the in-game list, the counts.
+2. Votes with several voters: counts for everyone, a changed vote, a tie, a round where nobody votes; someone joins and someone leaves mid-vote.
+3. The team mode: even split, friends stay together. During it, run **Rejoin** and **Late joiner**.
+4. The multi-round mode: no vote or rebalance between rounds (section 1 item).
+5. Infection (two rounds), then the FFA modes: damage between players.
+6. Bot backfill: start the bots entry with few players, others join mid-match; bots leave from the larger team.
+7. The `teams` size-2 entry, then the Big Team Battle mode with everyone.
+8. During a match, the host runs `openlink-server end-match`. At the very end, stop OpenLink Server: every player's app should leave by itself (section 1 item).
+
+Keep the logs in a new private/runtime/R0xx folder and note anything players saw that the log does not show.
 
 - [ ] Both players join through the app and see the server in Custom Game → Create Match → Server, with the configured name, at least one of them remote over the internet.
 - [ ] Voting with several voters: counts update for everyone, a tie, nobody votes (random pick), a player changes their vote.
@@ -121,17 +145,17 @@ For the first three, set `"lobby_leader_xuid"` to your own XUID so you get the l
 - [ ] A port-forwarded host (no tunnel), on a connection with a public IPv4 address. Your own router is behind carrier-grade NAT or a second router.
 - [ ] `auto_port_forward` on a router with a public address: the directory reaches the server, and the forward is gone after OpenLink Server exits.
 - [ ] Version notice: with a server on another Halo build listed, the app's notice names the side that is behind.
-- [ ] **Several servers on one PC** (built 2026-10-08; HOSTING.md): two servers with different names (127.0.0.2:1344 and 127.0.0.3:1345). Each listing shows its own name and status; the log's `status` line shows `beacon_identified=true` and counts `other_server_beacons`. Note the CPU, memory and GPU each uses, idle and in a match.
+- [ ] **Several servers on one PC** (released in v0.7.6; HOSTING.md): two servers with different names (127.0.0.2:1344 and 127.0.0.3:1345). Each listing shows its own name and status; the log's `status` line shows `beacon_identified=true` and counts `other_server_beacons`. Note the CPU, memory and GPU each uses, idle and in a match.
 
 ## 4. Work still to do
 
 - [x] **FFA modes: players cannot kill each other** (R024): scoreboard correct, team modes fine on the same build. With bots, FFA damage works on OpenLink (R026), and one player gets their own team (R027). Fixed by the server's FFA team guard (every player on their own team): two players damaged and killed each other in an FFA King of the Hill mode (user, 2026-10-06). Other FFA modes (Infection, FFA Slayer, minigames) not rechecked yet.
 - [ ] **Team balance** (`team_balance`, default on): works for one player (R028: moved to Eagle at match prep, Hades from the previous match did not carry over, in-match changes still work). Now `"even"` (default, keeps current teams where possible), `"shuffle"` and `"off"`, plus the playlist entry `teams` (`count`/`size`) for multi-team modes; the new version is not yet run live. Check with two or more players: even split, a pair on the same team stays together under `"even"`, `"shuffle"` mixes teams, a `teams` entry (e.g. size 2) makes the expected number of teams.
-- [ ] **Block Restart Match on the server** (user, 2026-10-08, reversing 2026-10-06: block what a modified client could send): built on branch server-hardening. The DLL replaces the restart request's handler (client event 0x58, 142ef7394; FN033). Test in section 1.
-- [ ] **Team code used connection slots** (A082, B14): the team rules read player records by connection slot, while the game uses player slots, and the two can differ after leaves and rejoins. Fixed on branch server-hardening (player mask session+0x18ac); rejoiners now also go back to their team. Tests in section 2 (Rejoin).
+- [ ] **Block Restart Match on the server** (user, 2026-10-08, reversing 2026-10-06: block what a modified client could send): released in v0.7.6. The DLL replaces the restart request's handler (client event 0x58, 142ef7394; FN033). Test in section 1.
+- [ ] **Team code used connection slots** (A082, B14): the team rules read player records by connection slot, while the game uses player slots, and the two can differ after leaves and rejoins. Fixed in v0.7.6 (player mask session+0x18ac); rejoiners now also go back to their team. Tests in section 2 (Rejoin).
 - [x] **Lobby map/mode picker**: fixed by the server-held lobby leader; Map and Mode Editor are greyed for every player (R025).
-- [ ] **Bot backfill** (built 2026-10-06 on branch bot-backfill-research, FN029; works alone in regular modes, R030 2026-10-08; joiner, no-navmesh map and difficulty still to test): server `bot_backfill` plus per-entry `bots`, DLL op 11 BotPolicy and a hook on the game's own bot job. Tests in sections 1 and 2. Backfill works only in modes that enable bots and register bot difficulties (A075: the server cannot switch bots on late; the authoritative lobby-variant rewrite before launch is the only route for other modes and needs the probe first). Maps without navigation are detected (A074, unconfirmed live). Entries are opt-in until the probe confirms the navmesh check.
-- [ ] **A player can rename the server** (static finding 2026-10-06, FN030, FN033): the game server applies the `EditLobbyName` network message (type 0x2e) from any player and copies it into the server name shown in the LAN server menu. Fixed on branch server-hardening: the DLL puts the configured name back on every engine tick. Test in section 1.
+- [ ] **Bot backfill** (released in v0.7.5, FN029; works alone in regular modes, R030 2026-10-08; joiner, no-navmesh map and difficulty still to test): server `bot_backfill` plus per-entry `bots`, DLL op 11 BotPolicy and a hook on the game's own bot job. Tests in sections 1 and 2. Backfill works only in modes that enable bots and register bot difficulties (A075: the server cannot switch bots on late; the authoritative lobby-variant rewrite before launch is the only route for other modes and needs the probe first). Maps without navigation are detected (A074, unconfirmed live). Entries are opt-in until the probe confirms the navmesh check.
+- [ ] **A player can rename the server** (static finding 2026-10-06, FN030, FN033): the game server applies the `EditLobbyName` network message (type 0x2e) from any player and copies it into the server name shown in the LAN server menu. Fixed in v0.7.6: the DLL puts the configured name back on every engine tick. Test in section 1.
 - [ ] **Docs pass**:
   - [ ] README "Status and known limitations": lobby control, voting, the overlay and the Linux app now exist.
   - [ ] A playlist.json reference for hosts (limits below).
@@ -140,7 +164,7 @@ For the first three, set `"lobby_leader_xuid"` to your own XUID so you get the l
 - [ ] Smoke test of each release artifact on a clean PC: the OpenLink Server zip, the Windows app and the Linux app.
 - [ ] **Production directory settings on Railway**: set `OPENLINK_ADMIN_KEY` (at least 24 characters, or the admin API stays off); keep `OPENLINK_REGISTER_KEY` (or the old `HICOMM_REGISTER_KEY`) as the trusted-host key for tunnels; set `OPENLINK_REQUIRE_KEY=1` only to keep the directory private until release. Check logging.
 - [ ] **Live check of the safeguards**: a port-forwarded host appears within about a minute; a tunnel host with the key appears; a host with a closed port never appears and its log says so; an admin ban removes a listing.
-- [ ] **`openlink-server end-match`** and the **watchdog** (built 2026-10-08 on branch server-hardening; HOST-CONTROL.md): DLL op 12 EndMatch writes the end-game value through its setter (142e1d548). The watchdog restarts a frozen or stuck game server and can end overlong matches (`max_match_minutes`). Tests in section 1.
+- [ ] **`openlink-server end-match`** and the **watchdog** (released in v0.7.6; HOST-CONTROL.md): DLL op 12 EndMatch writes the end-game value through its setter (142e1d548). The watchdog restarts a frozen or stuck game server and can end overlong matches (`max_match_minutes`). Tests in section 1.
 - [ ] **Dockerized host with Wine/Proton** (Linux servers). Not attempted yet; every step is unproven:
   - [ ] Halo Infinite starts in a container under Wine/Proton with no monitor (a virtual display; DX12 through vkd3d-proton needs a Vulkan GPU passed into the container)
   - [ ] sign-in and LAN hosting work inside the container through the game's normal flow

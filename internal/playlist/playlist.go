@@ -35,6 +35,71 @@ type Entry struct {
 	// the server spreads players over teams at the start of each match. Without
 	// it a team mode uses two teams (Eagle and Cobra). FFA modes ignore it.
 	Teams *Teams `json:"teams,omitempty"`
+	// Bots, optional: bot backfill for this entry when the server has it on.
+	// false turns it off for the entry, true turns it on, and an object turns
+	// it on with the entry's own fill_to and difficulty. Without it the
+	// server's setting decides.
+	Bots *Bots `json:"bots,omitempty"`
+}
+
+// Bots is a playlist entry's bot backfill setting. In JSON it is false, true
+// or {"fill_to": N, "difficulty": "..."}; zero values use the server's.
+type Bots struct {
+	Enabled    bool
+	FillTo     int
+	Difficulty string
+}
+
+// Bot backfill limits (the engine allows 8 bots; MaxBotFill is the largest
+// match the server fills).
+const (
+	MinBotFill = 2
+	MaxBotFill = 24
+)
+
+// BotDifficulties are the accepted bot difficulty names, easiest first.
+var BotDifficulties = []string{"recruit", "marine", "odst", "spartan"}
+
+// ValidBotDifficulty reports whether s is empty or one of BotDifficulties.
+func ValidBotDifficulty(s string) bool {
+	if s == "" {
+		return true
+	}
+	for _, d := range BotDifficulties {
+		if s == d {
+			return true
+		}
+	}
+	return false
+}
+
+func (b *Bots) UnmarshalJSON(data []byte) error {
+	var on bool
+	if err := json.Unmarshal(data, &on); err == nil {
+		*b = Bots{Enabled: on}
+		return nil
+	}
+	var o struct {
+		FillTo     int    `json:"fill_to"`
+		Difficulty string `json:"difficulty"`
+	}
+	dec := json.NewDecoder(strings.NewReader(string(data)))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&o); err != nil {
+		return errors.New(`bots must be false, true or {"fill_to": N, "difficulty": "..."}`)
+	}
+	*b = Bots{Enabled: true, FillTo: o.FillTo, Difficulty: o.Difficulty}
+	return nil
+}
+
+func (b Bots) MarshalJSON() ([]byte, error) {
+	if !b.Enabled || (b.FillTo == 0 && b.Difficulty == "") {
+		return json.Marshal(b.Enabled)
+	}
+	return json.Marshal(struct {
+		FillTo     int    `json:"fill_to,omitempty"`
+		Difficulty string `json:"difficulty,omitempty"`
+	}{b.FillTo, b.Difficulty})
 }
 
 // Teams is a playlist entry's team setup. Count is the number of teams
@@ -127,6 +192,14 @@ func Parse(b []byte) (*File, error) {
 				return nil, fmt.Errorf("playlist: entry %q teams.count %d must be %d-%d", e.ID, t.Count, MinTeams, MaxTeams)
 			case t.Size != 0 && (t.Size < MinTeamSize || t.Size > MaxTeamSize):
 				return nil, fmt.Errorf("playlist: entry %q teams.size %d must be %d-%d", e.ID, t.Size, MinTeamSize, MaxTeamSize)
+			}
+		}
+		if b := e.Bots; b != nil {
+			switch {
+			case b.FillTo != 0 && (b.FillTo < MinBotFill || b.FillTo > MaxBotFill):
+				return nil, fmt.Errorf("playlist: entry %q bots.fill_to %d must be %d-%d", e.ID, b.FillTo, MinBotFill, MaxBotFill)
+			case !ValidBotDifficulty(b.Difficulty):
+				return nil, fmt.Errorf("playlist: entry %q bots.difficulty %q must be one of %s", e.ID, b.Difficulty, strings.Join(BotDifficulties, ", "))
 			}
 		}
 		if e.enabled() {

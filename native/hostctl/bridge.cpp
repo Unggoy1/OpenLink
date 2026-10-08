@@ -74,9 +74,11 @@ int read_frame(SOCKET s,uint8_t* p,unsigned capacity,unsigned& size,bool allow_i
     return read_all(s,p,size);
 }
 bool reply(SOCKET s,uint16_t code,uint64_t id,const hostctl::BackendReport* report=nullptr) {
-    // v5: v2 layout (lifecycle state, match count, backend flags), the lobby probe at 112,
-    // lobby leader XUID at 176 and leader re-asserts at 184, team diagnostics at 192.
-    uint8_t b[256]={}; std::memcpy(b,"HICR",4); p16(b+4,5); p16(b+6,code);
+    // v6: v2 layout (lifecycle state, match count, backend flags), the lobby probe at 112,
+    // lobby leader XUID at 176 and leader re-asserts at 184, team diagnostics at 192,
+    // bot backfill at 256 (bots enabled, mode bots, bots, players, state, thread role,
+    // adds, removes, refused, ticks, supported, navigation state/source/faces).
+    uint8_t b[320]={}; std::memcpy(b,"HICR",4); p16(b+4,6); p16(b+6,code);
     p64(b+8,id); p32(b+16,GetCurrentProcessId());
     if(report) {
         p32(b+20,report->gates); p64(b+24,report->generation);
@@ -95,7 +97,13 @@ bool reply(SOCKET s,uint16_t code,uint64_t id,const hostctl::BackendReport* repo
         p32(b+196,uint32_t(l.last_team_count)); p32(b+200,uint32_t(l.forced_team_count)); p32(b+204,uint32_t(l.game_state));
         std::memcpy(b+208,l.peer_team,sizeof(l.peer_team));
         static_assert(sizeof(l.peer_team)==48,"peer team bytes fill 208-255");
-    } else std::memset(b+192,0xff,64);
+        b[256]=uint8_t(l.bots_enabled); b[257]=l.mode_bots; b[258]=uint8_t(l.bot_count); b[259]=uint8_t(l.bot_humans);
+        b[260]=l.bot_state; b[261]=uint8_t(l.bot_thread_role);
+        p16(b+262,l.bot_adds); p16(b+264,l.bot_removes); p16(b+266,l.bot_refused);
+        p32(b+268,l.bot_ticks); b[272]=l.bot_supported;
+        b[273]=uint8_t(l.nav_state); b[274]=l.nav_from_variant; p32(b+276,uint32_t(l.nav_faces));
+        p16(b+280,l.bot_difficulties);
+    } else std::memset(b+192,0xff,128);
     return send_frame(s,b,sizeof(b));
 }
 
@@ -203,6 +211,18 @@ DWORD session(SOCKET s) {
                 if(backend_result!=ERROR_SUCCESS) code=1;
                 else {
                     const DWORD changed=hostctl::BackendTeamPolicy(u32(request+48),u32(request+52),u32(request+56),u32(request+60));
+                    report=hostctl::BackendStatus(); have_report=true;
+                    code=changed==ERROR_SUCCESS ? 0 : 4;
+                }
+            }
+        }
+        // 11 BotPolicy: u32 BotPolicyFlag bits, u32 fill_to, u32 max bots, u32 BotDifficulty (bot_backfill.h).
+        if(op==11 && size==64) {
+            code=2;
+            if(launch.version==2) {
+                if(backend_result!=ERROR_SUCCESS) code=1;
+                else {
+                    const DWORD changed=hostctl::BackendBotPolicy(u32(request+48),u32(request+52),u32(request+56),u32(request+60));
                     report=hostctl::BackendStatus(); have_report=true;
                     code=changed==ERROR_SUCCESS ? 0 : 4;
                 }

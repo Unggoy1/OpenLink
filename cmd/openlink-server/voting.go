@@ -110,6 +110,7 @@ type voter struct {
 	rng     *rand.Rand
 	publish func(voteInfo)                           // admin status; may be nil
 	teams   func(*playlist.Entry) hostctl.TeamPolicy // team rules per entry; may be nil
+	bots    func(*playlist.Entry) hostctl.BotPolicy  // bot backfill per entry; may be nil
 
 	mu      sync.Mutex
 	round   *voteRound
@@ -300,7 +301,7 @@ func (v *voter) closeRound(ctx context.Context, now time.Time) {
 			v.publishLocked("")
 			v.mu.Unlock()
 			v.log.Info("vote closed", "round", r.id, "winner", e.ID, "counts", counts, "starting_in", v.delay)
-			v.sendTeams(ctx, &e)
+			v.sendRules(ctx, &e)
 			return
 		}
 		if err == nil {
@@ -328,7 +329,7 @@ func (v *voter) initialize(ctx context.Context) bool {
 				cancel()
 				if err == nil && reply.Code == hostctl.CodeSelected {
 					v.log.Info("vote: server selection initialized", "entry", e.ID)
-					v.sendTeams(ctx, &e)
+					v.sendRules(ctx, &e)
 					return true
 				}
 				v.log.Warn("vote: initial selection failed", "entry", e.ID, "err", err, "code", reply.Code)
@@ -339,9 +340,13 @@ func (v *voter) initialize(ctx context.Context) bool {
 	return false
 }
 
-func (v *voter) sendTeams(ctx context.Context, e *playlist.Entry) {
+// sendRules sends the team rules and bot backfill for the match of e.
+func (v *voter) sendRules(ctx context.Context, e *playlist.Entry) {
 	if v.teams != nil {
 		sendTeams(ctx, v.ctl, v.teams(e), v.log, e.ID)
+	}
+	if v.bots != nil {
+		sendBots(ctx, v.ctl, v.bots(e), v.log, e.ID)
 	}
 }
 
@@ -488,7 +493,7 @@ func (a *agent) runVoting(ctx context.Context, controller voteController) {
 		delay: cfg.startDelay(), options: cfg.options(), poll: 250 * time.Millisecond,
 		rng:     rand.New(rand.NewPCG(uint64(time.Now().UnixNano()), 0x6f706c6b)),
 		publish: func(info voteInfo) { a.mu.Lock(); a.vote = &info; a.mu.Unlock() },
-		teams:   a.entryTeams}
+		teams:   a.entryTeams, bots: a.cfg.botPolicy}
 	a.mu.Lock()
 	a.voter = v
 	a.mu.Unlock()

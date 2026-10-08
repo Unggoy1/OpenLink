@@ -70,6 +70,35 @@ struct LobbyProbe {
     // Per peer 0-15 (session + i*0x1470): requested team +0x2505, assigned +0x2cf5,
     // host/selected +0x2cf6 (142ebfcbc). -1 also when the peer is absent.
     int8_t peer_team[16][3];
+    // Bot backfill (FN029). Variant bytes are the loaded game options (+0x229
+    // botsEnabled, -1 unknown); mode_bots is set when the mode spawns or backfills
+    // bots itself (BotModeBackfill/BotModeTeams/BotModeFfa), and backfill then
+    // stays out. The rest is the last bot tick (the engine's bot job, which runs
+    // only while bots are enabled): counts, BotTickState, the tick thread's role
+    // in the engine thread registry (1 = main), and our changes (saturating).
+    int8_t bots_enabled;
+    uint8_t mode_bots;
+    int8_t bot_count,bot_humans;
+    uint8_t bot_state;
+    int8_t bot_thread_role;
+    uint16_t bot_adds,bot_removes,bot_refused;
+    uint32_t bot_ticks;
+    uint8_t bot_supported; // bot job hooked and native bot functions verified
+    int8_t nav_state;       // loaded map bot navigation: -1 unknown, 0 none, 1 present (A074)
+    uint8_t nav_from_variant; // 144708629: navigation came from the map variant (Forge)
+    int32_t nav_faces;      // navmesh faces, -1 unreadable
+    uint16_t bot_difficulties; // bit i: difficulty code i registered by the mode (9,6,7,8 = recruit..spartan)
+};
+enum BotModeFlag : uint8_t { BotModeBackfill=1,BotModeTeams=2,BotModeFfa=4 };
+enum BotTickState : uint8_t {
+    BotStateNone=0,     // no bot tick yet
+    BotStateOff=1,      // policy has backfill off for this match
+    BotStateModeBots=2, // the mode manages its own bots
+    BotStateWaiting=3,  // the engine's bot gate is closed (joins or bot changes in progress)
+    BotStateFilled=4,   // at the wanted bot count
+    BotStateChanged=5,  // added or removed a bot this tick
+    BotStateRefused=6,  // the engine did not create the bot
+    BotStateNoNavmesh=7 // the map has no bot navigation: no bots added, ours removed
 };
 
 struct BackendReport {
@@ -149,6 +178,16 @@ BackendReport BackendSetLeader(uint64_t xuid,uint32_t wait_ms) noexcept;
 // selection; flags and mode persist.
 // ERROR_INVALID_PARAMETER for unknown flags or out-of-range values.
 uint32_t BackendTeamPolicy(uint32_t flags,uint32_t mode,uint32_t count,uint32_t size) noexcept;
+// Bot backfill (bot_backfill.h, FN029): with BotBackfill, the engine's bot job
+// (it runs each game tick while the match's mode has bots enabled) tops the
+// match up to fill_to players with at most max_bots bots of a BotDifficulty,
+// and removes one when a player joins, one change at a time and only while the
+// engine's own bot gate (142c2b850) allows changes. Bots are created with the
+// script native 142a171c8 and removed with 142c2d090, as content scripts do.
+// Modes that spawn or backfill bots themselves are left alone. Persists until
+// changed; send it with every selection. ERROR_INVALID_PARAMETER for unknown
+// flags or out-of-range values.
+uint32_t BackendBotPolicy(uint32_t flags,uint32_t fill_to,uint32_t max_bots,uint32_t difficulty) noexcept;
 // Cancels pending work and restores our table slot; module remains pinned so
 // a callback already fetched by another thread still has a valid target.
 uint32_t StopGameBackend() noexcept;

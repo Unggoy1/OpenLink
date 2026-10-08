@@ -8,6 +8,7 @@
 #include "simulation_state.h"
 #include "beacon_name.h"
 #include "team_guard.h"
+#include "bot_backfill.h"
 #include <atomic>
 #include <cstring>
 
@@ -212,6 +213,7 @@ void ReadTeams(uintptr_t base,uintptr_t session,uintptr_t simulation,LobbyProbe&
 // which re-arms the balance.
 bool WriteAddress(uintptr_t address,const void* source,size_t size) noexcept;
 std::atomic<uint32_t> team_policy{TeamGuardFfa},team_mode{TeamModeEven},team_count{0},team_size{0};
+std::atomic<uint32_t> match_teams{0}; // teams the balance used this match (bot backfill), 0 none
 bool balanced=false; // engine thread only
 void BalanceTeams(uintptr_t session,uint32_t mask,bool& changed) noexcept {
     unsigned peers[kMaxTeamSize],n=0; int8_t current[kMaxTeamSize],want[kMaxTeamSize],requests[kMaxTeamSize];
@@ -226,6 +228,7 @@ void BalanceTeams(uintptr_t session,uint32_t mask,bool& changed) noexcept {
     if(!n) return;
     LARGE_INTEGER seed={}; QueryPerformanceCounter(&seed);
     const unsigned teams=TeamCount(n,team_count.load(),team_size.load());
+    match_teams.store(teams);
     AssignTeams(n,current,teams,team_mode.load(),uint64_t(seed.QuadPart)|1,want);
     for(unsigned k=0;k<n;++k) {
         const uintptr_t peer=session+uintptr_t(peers[k])*0x1470; const int8_t none=-1;
@@ -242,7 +245,7 @@ void NotifyTeams(uintptr_t session) noexcept {
 void TickTeams(uintptr_t session,uintptr_t simulation,int32_t state,bool start_requested) noexcept {
     uint8_t available=0,present=0,teams=0; uint32_t mask=0;
     if(!session || !simulation || !Read(simulation+kLobbyVariant+0xc0,available) || !(available&1) ||
-        !Read(simulation+kLobbyVariant+0xc8,present) || !present) { balanced=false; return; }
+        !Read(simulation+kLobbyVariant+0xc8,present) || !present) { balanced=false; match_teams.store(0); return; }
     if(!Read(simulation+kLobbyVariant+0xd0+kVariantTeams,teams) || !Read(session+0xa4,mask)) return;
     const uint32_t policy=team_policy.load(std::memory_order_acquire);
     bool changed=false;
@@ -264,6 +267,205 @@ void TickTeams(uintptr_t session,uintptr_t simulation,int32_t state,bool start_r
         team_count.store(0); team_size.store(0);
     }
     if(changed) NotifyTeams(session);
+}
+
+// Bot backfill (FN029, bot_backfill.h). The engine schedules its per-tick bot
+// update as a std::function job (140bd55d0, only while the match's game options
+// have bots enabled, +0x229); the job's call slot is vtable 1436ac278 +0x10 =
+// 140d9f53c, which runs 1407017d8 (bot AI, removals, the mode's own backfill).
+// HookBotJob runs that, then TickBots, in the same place and thread as the
+// engine's own backfill (142c30320). TickBots makes at most one change per tick
+// and only while the engine's gate 142c2b850 allows bot changes (running game,
+// every machine joined, 100 ms since the last change, no bot mid-change). Bots
+// are created with the script native 142a171c8(team, difficulty), as content
+// scripts do, and removed with 142c2d090(bot handle).
+constexpr uintptr_t kBotJobTable=0x36ac278,kBotJob=0xd9f53c,kBotAdd=0x2a171c8,kBotRemove=0x2c2d090,kBotGate=0x2c2b850;
+constexpr uintptr_t kParticipantTable=0x367f9b0,kParticipantInit=0x4a2e98,kParticipantNext=0x497a5c,kFreeTeam=0x2c292fc;
+constexpr uintptr_t kThreadRegistry=0x4948f40; // 64 x {tid +0, role +4} stride 0x60 (14051f988: role 1 = main)
+using BotJob=void (*)(void*);
+using BotAdd=void (*)(uint32_t,uint16_t);
+using BotRemove=uint64_t (*)(uint32_t,uint64_t,uint64_t,uint64_t);
+using BotGate=uint8_t (*)();
+using FreeTeam=int32_t (*)();
+using ParticipantInit=void (*)(void*);
+using ParticipantNext=uint8_t (*)(void*);
+SlotProtection bot_job_protection;
+std::atomic<bool> bots_supported{false};
+std::atomic<uint32_t> bot_flags{0},bot_fill{0},bot_max{kMaxBots},bot_difficulty{BotMarine};
+std::atomic<uint32_t> bot_ticks{0},bot_adds{0},bot_removes{0},bot_refused{0};
+std::atomic<int32_t> bot_count{-1},bot_humans{-1},bot_thread_role{-1};
+std::atomic<uint8_t> bot_state{BotStateNone};
+bool ValidateBots(uintptr_t base) noexcept {
+    struct Fingerprint { uintptr_t rva; uint8_t bytes[16]; };
+    static const Fingerprint targets[]={
+        {kBotJob,{0x48,0x83,0xec,0x28,0xe8,0x43,0x9c,0x72,0x01,0x48,0x8b,0x0d,0xd4,0x07,0x11,0x04}},
+        {kBotAdd,{0x48,0x89,0x5c,0x24,0x08,0x57,0x48,0x83,0xec,0x20,0x8b,0xf9,0x0f,0xb7,0xda,0x48}},
+        {kBotRemove,{0x48,0x89,0x5c,0x24,0x10,0x48,0x89,0x6c,0x24,0x18,0x48,0x89,0x74,0x24,0x20,0x41}},
+        {kBotGate,{0x48,0x89,0x5c,0x24,0x18,0x48,0x89,0x74,0x24,0x20,0x55,0x48,0x8b,0xec,0x48,0x83}},
+        {kParticipantInit,{0x40,0x53,0x48,0x83,0xec,0x20,0x48,0x8b,0xd9,0xff,0x15,0x21,0x21,0xa1,0x04,0x48}},
+        {kParticipantNext,{0x48,0x89,0x5c,0x24,0x08,0x48,0x89,0x6c,0x24,0x10,0x48,0x89,0x74,0x24,0x18,0x57}},
+        {kFreeTeam,{0x48,0x89,0x5c,0x24,0x08,0x57,0x48,0x83,0xec,0x50,0x48,0x8d,0x05,0xa3,0x66,0xa5}}
+    };
+    for(const auto& target:targets) {
+        uint8_t observed[16]={};
+        if(!CopyAddress(base+target.rva,observed,sizeof(observed)) || std::memcmp(observed,target.bytes,sizeof(observed))) return false;
+    }
+    uintptr_t job=0,next=0;
+    return Read(base+kBotJobTable+0x10,job) && job==base+kBotJob && Read(base+kParticipantTable,next) && next==base+kParticipantNext;
+}
+// The loaded game options (also read by ReadTeams), or 0.
+uintptr_t LoadedVariant(uintptr_t base) noexcept {
+    uintptr_t globals=0; uint16_t index=0;
+    if(!Read(base+kGameGlobals,globals) || !globals || !Read(base+kGameIndex,index)) return 0;
+    return globals+uintptr_t(index)*0x1134f0+0x28;
+}
+// BotModeFlag bits for the mode's own bots: backfill (+0x232), per-team (+0x22a..+0x231) or FFA (+0x233) counts.
+uint8_t ModeBots(uintptr_t variant) noexcept {
+    uint8_t settings[12]={}; uint8_t flags=0;
+    if(!variant || !CopyAddress(variant+0x229,settings,sizeof(settings))) return 0;
+    if(settings[9]) flags|=BotModeBackfill;
+    for(unsigned t=1;t<=8;++t) if(settings[t]) flags|=BotModeTeams;
+    if(settings[10]) flags|=BotModeFfa;
+    return flags;
+}
+int32_t ThreadRole() noexcept {
+    const DWORD self=GetCurrentThreadId();
+    const uintptr_t base=image.load(std::memory_order_acquire);
+    for(unsigned i=0;i<64;++i) {
+        DWORD tid=0; int32_t role=0;
+        if(!Read(base+kThreadRegistry+uintptr_t(i)*0x60,tid)) return -1;
+        if(tid==self) return Read(base+kThreadRegistry+uintptr_t(i)*0x60+4,role) ? role : -1;
+    }
+    return -1;
+}
+void Saturate(std::atomic<uint32_t>& counter) noexcept { const uint32_t n=counter.load(); if(n!=UINT32_MAX) counter.store(n+1); }
+// The match's participants through the engine's iterator (vtable 14367f9b0,
+// 1404a2e98/140497a5c, current participant at +0x28; leaving players and bots
+// queued for removal are skipped, as for 142c292fc and Lua Bot_RemoveAll).
+unsigned ReadParticipants(uintptr_t base,BotParticipant* out,unsigned capacity) noexcept {
+    alignas(16) uintptr_t iterator[16]={};
+    iterator[0]=base+kParticipantTable;
+    reinterpret_cast<ParticipantInit>(base+kParticipantInit)(iterator);
+    unsigned n=0;
+    for(unsigned guard=0;guard<64 && reinterpret_cast<ParticipantNext>(base+kParticipantNext)(iterator);++guard) {
+        const uintptr_t participant=iterator[5];
+        int32_t machine=0,handle=-1; uint8_t team=0;
+        if(n>=capacity || !participant || !Read(participant+0x538,machine) || !Read(participant+0x53c,handle) || !Read(participant+0x285,team)) continue;
+        out[n].bot=handle!=-1; out[n].team=int8_t(team^0x9e); out[n].handle=uint32_t(handle);
+        if(!out[n].bot && machine==-1) continue; // neither player nor bot
+        ++n;
+    }
+    return n;
+}
+// Bot navigation of the loaded map (A074): the server's HavokAIManager
+// (*144976770, created at map load) holds the hkaiWorld at +0x454460, whose
+// streaming collection (+0x130) has n (+0x40) 0x110-byte entries (+0x38) with
+// the navmesh instance at +0; instance +0x20 -> data, face count at data +0x20.
+// 343 maps load it from the scenario's pathfinding tag, Forge maps from the map
+// variant's baked "Navigation" content (then byte 144708629 is set). Plain
+// reads only. Returns the face total, or -1 when a pointer is missing.
+constexpr uintptr_t kAiManager=0x4976770,kNavFromVariant=0x4708629;
+int32_t NavmeshFaces(uintptr_t base) noexcept {
+    uintptr_t manager=0,world=0,collection=0,entries=0; int32_t n=0;
+    if(!Read(base+kAiManager,manager) || !manager || !Read(manager+0x454460,world) || !world ||
+        !Read(world+0x130,collection) || !collection || !Read(collection+0x40,n) || n<0 || n>1024 ||
+        (n && (!Read(collection+0x38,entries) || !entries))) return -1;
+    int64_t faces=0;
+    for(int32_t i=0;i<n;++i) {
+        uintptr_t instance=0,data=0; int32_t count=0;
+        if(!Read(entries+uintptr_t(i)*0x110,instance)) return -1;
+        if(!instance) continue;
+        if(!Read(instance+0x20,data) || !data || !Read(data+0x20,count) || count<0) return -1;
+        faces+=count;
+    }
+    return faces>INT32_MAX ? INT32_MAX : int32_t(faces);
+}
+std::atomic<int32_t> nav_faces{-1};
+std::atomic<int8_t> nav_state{-1}; // -1 unknown, 0 no navmesh (two zero samples >= 1 s apart), 1 navmesh
+ULONGLONG nav_zero_since=0,bot_last_tick=0; // bot job thread only
+// Updates nav_state; a new match (no bot tick for 2 s) starts over.
+void TickNavmesh(uintptr_t base) noexcept {
+    const ULONGLONG now=GetTickCount64();
+    if(now-bot_last_tick>2000) { nav_state.store(-1); nav_zero_since=0; }
+    bot_last_tick=now;
+    const int32_t faces=NavmeshFaces(base); nav_faces.store(faces);
+    if(faces>0) { nav_state.store(1); nav_zero_since=0; }
+    else if(faces<0) nav_zero_since=0;
+    else if(nav_state.load()!=1) {
+        if(!nav_zero_since) nav_zero_since=now;
+        else if(now-nav_zero_since>=1000) nav_state.store(0);
+    }
+}
+// Registered bot difficulties (A075): bot manager *144eafd20 +0x8bac holds ten
+// int32 tag handles indexed by difficulty code, -1 when unset; bot init clears
+// them each map load and only the Lua native Bot_SetDifficultyTagRef (142a17fc8)
+// fills them, so a mode without bot scripts has none. Bit i = code i set.
+constexpr uintptr_t kBotManager=0x4eafd20;
+uint16_t BotDifficultyMask(uintptr_t base) noexcept {
+    uintptr_t manager=0; int32_t handles[10]={};
+    if(!Read(base+kBotManager,manager) || !manager || !CopyAddress(manager+0x8bac,handles,sizeof(handles))) return 0;
+    uint16_t mask=0;
+    for(unsigned i=0;i<10;++i) if(handles[i]!=-1) mask|=uint16_t(1u<<i);
+    return mask;
+}
+void TickBots(uintptr_t base) noexcept {
+    Saturate(bot_ticks);
+    if(bot_thread_role.load()<0) bot_thread_role.store(ThreadRole()); // the job thread does not change
+    TickNavmesh(base);
+    const uintptr_t variant=LoadedVariant(base);
+    BotParticipant participants[32]; const unsigned n=ReadParticipants(base,participants,32);
+    int32_t bots=0; for(unsigned i=0;i<n;++i) if(participants[i].bot) ++bots;
+    bot_count.store(bots); bot_humans.store(int32_t(n)-bots);
+    if(ModeBots(variant)) { bot_state.store(BotStateModeBots); return; }
+    if(!(bot_flags.load(std::memory_order_acquire)&BotBackfill)) { bot_state.store(BotStateOff); return; }
+    if(!reinterpret_cast<BotGate>(base+kBotGate)()) { bot_state.store(BotStateWaiting); return; }
+    // No navigation: bots would only stand around. Remove any we added, add none.
+    if(nav_state.load()==0) {
+        bot_state.store(BotStateNoNavmesh);
+        for(unsigned i=0;i<n;++i) if(participants[i].bot) {
+            reinterpret_cast<BotRemove>(base+kBotRemove)(participants[i].handle,0,0,0);
+            Saturate(bot_removes); break;
+        }
+        return;
+    }
+    uint8_t teams_enabled=0;
+    const unsigned teams=variant && Read(variant+kVariantTeams,teams_enabled) && teams_enabled ? (match_teams.load() ? match_teams.load() : 2u) : 0u;
+    const BotAction action=DecideBots(participants,n,bot_fill.load(),bot_max.load(),teams);
+    if(action.kind==BotAction::None) { bot_state.store(BotStateFilled); return; }
+    if(action.kind==BotAction::Remove) {
+        reinterpret_cast<BotRemove>(base+kBotRemove)(action.handle,0,0,0);
+        Saturate(bot_removes); bot_state.store(BotStateChanged); return;
+    }
+    // The engine creates a bot only for a difficulty whose tag the mode's scripts
+    // registered (Bot_SetDifficultyTagRef); use the configured one if it is, else
+    // the nearest registered one, else add nothing.
+    const uint16_t difficulty=BotDifficultyFallback(BotDifficultyCode(bot_difficulty.load()),BotDifficultyMask(base));
+    if(!difficulty) { Saturate(bot_refused); bot_state.store(BotStateRefused); return; }
+    int32_t team=action.team;
+    if(team<0) team=reinterpret_cast<FreeTeam>(base+kFreeTeam)();
+    if(team<0) { Saturate(bot_refused); bot_state.store(BotStateRefused); return; }
+    reinterpret_cast<BotAdd>(base+kBotAdd)(uint32_t(team),difficulty);
+    BotParticipant after[32]; const unsigned m=ReadParticipants(base,after,32);
+    int32_t now=0; for(unsigned i=0;i<m;++i) if(after[i].bot) ++now;
+    if(now>bots) { Saturate(bot_adds); bot_state.store(BotStateChanged); bot_count.store(now); }
+    else { Saturate(bot_refused); bot_state.store(BotStateRefused); }
+}
+void HookBotJob(void* job) {
+    const uintptr_t base=image.load(std::memory_order_acquire);
+    reinterpret_cast<BotJob>(base+kBotJob)(job); // the engine's bot update, exactly once
+    if(running.load(std::memory_order_acquire) && bots_supported.load(std::memory_order_acquire)) TickBots(base);
+}
+uint16_t SaturatedU16(const std::atomic<uint32_t>& counter) noexcept { const uint32_t n=counter.load(); return uint16_t(n>65535 ? 65535 : n); }
+void ReadBots(uintptr_t base,LobbyProbe& p) noexcept {
+    const uintptr_t variant=LoadedVariant(base); uint8_t enabled=0;
+    p.bots_enabled=variant && Read(variant+0x229,enabled) ? int8_t(enabled!=0) : int8_t(-1);
+    p.mode_bots=ModeBots(variant);
+    p.bot_count=int8_t(bot_count.load()); p.bot_humans=int8_t(bot_humans.load());
+    p.bot_state=bot_state.load(); p.bot_thread_role=int8_t(bot_thread_role.load());
+    p.bot_adds=SaturatedU16(bot_adds); p.bot_removes=SaturatedU16(bot_removes); p.bot_refused=SaturatedU16(bot_refused);
+    p.bot_ticks=bot_ticks.load(); p.bot_supported=bots_supported.load() ? 1 : 0;
+    p.nav_state=nav_state.load(); p.nav_faces=nav_faces.load(); Read(base+kNavFromVariant,p.nav_from_variant);
+    p.bot_difficulties=BotDifficultyMask(base);
 }
 
 LobbyProbe ReadLobby(uintptr_t base,uintptr_t session,uintptr_t simulation) noexcept {
@@ -305,6 +507,7 @@ LobbyProbe ReadLobby(uintptr_t base,uintptr_t session,uintptr_t simulation) noex
     }
     p.leader_sets=leader_sets.load();
     ReadTeams(base,session,simulation,p);
+    ReadBots(base,p);
     return p;
 }
 // Keeps the server's leader XUID in the leader component (engine tick only) and
@@ -459,6 +662,10 @@ DWORD SwapTick(uintptr_t base,void* expected,void* replacement) noexcept {
     const auto slot=reinterpret_cast<void* volatile*>(base+kServerTable+0x18);
     return ReplaceTickSlot(slot,expected,replacement,slot_protection,slot_functions);
 }
+DWORD SwapBotJob(uintptr_t base,void* expected,void* replacement) noexcept {
+    const auto slot=reinterpret_cast<void* volatile*>(base+kBotJobTable+0x10);
+    return ReplaceTickSlot(slot,expected,replacement,bot_job_protection,slot_functions);
+}
 
 // Server-owned selection lock. Game code reaches the provider's authoritative
 // Set (142e1d478), request dispatcher (142e1cb9c) and unconditional apply (142e0dc08)
@@ -566,6 +773,14 @@ uint32_t InstallGameBackend() noexcept {
                 if(result==ERROR_SUCCESS) result=SwapProviderSlot(base,0xb8,reinterpret_cast<void*>(base+kProviderRequest),reinterpret_cast<void*>(&HookProviderRequest),request_protection);
                 if(result==ERROR_SUCCESS) result=SwapProviderSlot(base,0x78,reinterpret_cast<void*>(base+kProviderApply),reinterpret_cast<void*>(&HookProviderApply),apply_protection);
                 if(result==ERROR_SUCCESS) result=SwapTick(base,reinterpret_cast<void*>(base+kServerTick),reinterpret_cast<void*>(&HookTick));
+                // Bot backfill is optional: without verified bot functions the rest still runs.
+                if(result==ERROR_SUCCESS && ValidateBots(base)) {
+                    bots_supported.store(true,std::memory_order_release);
+                    if(SwapBotJob(base,reinterpret_cast<void*>(base+kBotJob),reinterpret_cast<void*>(&HookBotJob))!=ERROR_SUCCESS) {
+                        bots_supported.store(false,std::memory_order_release);
+                        RestoreTickProtection(reinterpret_cast<void* volatile*>(base+kBotJobTable+0x10),bot_job_protection,slot_functions);
+                    }
+                }
                 if(result!=ERROR_SUCCESS) {
                     running.store(false); commands.Stop();
                     RestoreProviderSlot(base,0x78,kProviderApply,reinterpret_cast<void*>(&HookProviderApply),apply_protection);
@@ -594,6 +809,12 @@ uint32_t StopGameBackend() noexcept {
         if(result==ERROR_SUCCESS) result=apply;
         if(result==ERROR_SUCCESS) result=request;
         if(result==ERROR_SUCCESS) result=set;
+        bots_supported.store(false,std::memory_order_release);
+        uintptr_t job=0; DWORD bot_job=ERROR_SUCCESS;
+        if(!Read(base+kBotJobTable+0x10,job)) bot_job=ERROR_READ_FAULT;
+        else if(job==reinterpret_cast<uintptr_t>(&HookBotJob)) bot_job=SwapBotJob(base,reinterpret_cast<void*>(&HookBotJob),reinterpret_cast<void*>(base+kBotJob));
+        const auto bot_cleanup=RestoreTickProtection(reinterpret_cast<void* volatile*>(base+kBotJobTable+0x10),bot_job_protection,slot_functions);
+        if(result==ERROR_SUCCESS) result=bot_job==ERROR_SUCCESS ? bot_cleanup : bot_job;
         if(owner_patched.exchange(false)) {
             const auto owner_site=SwapOwnerSite(base,kOwnerPatched,kOwnerNative);
             if(result==ERROR_SUCCESS) result=owner_site;
@@ -678,6 +899,14 @@ uint32_t BackendTeamPolicy(uint32_t flags,uint32_t mode,uint32_t count,uint32_t 
         return ERROR_INVALID_PARAMETER;
     team_mode.store(mode); team_count.store(count); team_size.store(size);
     team_policy.store(flags,std::memory_order_release);
+    return ERROR_SUCCESS;
+}
+uint32_t BackendBotPolicy(uint32_t flags,uint32_t fill_to,uint32_t max_bots,uint32_t difficulty) noexcept {
+    if((flags&~uint32_t(BotBackfill)) || fill_to>kMaxBotFill || max_bots>kMaxBots || difficulty>BotSpartan ||
+        ((flags&BotBackfill) && (fill_to<2 || !max_bots)))
+        return ERROR_INVALID_PARAMETER;
+    bot_fill.store(fill_to); bot_max.store(max_bots); bot_difficulty.store(difficulty);
+    bot_flags.store(flags,std::memory_order_release);
     return ERROR_SUCCESS;
 }
 uint32_t BackendServerOwned(uint32_t mode) noexcept {

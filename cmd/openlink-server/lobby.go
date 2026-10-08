@@ -105,6 +105,7 @@ func (a *agent) runLobby(ctx context.Context, controller lobbyController, poll t
 		a.holdLeader(ctx, controller, a.cfg.lobbyLeader(), poll)
 	}
 	var last hostctl.Lobby
+	var lastBots botView
 	var lastState int32 = -2
 	var since time.Time // when the lobby first had enough players
 	for ctx.Err() == nil && !controller.Closed() {
@@ -125,6 +126,10 @@ func (a *agent) runLobby(ctx context.Context, controller lobbyController, poll t
 		if st.Version >= 5 {
 			a.warnFFATeams(l.LobbyVariantTeams)
 		}
+		if st.Version >= 6 {
+			a.logBots(l, &lastBots)
+		}
+		l.BotTicks = 0 // counts every game tick; logged in the bots line
 		if l != last || st.State != lastState {
 			a.log.Info("lobby", "state", st.State, "connected", l.Connected, "peers", l.Peers, "mask", l.PeerMask,
 				"owner", l.Owner, "host_peer", l.HostPeer, "players", l.Players, "start_mode", l.StartMode,

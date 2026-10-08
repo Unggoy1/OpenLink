@@ -1,6 +1,7 @@
 package playlist
 
 import (
+	"encoding/json"
 	"math/rand/v2"
 	"slices"
 	"strings"
@@ -146,6 +147,40 @@ func TestParseTeams(t *testing.T) {
 		}
 		if got == nil || *got != want {
 			t.Errorf("teams %s parsed as %+v", teams, got)
+		}
+	}
+}
+
+func TestParseBots(t *testing.T) {
+	with := func(bots string) string {
+		return strings.Replace(sample, `{"id": "kusini-ctf",`, `{"id": "kusini-ctf", "bots": `+bots+`,`, 1)
+	}
+	for _, bad := range []string{`{"fill_to": 1}`, `{"fill_to": 25}`, `{"difficulty": "legendary"}`, `{"count": 4}`, `"yes"`, `4`} {
+		if _, err := Parse([]byte(with(bad))); err == nil {
+			t.Errorf("bots %s accepted", bad)
+		}
+	}
+	for bots, want := range map[string]Bots{
+		`false`: {}, `true`: {Enabled: true}, `{}`: {Enabled: true},
+		`{"fill_to": 16}`: {Enabled: true, FillTo: 16}, `{"difficulty": "spartan", "fill_to": 2}`: {Enabled: true, FillTo: 2, Difficulty: "spartan"},
+	} {
+		f, err := Parse([]byte(with(bots)))
+		if err != nil {
+			t.Fatalf("bots %s rejected: %v", bots, err)
+		}
+		var got *Bots
+		for _, e := range f.Entries {
+			if e.ID == "kusini-ctf" {
+				got = e.Bots
+			}
+		}
+		if got == nil || *got != want {
+			t.Errorf("bots %s parsed as %+v", bots, got)
+		}
+		b, err := json.Marshal(got)
+		var back Bots
+		if err != nil || json.Unmarshal(b, &back) != nil || back != want {
+			t.Errorf("bots %s round trip %s -> %+v (%v)", bots, b, back, err)
 		}
 	}
 }

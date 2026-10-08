@@ -63,6 +63,7 @@ Every server needs a playlist in openlink-server.json; the program refuses to st
 - `selection`: `shuffle_bag` (default) plays every entry once per cycle in random order, never repeating across a cycle boundary. `sequential` uses file order.
 - Each entry has `enabled` (default true). Every mode is a published game variant (UGC), as in a custom game.
 - Optional `teams`, for team modes: `{"count": 4}` (number of teams, 2–8) or `{"size": 4}` (players per team, 2–32), or both. Modes do not say how many teams they are made for (since 343's multi-team update every mode allows 8), so this tells the server's team balance how to split players. Without it a team mode uses two teams (Eagle and Cobra). With only `size`, the server makes as many teams as needed and spreads players evenly: 10 players with `"size": 3` get 4 teams of 3, 3, 2 and 2; there are always at least two teams, so `"size": 4` with only 4 players gives two teams of 2. The count or size applies to that one match: a manual selection (admin `select`) uses the default two teams. With both, `count` decides. It applies even with `"team_balance": "off"` (as `"even"`), so nobody stays on a team the entry does not have. FFA modes ignore it. Example: `"teams": {"size": 4}` on a "Multi-Team: Teams of 4" mode.
+- Optional `bots`, with `bot_backfill` on the server (see Bot backfill below): `false` turns backfill off for the entry, `true` turns it on, and `{"fill_to": 16, "difficulty": "odst"}` turns it on with the entry's own fill and difficulty (`fill_to` 2–24; `difficulty` `recruit`, `marine`, `odst` or `spartan`). Without it the entry has no backfill.
 - Limits, checked when the agent starts (it refuses to start on any error) and by `openlink-server check-playlist [file]`:
   - `id`: required and unique; at most 80 bytes. A short readable slug such as `fiesta-slayer-interference` is best.
   - `name`: optional (players see the `id` without it); at most 80 UTF-8 bytes, not characters (é is 2 bytes, most other scripts 2–3, emoji 4). No control characters in either.
@@ -86,6 +87,23 @@ In a stock LAN lobby the first player to join becomes lobby leader, and any play
 - `auto_start` (for example `{"min_players": 1, "delay_seconds": 30}`): once at least `min_players` players are connected (default 1) and have stayed for `delay_seconds` (default 10), the agent starts the match, as a leader's Play would. This repeats in the lobby after every match. A server without `vote` always uses it, with the defaults when it is not set.
 - `GET /status` shows `host_control.lobby`: `lobby.connected` (connected players), `lobby.owner` (leader peer, -1 none), `lobby.start_mode` (1 once a start was requested), `blocked_start` and `blocked_end` (dropped player requests), `starts` and `error`. The agent log line `lobby` records each change.
 - Like selection, this changes the running server process (a code patch and two table hooks, removed when control stops). Operators carry the terms-of-service risk of modifying their server. Clients are not modified.
+
+## Bot backfill (experimental, not yet tested with the game)
+
+With few players, the server can fill a match up with bots and remove one each time a player joins:
+
+```json
+{"bot_backfill": {"fill_to": 8, "max_bots": 8, "difficulty": "marine"}}
+```
+
+and in the playlist, on each entry that should get bots: `"bots": true` (or `{"fill_to": 16}` to override).
+
+- `fill_to` (default 8, 2–24): players plus bots the server aims for. `max_bots` (default 8, 1–8): the game allows at most 8 bots. `difficulty`: `recruit`, `marine` (default), `odst` or `spartan` (names inferred from the game's difficulty codes 9, 6, 7, 8).
+- Bots are added **during the match only**: the game creates no bots in the lobby. Once the match runs and every player has joined, the server adds one bot at a time (the game waits at least 100 ms between bot changes) until players plus bots reach `fill_to`. When a player joins mid-match, a bot leaves. In team modes a new bot joins the team with the fewest players and a leaving bot comes from the largest team; in free-for-all each bot gets its own team.
+- **The mode must have bots enabled and register bot difficulties.** The game runs its bot code only for modes whose bot setting is on, so in other modes nothing happens (the `bots` log line shows `mode_bots_enabled=0`). The setting is fixed when the map loads, before the server can change anything, so the server cannot switch bots on by itself (A075). The game also creates a bot only for a difficulty the mode's scripts registered; the line shows them as `mode_difficulties` (`none` means no bots can be made). If the configured difficulty is not registered, the nearest registered one is used. Modes that spawn or backfill bots themselves (for example a mode with 7 bots built in) are left alone (`state=mode_bots`). Which published modes qualify is not known yet: the first test is to note these fields for a few modes.
+- **Maps need bot navigation.** Bots need the map's navigation mesh: 343's maps have one, Forge maps only if the creator built it. The DLL checks the loaded map's navmesh during the match: when it is readable and empty on two checks a second apart, no bots are added and any it added leave (`state=no_navmesh`). The `bots` line shows `navmesh` (`yes`, `none` or `unknown`), `nav_faces` and `nav_from_forge_map`. The check is new and not yet confirmed on real maps (A074), so backfill stays per entry for now: turn it on only for entries whose map works with bots.
+- How it works: the control DLL runs right after the game's own per-tick bot update (the same place the game's own backfill runs), checks the game's bot-change gate (142c2b850), and creates or removes bots with the same functions content scripts use (142a171c8, 142c2d090). FN029 has the addresses.
+- The agent log line `bots` shows `supported` (DLL found the game's bot functions), `mode_bots_enabled`, `mode_spawns_bots`, `state` (`off`, `mode_bots`, `waiting`, `filled`, `changed`, `refused`), `bots`, `players`, `thread_role` (1 = the game's main thread), and how many bots were `added`, `removed` and `refused`. `GET /status` shows the same fields under `host_control.lobby.lobby`.
 
 ## Server name in the in-game list
 

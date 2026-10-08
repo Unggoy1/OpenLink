@@ -311,3 +311,58 @@ func TestTeamPolicyRequest(t *testing.T) {
 		}
 	}
 }
+
+// Version 6 replies add bot backfill at 256.
+func TestReplyVersion6Bots(t *testing.T) {
+	b := make([]byte, 320)
+	copy(b, "HICR")
+	binary.LittleEndian.PutUint16(b[4:], 6)
+	binary.LittleEndian.PutUint64(b[8:], 9)
+	binary.LittleEndian.PutUint32(b[16:], 70)
+	b[192], b[193] = 0, 0
+	b[256], b[257], b[258], b[259], b[260], b[261] = 1, BotModeFFA, 3, 2, BotStateFilled, 1
+	binary.LittleEndian.PutUint16(b[262:], 4)
+	binary.LittleEndian.PutUint16(b[264:], 1)
+	binary.LittleEndian.PutUint16(b[266:], 2)
+	binary.LittleEndian.PutUint32(b[268:], 500)
+	b[272], b[273], b[274] = 1, 0, 1
+	binary.LittleEndian.PutUint32(b[276:], 1234)
+	binary.LittleEndian.PutUint16(b[280:], 1<<6|1<<8)
+	var w bytes.Buffer
+	writeFrame(&w, b)
+	got, err := DecodeReply(&w)
+	l := got.Lobby
+	if err != nil || got.Version != 6 || l.BotsEnabled != 1 || l.ModeBots != BotModeFFA || l.BotCount != 3 || l.BotHumans != 2 ||
+		l.BotState != BotStateFilled || l.BotThreadRole != 1 || l.BotAdds != 4 || l.BotRemoves != 1 || l.BotRefused != 2 ||
+		l.BotTicks != 500 || !l.BotSupported || l.GameVariantTeams != 0 || l.NavState != 0 || !l.NavFromVariant || l.NavFaces != 1234 || l.BotDifficulties != 1<<6|1<<8 {
+		t.Fatalf("v6 decode: %+v %v", l, err)
+	}
+	var short bytes.Buffer
+	writeFrame(&short, b[:256])
+	if _, err := DecodeReply(&short); err == nil {
+		t.Fatal("accepted v6 header on a v5-length frame")
+	}
+}
+
+func TestBotPolicyRequest(t *testing.T) {
+	for _, p := range []BotPolicy{{}, {Flags: BotBackfill, FillTo: 8, MaxBots: MaxBots, Difficulty: BotMarine},
+		{Flags: BotBackfill, FillTo: MaxBotFill, MaxBots: 1, Difficulty: BotSpartan}, {FillTo: 0, MaxBots: 0}} {
+		var w bytes.Buffer
+		if err := EncodeRequest(&w, Request{Op: OpBotPolicy, ID: 2, Bots: p}); err != nil {
+			t.Fatal(err)
+		}
+		if w.Len() != 4+64 {
+			t.Fatalf("bot-policy frame is %d bytes", w.Len())
+		}
+		got, err := DecodeRequest(&w)
+		if err != nil || got.Op != OpBotPolicy || got.Bots != p {
+			t.Fatalf("round trip %+v: %+v %v", p, got, err)
+		}
+	}
+	for _, bad := range []BotPolicy{{Flags: 2}, {Flags: BotBackfill, FillTo: 1, MaxBots: 8}, {Flags: BotBackfill, FillTo: 8},
+		{FillTo: MaxBotFill + 1}, {MaxBots: MaxBots + 1}, {Difficulty: BotSpartan + 1}} {
+		if err := EncodeRequest(io.Discard, Request{Op: OpBotPolicy, ID: 2, Bots: bad}); err == nil {
+			t.Fatalf("invalid bot policy %+v accepted", bad)
+		}
+	}
+}

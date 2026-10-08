@@ -74,6 +74,8 @@ type config struct {
 	// Vote, with a playlist and proxy mode: players vote in the OpenLink app
 	// for the next match, which then starts by itself. Replaces AutoStart.
 	Vote *voteConfig `json:"vote,omitempty"`
+	// BotBackfill: top matches up with bots (bots.go); off when absent.
+	BotBackfill *botBackfill `json:"bot_backfill,omitempty"`
 
 	Simulate     bool          `json:"-"`
 	Loopback     bool          `json:"-"`
@@ -253,6 +255,11 @@ func loadConfig(fs *flag.FlagSet, args []string) (config, error) {
 	}
 	if c.TeamBalance != "" && c.TeamBalance != "even" && c.TeamBalance != "shuffle" && c.TeamBalance != "off" {
 		return c, errors.New(`team_balance must be "even", "shuffle" or "off"`)
+	}
+	if c.BotBackfill != nil {
+		if err := c.BotBackfill.validate(); err != nil {
+			return c, err
+		}
 	}
 	return c, nil
 }

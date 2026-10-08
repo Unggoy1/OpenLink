@@ -160,6 +160,18 @@ func (b *Bridge) TeamPolicy(ctx context.Context, p TeamPolicy) (Reply, error) {
 	return b.send(ctx, Request{Op: OpTeamPolicy, Teams: p})
 }
 
+// BotPolicy sets bot backfill for the coming match (native bot_backfill.h).
+// The engine's bot job applies it each game tick, only while the match's mode
+// has bots enabled; modes that spawn or backfill bots themselves are left
+// alone. Send it with each selection. CodeOK once stored; CodeInvalid for bad
+// values.
+func (b *Bridge) BotPolicy(ctx context.Context, p BotPolicy) (Reply, error) {
+	if !p.valid() {
+		return Reply{}, errors.New("invalid bot policy")
+	}
+	return b.send(ctx, Request{Op: OpBotPolicy, Bots: p})
+}
+
 func (b *Bridge) exchange(ctx context.Context, op uint16, pair AssetPair) (Reply, error) {
 	return b.send(ctx, Request{Op: op, Pair: pair})
 }

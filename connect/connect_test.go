@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"halocommunity/internal/api"
+	"halocommunity/internal/dirclient"
 	"halocommunity/internal/directory"
 	"halocommunity/internal/sim"
 	"halocommunity/vote"
@@ -43,7 +44,7 @@ func TestSessionEndToEnd(t *testing.T) {
 	// Directory with the server registered and a beacon posted.
 	ts := httptest.NewServer(directory.New(directory.Config{RegisterKey: "k", ShowUnconfirmed: true, AllowPrivateHosts: true}))
 	defer ts.Close()
-	dc := directory.NewClient(ts.URL, "k")
+	dc := dirclient.NewClient(ts.URL, "k")
 	reg, err := dc.Register(ctx, api.RegisterRequest{Name: "Sim", Host: "127.0.0.2", Port: srvPort, Build: "b"})
 	if err != nil {
 		t.Fatal(err)

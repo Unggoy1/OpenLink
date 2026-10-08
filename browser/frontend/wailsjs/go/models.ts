@@ -86,6 +86,8 @@ export namespace main {
 	    joinable: boolean;
 	    build: string;
 	    buildMatch: boolean;
+	    version: string;
+	    needsUpdate: boolean;
 	    players: number;
 	    reachability: string;
 	    pingMs: number;
@@ -107,6 +109,8 @@ export namespace main {
 	        this.joinable = source["joinable"];
 	        this.build = source["build"];
 	        this.buildMatch = source["buildMatch"];
+	        this.version = source["version"];
+	        this.needsUpdate = source["needsUpdate"];
 	        this.players = source["players"];
 	        this.reachability = source["reachability"];
 	        this.pingMs = source["pingMs"];

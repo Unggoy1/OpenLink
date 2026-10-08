@@ -284,8 +284,8 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 	}
 	s.servers[id] = &entry{
 		info: api.ServerInfo{ID: id, Name: req.Name, Host: req.Host, Port: req.Port, Build: req.Build,
-			Description: req.Description,
-			Region:      req.Region, Status: "starting", Players: -1, LastSeen: now, Reachability: api.ReachUnknown},
+			Description: req.Description, Version: req.Version, AppProtocol: req.AppProtocol,
+			Region: req.Region, Status: "starting", Players: -1, LastSeen: now, Reachability: api.ReachUnknown},
 		token: tok, ownerIP: ip, registeredAt: now,
 	}
 	writeJSON(w, http.StatusCreated, api.RegisterResponse{ID: id, Token: tok, Host: req.Host})
@@ -374,6 +374,10 @@ func validateRegister(req *api.RegisterRequest) error {
 		return errors.New("bad region")
 	case !api.ValidDescription(req.Description):
 		return errors.New("description must be at most 120 characters, no control characters")
+	case len(req.Version) > api.MaxVersionBytes || !printable(req.Version):
+		return errors.New("bad version")
+	case req.AppProtocol < 0 || req.AppProtocol > 1000:
+		return errors.New("bad app_protocol")
 	case req.Host != "" && net.ParseIP(req.Host) == nil && !hostRe.MatchString(req.Host):
 		return errors.New("bad host")
 	}

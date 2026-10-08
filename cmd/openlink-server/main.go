@@ -25,6 +25,7 @@ import (
 	"halocommunity/internal/game"
 	"halocommunity/internal/playlist"
 	"halocommunity/internal/relay"
+	"halocommunity/internal/release"
 	"halocommunity/internal/sim"
 	"halocommunity/internal/udpx"
 )
@@ -150,6 +151,12 @@ func main() {
 	a.log.Info("openlink-server", "version", version, "config", orDash(c.path))
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	go func() {
+		// Only releases that carry the server package count; app-only ones are skipped.
+		if u := release.Check(ctx, version, release.ServerAsset); u.Available {
+			a.log.Warn("a newer OpenLink Server is available", "current", version, "latest", u.Latest, "download", u.URL)
+		}
+	}()
 	if err := a.run(ctx); err != nil {
 		a.log.Error("agent stopped", "err", err)
 		os.Exit(1)

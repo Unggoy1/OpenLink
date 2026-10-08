@@ -20,7 +20,7 @@
   let installDir = $state(initial.installDir);
   let voteSound = $state(!initial.muteVoteSound);
   let overlayMode = $state(initial.overlayMode || 'off');
-  let overlayCorner = $state(initial.overlayCorner || 'top-right');
+  let overlayCorner = $state(initial.overlayCorner || 'top-left');
   let openKey = $state(initial.overlayOpenKey);
   let voteKeys = $state([...(initial.overlayVoteKeys ?? [])]);
   let controllerVote = $state(!initial.overlayNoController);

@@ -32,6 +32,15 @@ const (
 	// MaxGameNameLength is the longest name in Halo's in-game server list: the
 	// LAN beacon holds 48 UTF-16 units including the terminator (O080).
 	MaxGameNameLength = 47
+	// AppProtocol is the level of the protocol between the OpenLink app and
+	// OpenLink Server (joining through the proxy, ballots and votes). The app
+	// and the server are released separately: raise it only when a server
+	// change needs new app code, never for a server-only release. OpenLink
+	// Server lists it as the level it needs (RegisterRequest.AppProtocol), and
+	// an app below that level asks the player to update instead of joining.
+	AppProtocol = 1
+	// MaxVersionBytes bounds the OpenLink Server version in a listing.
+	MaxVersionBytes = 64
 )
 
 // GameName is the name OpenLink Server puts in Halo's in-game server list for
@@ -91,7 +100,9 @@ type RegisterRequest struct {
 	Port        int    `json:"port"`
 	Build       string `json:"build"`
 	Region      string `json:"region,omitempty"`
-	Description string `json:"description,omitempty"` // ValidDescription
+	Description string `json:"description,omitempty"`  // ValidDescription
+	Version     string `json:"version,omitempty"`      // OpenLink Server version, e.g. v0.8.2
+	AppProtocol int    `json:"app_protocol,omitempty"` // lowest app protocol the server needs (AppProtocol)
 }
 
 // RegisterResponse carries the server ID and the secret used for later updates.
@@ -162,6 +173,8 @@ type ServerInfo struct {
 	Build        string    `json:"build"`
 	Region       string    `json:"region,omitempty"`
 	Description  string    `json:"description,omitempty"`
+	Version      string    `json:"version,omitempty"`      // OpenLink Server version; "" when not reported
+	AppProtocol  int       `json:"app_protocol,omitempty"` // lowest app protocol the server needs; 0 = not reported
 	Status       string    `json:"status"`
 	Players      int       `json:"players"`
 	Joinable     bool      `json:"joinable"`

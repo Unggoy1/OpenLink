@@ -135,6 +135,7 @@ func (a *agent) handleControlSelect(w http.ResponseWriter, r *http.Request) {
 	if reply.Code == hostctl.CodeSelected {
 		// Not a playlist entry: default team rules (two teams), not the last entry's.
 		sendTeams(ctx, controller, a.entryTeams(nil), a.log, "manual selection")
+		sendBots(ctx, controller, a.cfg.botPolicy(nil), a.log, "manual selection")
 	}
 	writeJSON(w, 200, controlReply(reply))
 }

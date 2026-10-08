@@ -21,7 +21,7 @@ const (
 var overlayCorners = []string{"top-left", "top-right", "bottom-left", "bottom-right"}
 
 const (
-	defaultOverlayCorner = "top-right" // Discord's widgets default to the left
+	defaultOverlayCorner = "top-left" // covers the lobby's map preview, which can show another map than the vote's
 	defaultOverlayOpen   = "Ctrl+Alt+V"
 )
 

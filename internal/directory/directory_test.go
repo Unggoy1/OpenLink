@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"halocommunity/internal/api"
+	"halocommunity/internal/dirclient"
 )
 
 type clock struct {
@@ -24,23 +25,23 @@ func (c *clock) Add(d time.Duration) { c.mu.Lock(); c.t = c.t.Add(d); c.mu.Unloc
 
 // setup lists servers without waiting for the reachability probe, which most
 // tests do not exercise; setupGated keeps the production behaviour.
-func setup(t *testing.T, cfg Config) (*Server, *Client, *clock) {
+func setup(t *testing.T, cfg Config) (*Server, *dirclient.Client, *clock) {
 	cfg.ShowUnconfirmed = true
 	return setupGated(t, cfg)
 }
 
-func setupGated(t *testing.T, cfg Config) (*Server, *Client, *clock) {
+func setupGated(t *testing.T, cfg Config) (*Server, *dirclient.Client, *clock) {
 	clk := &clock{t: time.Date(2026, 10, 3, 0, 0, 0, 0, time.UTC)}
 	cfg.Now = clk.Now
 	cfg.AllowPrivateHosts = true // tests register from 127.0.0.1
 	s := New(cfg)
 	ts := httptest.NewServer(s)
 	t.Cleanup(ts.Close)
-	return s, NewClient(ts.URL, cfg.RegisterKey), clk
+	return s, dirclient.NewClient(ts.URL, cfg.RegisterKey), clk
 }
 
 func code(err error) int {
-	var se *StatusError
+	var se *dirclient.StatusError
 	if errors.As(err, &se) {
 		return se.Code
 	}
@@ -50,7 +51,7 @@ func code(err error) int {
 func TestLifecycle(t *testing.T) {
 	s, c, clk := setup(t, Config{TTL: 30 * time.Second})
 	ctx := context.Background()
-	reg, err := c.Register(ctx, api.RegisterRequest{Name: "Test Server", Port: 1343, Build: "b1"})
+	reg, err := c.Register(ctx, api.RegisterRequest{Name: "Test Server", Port: 1343, Build: "b1", Version: "v0.8.2", AppProtocol: 3})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,6 +61,9 @@ func TestLifecycle(t *testing.T) {
 	list, _ := c.List(ctx, "")
 	if len(list) != 1 || list[0].Joinable || list[0].BeaconAgeMS != -1 {
 		t.Fatalf("fresh listing should not be joinable: %+v", list)
+	}
+	if list[0].Version != "v0.8.2" || list[0].AppProtocol != 3 {
+		t.Fatalf("version %q, app protocol %d not passed on", list[0].Version, list[0].AppProtocol)
 	}
 	if _, err := c.Beacon(ctx, reg.ID); code(err) != 404 {
 		t.Fatalf("beacon before heartbeat: %v", err)
@@ -116,6 +120,9 @@ func TestAuthAndValidation(t *testing.T) {
 		{Name: "x", Port: 1343, Build: ""},
 		{Name: "bad\nname", Port: 1343, Build: "b"},
 		{Name: "x", Host: "bad host!", Port: 1343, Build: "b"},
+		{Name: "x", Port: 1343, Build: "b", Version: "v1\n"},
+		{Name: "x", Port: 1343, Build: "b", Version: strings.Repeat("v", api.MaxVersionBytes+1)},
+		{Name: "x", Port: 1343, Build: "b", AppProtocol: -1},
 	} {
 		if _, err := c.Register(ctx, bad); code(err) != 400 {
 			t.Fatalf("%+v accepted: %v", bad, err)
@@ -593,7 +600,7 @@ func TestClientRefusesCrossOriginRedirect(t *testing.T) {
 		http.Redirect(w, r, other.URL+r.URL.Path, http.StatusFound)
 	}))
 	defer redirector.Close()
-	if _, err := NewClient(redirector.URL, "").List(context.Background(), ""); err == nil {
+	if _, err := dirclient.NewClient(redirector.URL, "").List(context.Background(), ""); err == nil {
 		t.Fatal("cross-origin redirect accepted")
 	}
 }

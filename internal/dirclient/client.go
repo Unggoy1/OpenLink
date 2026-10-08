@@ -1,4 +1,7 @@
-package directory
+// Package dirclient is the HTTP client for an OpenLink Directory, used by
+// OpenLink Server and the player app. It is kept apart from the directory
+// server so that the app is not rebuilt for directory-only changes.
+package dirclient
 
 import (
 	"bytes"

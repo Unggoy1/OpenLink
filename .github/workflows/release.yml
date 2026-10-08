@@ -1,12 +1,31 @@
-# Builds every program and, for a version tag (v*), publishes a GitHub Release.
+# Builds the programs and, for a version tag (v*), publishes a GitHub Release.
 # Manual runs (Actions tab -> Release -> Run workflow) build and upload
 # artifacts without publishing a release.
+#
+# All programs share one tag series, but a release carries the OpenLink app
+# and OpenLink Server only when something they are built from changed since
+# the last release that carried them (the plan job). The app's update check
+# and the website look for the newest release with each program's file, so a
+# server-only release never asks players to update. Override the choice with
+# [app] / [no-app] and [server] / [no-server] in the annotated tag's message,
+# or with the inputs of a manual run on the tag.
 name: Release
 
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      app:
+        description: "Build the OpenLink app (auto: on a tag, only if it changed since the last release with the app)"
+        type: choice
+        options: ["auto", "yes", "no"]
+        default: "auto"
+      server:
+        description: "Build OpenLink Server (auto: on a tag, only if it changed since the last release with the server)"
+        type: choice
+        options: ["auto", "yes", "no"]
+        default: "auto"
 
 permissions:
   contents: read
@@ -15,8 +34,98 @@ env:
   WAILS_VERSION: v2.16.0 # keep in step with browser/go.mod
   # Stamped into every program (main.version): the tag for releases, else dev-<commit>.
   VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('dev-{0}', github.sha) }}
+  APP_ASSET: OpenLink-windows-amd64.exe # keep in step with internal/release
+  SERVER_ASSET: OpenLink-Server-windows-amd64.zip
 
 jobs:
+  # Decides which programs this run builds, and the release's name and notes.
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      app: ${{ steps.plan.outputs.app }}
+      server: ${{ steps.plan.outputs.server }}
+      name: ${{ steps.plan.outputs.name }}
+      notes: ${{ steps.plan.outputs.notes }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+      - name: Plan
+        id: plan
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_APP: ${{ inputs.app }}
+          INPUT_SERVER: ${{ inputs.server }}
+        run: |
+          set -euo pipefail
+          tag=""; tag_msg=""; releases="[]"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            tag=$GITHUB_REF_NAME
+            git fetch --force origin "$GITHUB_REF:$GITHUB_REF" # keep the annotated tag's message
+            tag_msg=$(git for-each-ref "$GITHUB_REF" --format='%(contents)')
+            releases=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=50")
+          fi
+          # last_with FILE: the newest published release, other than this one, that carries FILE.
+          last_with() {
+            jq -r --arg a "$1" --arg t "$tag" \
+              '[.[] | select((.draft | not) and .tag_name != $t and any(.assets[]; .name == $a))][0].tag_name // ""' <<<"$releases"
+          }
+          # src_files MODULE_DIR PACKAGE GOOS: the repo's source files a Go program
+          # compiles (files, not folders, so a shared package's other files do not count).
+          src_files() {
+            (cd "$1" && GOOS=$3 go list -e -deps -f \
+              '{{if not .Standard}}{{$d := .Dir}}{{range .GoFiles}}{{$d}}/{{.}}{{"\n"}}{{end}}{{range .CgoFiles}}{{$d}}/{{.}}{{"\n"}}{{end}}{{range .EmbedFiles}}{{$d}}/{{.}}{{"\n"}}{{end}}{{end}}' \
+              "$2") | sed -n "s#^$PWD/##p"
+          }
+          # decide NAME INPUT FILE PATHS...: sets NAME=true|false and last_NAME.
+          decide() {
+            local name=$1 input=$2 file=$3 build why last=""
+            shift 3
+            if [[ "$input" == yes || "$input" == no ]]; then
+              build=$([[ "$input" == yes ]] && echo true || echo false); why="manual run input"
+            elif grep -qF "[no-$name]" <<<"$tag_msg"; then
+              build=false; why="tag message says [no-$name]"
+            elif grep -qF "[$name]" <<<"$tag_msg"; then
+              build=true; why="tag message says [$name]"
+            elif [[ -z "$tag" ]]; then
+              build=true; why="not a release: build everything"
+            else
+              last=$(last_with "$file")
+              if [[ -z "$last" ]] || ! git rev-parse -q --verify "refs/tags/$last" >/dev/null; then
+                build=true; why="no earlier release carries it"
+              elif git diff --quiet "$last" HEAD -- "$@"; then
+                build=false; why="unchanged since $last"
+              else
+                build=true; why="changed since $last"
+              fi
+            fi
+            [[ "$build" == true ]] || last=${last:-$(last_with "$file")}
+            echo "$name: $build ($why)" | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "$name=$build" >>"$GITHUB_OUTPUT"
+            printf -v "build_$name" '%s' "$build"
+            printf -v "last_$name" '%s' "$last"
+          }
+          mapfile -t app_paths < <({ src_files browser . windows; src_files browser . linux; } | sort -u)
+          mapfile -t server_paths < <(src_files . ./cmd/openlink-server windows | sort -u)
+          printf '%s\n' "app inputs outside browser/:" "${app_paths[@]}" | grep -v '^browser/'
+          decide app "${INPUT_APP:-auto}" "$APP_ASSET" browser go.mod go.sum "${app_paths[@]}"
+          decide server "${INPUT_SERVER:-auto}" "$SERVER_ASSET" native packaging/host go.mod go.sum "${server_paths[@]}"
+
+          name=$tag; notes=""
+          case "$build_app,$build_server" in
+            true,false) name="$tag · OpenLink app" ;;
+            false,true) name="$tag · OpenLink Server" ;;
+            false,false) name="$tag · OpenLink Directory" ;;
+          esac
+          [[ "$build_app" == true ]] || notes+="**OpenLink app:** unchanged in this release${last_app:+, the current version is $last_app}. Players do not need to update."$'\n\n'
+          [[ "$build_server" == true ]] || notes+="**OpenLink Server:** unchanged in this release${last_server:+, the current version is $last_server}. Hosts do not need to update."$'\n\n'
+          echo "name=$name" >>"$GITHUB_OUTPUT"
+          { echo "notes<<EOF_NOTES"; printf '%s' "$notes"; echo; echo "EOF_NOTES"; } >>"$GITHUB_OUTPUT"
+
   test:
     strategy:
       fail-fast: false
@@ -63,7 +172,8 @@ jobs:
   # openlink-loader.exe plus example configs, in one zip. The DLL is built with the runner's MSVC x64
   # tools (native/hostctl/vcvars.cmd finds them) and a static C runtime.
   host-windows:
-    needs: test
+    needs: [test, plan]
+    if: needs.plan.outputs.server == 'true'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -76,7 +186,7 @@ jobs:
       - name: Native tests
         shell: cmd
         run: |
-          for %%t in (slot provider mailbox image choice snapshot backend beacon team) do (
+          for %%t in (slot provider mailbox image choice snapshot backend beacon team bots) do (
             call native\hostctl\test-%%t.cmd "%GITHUB_WORKSPACE%\native-tests\%%t" || exit /b 1
           )
       - name: DLL-backed Go tests
@@ -102,7 +212,8 @@ jobs:
           path: OpenLink-Server-windows-amd64.zip
 
   browser-windows:
-    needs: test
+    needs: [test, plan]
+    if: needs.plan.outputs.app == 'true'
     runs-on: windows-latest
     defaults:
       run:
@@ -130,7 +241,8 @@ jobs:
   # Experimental: the Linux app has not been tested yet. A failure here does
   # not block the release.
   browser-linux:
-    needs: test
+    needs: [test, plan]
+    if: needs.plan.outputs.app == 'true'
     runs-on: ubuntu-24.04
     continue-on-error: true
     defaults:
@@ -152,9 +264,11 @@ jobs:
           name: browser-linux
           path: browser/build/bin/OpenLink-linux-amd64
 
+  # Runs when the planned builds succeeded; programs the plan left out are
+  # skipped jobs, which must not stop the release.
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [tools, host-windows, browser-windows, browser-linux]
+    if: ${{ !cancelled() && !failure() && startsWith(github.ref, 'refs/tags/v') }}
+    needs: [plan, tools, host-windows, browser-windows, browser-linux]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -171,5 +285,7 @@ jobs:
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           files: dist/*
+          name: ${{ needs.plan.outputs.name }}
+          body: ${{ needs.plan.outputs.notes }}
           generate_release_notes: true
           prerelease: ${{ contains(github.ref_name, '-') }}

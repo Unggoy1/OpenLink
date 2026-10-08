@@ -13,7 +13,7 @@ import (
 	"halocommunity/internal/api"
 	"halocommunity/internal/beacon"
 	"halocommunity/internal/bootlog"
-	"halocommunity/internal/directory"
+	"halocommunity/internal/dirclient"
 	"halocommunity/internal/game"
 	"halocommunity/internal/udpx"
 )
@@ -212,14 +212,14 @@ func (a *agent) players() int {
 }
 
 func (a *agent) directoryLoop(ctx context.Context) {
-	dc := directory.NewClient(a.cfg.Directory, a.cfg.RegisterKey)
+	dc := dirclient.NewClient(a.cfg.Directory, a.cfg.RegisterKey)
 	var reg api.RegisterResponse
 	backoff := 5 * time.Second
 	var lastCheck time.Time
 	for ctx.Err() == nil {
 		if reg.ID == "" {
 			r, err := dc.Register(ctx, api.RegisterRequest{Name: a.cfg.Name, Description: strings.TrimSpace(a.cfg.Description), Host: a.cfg.PublicHost,
-				Port: a.cfg.PublicPort, Build: a.build, Region: a.cfg.Region})
+				Port: a.cfg.PublicPort, Build: a.build, Region: a.cfg.Region, Version: version, AppProtocol: api.AppProtocol})
 			if err != nil {
 				a.log.Warn("directory registration failed", "err", err, "retry_in", backoff)
 				sleep(ctx, backoff)
@@ -237,7 +237,7 @@ func (a *agent) directoryLoop(ctx context.Context) {
 			hb.Beacon, hb.BeaconAgeMS = b, time.Since(at).Milliseconds()
 		}
 		if err := dc.Heartbeat(ctx, reg.ID, reg.Token, hb); err != nil {
-			var se *directory.StatusError
+			var se *dirclient.StatusError
 			if errors.As(err, &se) && (se.Code == 404 || se.Code == 401) {
 				a.log.Warn("listing expired; registering again")
 				reg = api.RegisterResponse{}
@@ -263,7 +263,7 @@ func (a *agent) directoryLoop(ctx context.Context) {
 // updateReachability reads the directory's probe result for our listing and
 // logs it when it changes: the built-in "is my server reachable?" check. The
 // directory shows a server to players only once its port has answered.
-func (a *agent) updateReachability(ctx context.Context, dc *directory.Client, id, token string) {
+func (a *agent) updateReachability(ctx context.Context, dc *dirclient.Client, id, token string) {
 	s, err := dc.Self(ctx, id, token)
 	if err != nil {
 		return

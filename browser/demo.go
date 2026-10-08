@@ -42,6 +42,8 @@ func (d *demoState) servers() []ServerView {
 			Thumb: vote.MapThumbRef("00000000-0000-0000-0000-000000000001", "00000000-0000-0000-0000-000000000001")}),
 		row("new", "Just Started", "us-east", -1, -1, false, nil), // no match report yet
 	}
+	list = append(list, row("future", "Needs Newer App", "eu-west", 2, 90, true, &api.Match{Phase: api.PhaseLobby}))
+	list[len(list)-1].NeedsUpdate = true
 	list[1].Description = "Casual BTB and Fiesta every night. Be nice, have fun."
 	return list
 }

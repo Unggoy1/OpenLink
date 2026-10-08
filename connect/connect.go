@@ -15,7 +15,7 @@ import (
 
 	"halocommunity/internal/api"
 	"halocommunity/internal/beacon"
-	"halocommunity/internal/directory"
+	"halocommunity/internal/dirclient"
 	"halocommunity/internal/game"
 	"halocommunity/internal/relay"
 	"halocommunity/internal/sim"
@@ -52,7 +52,7 @@ func LocalBuild(installDir string) string {
 
 // List returns the directory's servers; build filters by game build when not empty.
 func List(ctx context.Context, directoryURL, build string) ([]Server, error) {
-	return directory.NewClient(directoryURL, "").List(ctx, build)
+	return dirclient.NewClient(directoryURL, "").List(ctx, build)
 }
 
 // Options configure a session.
@@ -150,7 +150,7 @@ func Start(s Server, o Options) (*Session, error) {
 	ss.fwd = &relay.Forwarder{Listen: listen, Upstream: upstream, InterceptDown: ss.takeBallot,
 		Allow:       func(ip net.IP) bool { return ip.IsLoopback() || own[ip.String()] },
 		MaxSessions: playerSessions, MaxPPS: playerPPS}
-	dc := directory.NewClient(o.Directory, "")
+	dc := dirclient.NewClient(o.Directory, "")
 
 	var wg sync.WaitGroup
 	wg.Add(3)
@@ -224,14 +224,14 @@ func (ss *Session) Status() Status {
 // pollBeacons fetches the server's latest beacon every 2 s (hosts send a new
 // one every 2 s). The stored time is when the host captured it, so a stalled
 // host goes stale here too.
-func (ss *Session) pollBeacons(ctx context.Context, dc *directory.Client) {
+func (ss *Session) pollBeacons(ctx context.Context, dc *dirclient.Client) {
 	var last []byte
 	for ctx.Err() == nil {
 		b, err := dc.Beacon(ctx, ss.server.ID)
 		switch {
 		case err != nil && ctx.Err() == nil:
 			msg := err.Error()
-			var se *directory.StatusError
+			var se *dirclient.StatusError
 			if errors.As(err, &se) && se.Code == 404 {
 				msg = "server is no longer listed"
 			}

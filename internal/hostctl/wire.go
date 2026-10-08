@@ -20,6 +20,7 @@ const (
 	OpSetName              uint16 = 8  // name in the in-game server list (ValidName)
 	OpSetLeader            uint16 = 9  // lobby leader XUID the server holds (0 releases it)
 	OpTeamPolicy           uint16 = 10 // server team rules (TeamGuardFFA, TeamBalance)
+	OpBotPolicy            uint16 = 11 // bot backfill for the coming match (BotPolicy)
 	CodeOK                 uint16 = 0
 	CodeUnsupported        uint16 = 1
 	CodeNativePending      uint16 = 2
@@ -68,6 +69,36 @@ type Request struct {
 	Name  string     // OpSetName
 	XUID  uint64     // OpSetLeader
 	Teams TeamPolicy // OpTeamPolicy
+	Bots  BotPolicy  // OpBotPolicy
+}
+
+// BotPolicy is the server's bot backfill for the coming match (OpBotPolicy):
+// with BotBackfill, the match is topped up with bots to FillTo players (at
+// most MaxBots bots) and a bot leaves each time a player joins.
+type BotPolicy struct {
+	Flags      uint32 // BotBackfill
+	FillTo     uint32 // players plus bots wanted, 2-MaxBotFill
+	MaxBots    uint32 // 1-MaxBots
+	Difficulty uint32 // BotRecruit, BotMarine, BotODST or BotSpartan
+}
+
+// BotPolicy flags, limits and difficulties (native bot_backfill.h).
+const (
+	BotBackfill   uint32 = 1
+	knownBotFlags        = BotBackfill
+	MaxBots              = 8  // the engine's bot limit (Bot_EnforceCountLimit)
+	MaxBotFill           = 24 // largest FillTo
+	BotRecruit    uint32 = 0
+	BotMarine     uint32 = 1
+	BotODST       uint32 = 2
+	BotSpartan    uint32 = 3
+)
+
+func (p BotPolicy) valid() bool {
+	if p.Flags&^knownBotFlags != 0 || p.FillTo > MaxBotFill || p.MaxBots > MaxBots || p.Difficulty > BotSpartan {
+		return false
+	}
+	return p.Flags&BotBackfill == 0 || (p.FillTo >= 2 && p.MaxBots >= 1)
 }
 
 // TeamPolicy is the server's team rules for the coming match (OpTeamPolicy).
@@ -167,7 +198,49 @@ type Lobby struct {
 	ForcedTeamCount   int32       `json:"forced_team_count"`
 	GameState         int32       `json:"game_state"`
 	PeerTeams         [16][3]int8 `json:"peer_teams"` // per peer: requested, assigned, selected (-1 none)
+	// Version 6 bot backfill. BotsEnabled is the loaded mode's bots-enabled
+	// setting (-1 unknown); ModeBots has BotMode* bits when the mode spawns or
+	// backfills bots itself. The rest is from the last engine bot tick, which
+	// runs only while the mode has bots enabled: bots and players in the match,
+	// BotState*, the tick thread's engine role (1 = main thread), and counts of
+	// bots added, removed and not created (saturating).
+	BotsEnabled   int8   `json:"bots_enabled"`
+	ModeBots      uint8  `json:"mode_bots"`
+	BotCount      int8   `json:"bot_count"`
+	BotHumans     int8   `json:"bot_humans"`
+	BotState      uint8  `json:"bot_state"`
+	BotThreadRole int8   `json:"bot_thread_role"`
+	BotAdds       uint16 `json:"bot_adds"`
+	BotRemoves    uint16 `json:"bot_removes"`
+	BotRefused    uint16 `json:"bot_refused"`
+	BotTicks      uint32 `json:"bot_ticks"`
+	BotSupported  bool   `json:"bot_supported"` // bot job hooked, bot functions verified
+	// Bot navigation of the loaded map: NavState -1 unknown, 0 none (bots are
+	// not added), 1 present; NavFromVariant when it came from a Forge map
+	// variant; NavFaces the navmesh face count (-1 unreadable).
+	NavState       int8  `json:"nav_state"`
+	NavFromVariant bool  `json:"nav_from_variant"`
+	NavFaces       int32 `json:"nav_faces"`
+	// BotDifficulties: bit i set when the mode registered difficulty code i
+	// (9 recruit, 6 marine, 7 odst, 8 spartan); bots need at least one.
+	BotDifficulties uint16 `json:"bot_difficulties"`
 }
+
+// Lobby.ModeBots bits and Lobby.BotState values (native game_b002.h).
+const (
+	BotModeBackfill uint8 = 1 // the mode backfills bots itself
+	BotModeTeams    uint8 = 2 // the mode spawns bots on teams
+	BotModeFFA      uint8 = 4 // the mode spawns FFA bots
+
+	BotStateNone      uint8 = 0 // no bot tick yet
+	BotStateOff       uint8 = 1 // backfill off for this match
+	BotStateModeBots  uint8 = 2 // the mode manages its own bots
+	BotStateWaiting   uint8 = 3 // the engine allows no bot change right now
+	BotStateFilled    uint8 = 4 // at the wanted bot count
+	BotStateChanged   uint8 = 5 // a bot was added or removed
+	BotStateRefused   uint8 = 6 // the engine did not create a bot
+	BotStateNoNavmesh uint8 = 7 // the map has no bot navigation: no bots added
+)
 
 type Reply struct {
 	Code       uint16
@@ -216,6 +289,11 @@ func requestSize(r Request) (int, error) {
 			return 0, errors.New("invalid team policy")
 		}
 		return 64, nil
+	case OpBotPolicy:
+		if !r.Bots.valid() {
+			return 0, errors.New("invalid bot policy")
+		}
+		return 64, nil
 	case OpPrepare, OpPrepareEngine, OpInitialize:
 		if !r.Pair.Valid() {
 			return 0, errors.New("map and mode require nonzero asset and version IDs")
@@ -254,6 +332,11 @@ func EncodeRequest(w io.Writer, r Request) error {
 	}
 	if r.Op == OpTeamPolicy {
 		for i, v := range []uint32{r.Teams.Flags, r.Teams.Mode, r.Teams.Count, r.Teams.Size} {
+			binary.LittleEndian.PutUint32(b[48+4*i:], v)
+		}
+	}
+	if r.Op == OpBotPolicy {
+		for i, v := range []uint32{r.Bots.Flags, r.Bots.FillTo, r.Bots.MaxBots, r.Bots.Difficulty} {
 			binary.LittleEndian.PutUint32(b[48+4*i:], v)
 		}
 	}
@@ -315,6 +398,12 @@ func DecodeRequest(rd io.Reader) (Request, error) {
 		}
 		u := func(i int) uint32 { return binary.LittleEndian.Uint32(b[48+4*i:]) }
 		r.Teams = TeamPolicy{Flags: u(0), Mode: u(1), Count: u(2), Size: u(3)}
+	case OpBotPolicy:
+		if len(b) != 64 {
+			return r, errors.New("invalid bot-policy size")
+		}
+		u := func(i int) uint32 { return binary.LittleEndian.Uint32(b[48+4*i:]) }
+		r.Bots = BotPolicy{Flags: u(0), FillTo: u(1), MaxBots: u(2), Difficulty: u(3)}
 	case OpPrepare, OpPrepareEngine, OpInitialize:
 		if len(b) != 112 {
 			return r, errors.New("invalid prepare size")
@@ -345,7 +434,7 @@ func EncodeReply(w io.Writer, r Reply) error {
 
 func DecodeReply(rd io.Reader) (Reply, error) {
 	var r Reply
-	b, err := readFrame(rd, 256)
+	b, err := readFrame(rd, 320)
 	if err != nil {
 		return r, err
 	}
@@ -356,7 +445,7 @@ func DecodeReply(rd io.Reader) (Reply, error) {
 	switch {
 	case r.Version == 1 && len(b) == 96:
 	case r.Version == 2 && len(b) == 112, r.Version == 3 && len(b) == 176, r.Version == 4 && len(b) == 192,
-		r.Version == 5 && len(b) == 256:
+		r.Version == 5 && len(b) == 256, r.Version == 6 && len(b) == 320:
 		r.State = int32(binary.LittleEndian.Uint32(b[96:]))
 		r.Matches = binary.LittleEndian.Uint32(b[100:])
 		r.Flags = binary.LittleEndian.Uint32(b[104:])
@@ -367,8 +456,11 @@ func DecodeReply(rd io.Reader) (Reply, error) {
 			r.Lobby.Leader = binary.LittleEndian.Uint64(b[176:])
 			r.Lobby.LeaderSets = binary.LittleEndian.Uint32(b[184:])
 		}
-		if r.Version == 5 {
+		if r.Version >= 5 {
 			decodeTeams(&r.Lobby, b[192:])
+		}
+		if r.Version >= 6 {
+			decodeBots(&r.Lobby, b[256:])
 		}
 	default:
 		return r, errors.New("invalid bridge reply header")
@@ -407,6 +499,19 @@ func decodeTeams(l *Lobby, b []byte) {
 			l.PeerTeams[i][j] = int8(b[16+3*i+j])
 		}
 	}
+}
+
+func decodeBots(l *Lobby, b []byte) {
+	l.BotsEnabled, l.ModeBots, l.BotCount, l.BotHumans = int8(b[0]), b[1], int8(b[2]), int8(b[3])
+	l.BotState, l.BotThreadRole = b[4], int8(b[5])
+	l.BotAdds = binary.LittleEndian.Uint16(b[6:])
+	l.BotRemoves = binary.LittleEndian.Uint16(b[8:])
+	l.BotRefused = binary.LittleEndian.Uint16(b[10:])
+	l.BotTicks = binary.LittleEndian.Uint32(b[12:])
+	l.BotSupported = b[16] != 0
+	l.NavState, l.NavFromVariant = int8(b[17]), b[18] != 0
+	l.NavFaces = int32(binary.LittleEndian.Uint32(b[20:]))
+	l.BotDifficulties = binary.LittleEndian.Uint16(b[24:])
 }
 
 // TeamSummary renders the per-peer team bytes of the peers in PeerMask as

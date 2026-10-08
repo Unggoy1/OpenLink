@@ -142,7 +142,7 @@ const (
 
 	maxThumbSide = 4096 // larger map thumbnails are not decoded
 
-	panelWidth = 400 // DIP
+	panelWidth = 400 // DIP (overlay_scale.go)
 	rowShort   = 60  // DIP: option row with a one-line name
 	rowTall    = 78  // DIP: option row when a name needs two lines
 
@@ -297,7 +297,7 @@ type voteOverlay struct {
 	closedAt    time.Time
 	fgHwnd      uintptr
 	fgGame      bool
-	dpi         uint32
+	scale       int // device pixels per 1000 DIP (overlayScale), 0 before the first placement
 	fontTitle   uintptr
 	fontName    uintptr
 	fontSmall   uintptr
@@ -710,7 +710,8 @@ func (o *voteOverlay) mine() int {
 
 // ---- layout and drawing (window thread) ----
 
-func (o *voteOverlay) px(v int) int32 { return int32(v * int(o.dpi) / 96) }
+// px converts a design size to device pixels for the current monitor (overlayScale).
+func (o *voteOverlay) px(v int) int32 { return int32(v * o.scale / 1000) }
 
 // compact is the one-line hint used by the interactive mode until opened.
 func (o *voteOverlay) compact(cfg Settings) bool {
@@ -731,8 +732,8 @@ func (o *voteOverlay) place(hwnd uintptr, b *BallotView, cfg Settings) {
 	if r, _, _ := procGetDpiForMonitor.Call(mon, 0, uintptr(unsafe.Pointer(&dx)), uintptr(unsafe.Pointer(&dy))); r != 0 || dx == 0 {
 		dx = 96
 	}
-	if dx != o.dpi {
-		o.setDPI(dx)
+	if s := overlayScale(mi.monitor.bottom-mi.monitor.top, dx); s != o.scale {
+		o.setScale(s)
 	}
 
 	var w, h int32
@@ -762,13 +763,13 @@ func (o *voteOverlay) place(hwnd uintptr, b *BallotView, cfg Settings) {
 	procInvalidateRect.Call(hwnd, 0, 0)
 }
 
-func (o *voteOverlay) setDPI(dpi uint32) {
+func (o *voteOverlay) setScale(scale int) {
 	for _, f := range []uintptr{o.fontTitle, o.fontName, o.fontSmall} {
 		if f != 0 {
 			procDeleteObject.Call(f)
 		}
 	}
-	o.dpi = dpi
+	o.scale = scale
 	o.fontTitle = o.font(15, 600)
 	o.fontName = o.font(14, 600)
 	o.fontSmall = o.font(12, 400)
@@ -857,7 +858,7 @@ func (o *voteOverlay) paint(hwnd uintptr) {
 	g := canvas{dc: mem}
 
 	g.fill(cr, colBg)
-	if b, cfg := o.snapshot(); b != nil && o.dpi != 0 {
+	if b, cfg := o.snapshot(); b != nil && o.scale != 0 {
 		if o.compact(cfg) {
 			col := colText
 			if b.Closed {

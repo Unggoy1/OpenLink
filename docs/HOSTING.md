@@ -82,6 +82,17 @@ This creates a Windows Task Scheduler task that starts OpenLink Server **when yo
 
 Why a logon task and not a Windows service: a service runs in a separate, non-interactive session under another account. The game server expects the normal user environment (your Steam install and profile), so it is not expected to work as a service. To run unattended, set Windows to log on automatically.
 
+## Without Steam (experimental)
+
+The host package includes `steam-free\steam_api64.dll`, a replacement for the game's Steam library that lets the game server run on a PC with no Steam client, for example a dedicated server PC. With it, the server starts and holds a ready, listed lobby. **Players joining and full matches have not been tested yet.** Xbox sign-in and Halo services work as usual.
+
+1. Make a **separate copy** of the whole Halo Infinite folder for the server, **on a PC you don't play on**. Never use the folder you play from: the DLL refuses to run anything but the server, so your game would not start. A second copy of the game folder on the PC you play on also kept the game from starting in testing.
+2. In the copy, rename `game\steam_api64.dll` to `steam_api64.stock.dll` and put `steam-free\steam_api64.dll` in its place.
+3. Set `install` in `openlink-server.json` to the copy's folder (the one holding `version.txt`). Without Steam it cannot be found automatically.
+4. Run `openlink-server` as usual.
+
+The DLL implements only the Steam calls the game server makes. Any other call stops the game server with code `0xe0534645` and is named in `game\steamfree-<pid>.jsonl` in the copy; include that file when you ask for help. To undo, put `steam_api64.stock.dll` back. Details: [native/steamfree/README.md](../native/steamfree/README.md).
+
 ## Proxy mode (default)
 
 OpenLink Server listens on the public port and passes each player's traffic to the server on 127.0.0.1. Packets are never read or changed. This gives you:

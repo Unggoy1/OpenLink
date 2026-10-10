@@ -169,8 +169,9 @@ jobs:
           path: dist/*
 
   # OpenLink Server package: openlink-server.exe, openlink-control.dll and
-  # openlink-loader.exe plus example configs, in one zip. The DLL is built with the runner's MSVC x64
-  # tools (native/hostctl/vcvars.cmd finds them) and a static C runtime.
+  # openlink-loader.exe plus example configs, in one zip, and the experimental
+  # Steam-free steam_api64.dll in steam-free\. The DLLs are built with the runner's
+  # MSVC x64 tools (native/hostctl/vcvars.cmd finds them) and a static C runtime.
   host-windows:
     needs: [test, plan]
     if: needs.plan.outputs.server == 'true'
@@ -189,6 +190,9 @@ jobs:
           for %%t in (slot provider mailbox image choice snapshot backend beacon team bots) do (
             call native\hostctl\test-%%t.cmd "%GITHUB_WORKSPACE%\native-tests\%%t" || exit /b 1
           )
+      - name: Build and test the Steam-free DLL
+        shell: cmd
+        run: call native\steamfree\test.cmd "%GITHUB_WORKSPACE%\native-out\steamfree"
       - name: DLL-backed Go tests
         shell: pwsh
         run: |
@@ -203,9 +207,11 @@ jobs:
           New-Item -ItemType Directory host | Out-Null
           go build -trimpath -ldflags "-s -w -X main.version=$env:VERSION" -o host\openlink-server.exe ./cmd/openlink-server
           Copy-Item native-out\openlink-control.dll, native-out\openlink-loader.exe host\
+          New-Item -ItemType Directory host\steam-free | Out-Null
+          Copy-Item native-out\steamfree\steam_api64.dll host\steam-free\
           Copy-Item packaging\host\* host\
           Compress-Archive -Path host\* -DestinationPath OpenLink-Server-windows-amd64.zip
-          Get-ChildItem host | Format-Table Name, Length
+          Get-ChildItem -Recurse -File host | Format-Table FullName, Length
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: host-windows

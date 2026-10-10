@@ -5,6 +5,8 @@ Files
   openlink-control.dll   server-side control (loaded into the game server only)
   openlink-loader.exe    loads the DLL into the game server openlink-server.exe starts
   openlink-server.example.json, playlist.example.json
+  steam-free\steam_api64.dll   experimental: run the game server without Steam
+                               (see "Without Steam" below)
 
 Setup
   1. Keep all files in one folder.
@@ -69,6 +71,25 @@ Notes
   - The log is openlink-server.log next to openlink-server.json. When you ask
     for help, run openlink-server.exe diagnostics and attach the file it
     writes (public IPs and keys are removed).
+
+Without Steam (experimental)
+  steam-free\steam_api64.dll lets the game server run on a PC with no Steam
+  client, for example a dedicated server PC. Startup and an idle lobby work;
+  players joining and full matches are not tested yet.
+  1. Make a separate copy of the whole Halo Infinite folder for the server,
+     on a PC you don't play on. Never use the folder you play from: this DLL
+     only runs the server, so your game would not start. A second copy of
+     the game folder on the PC you play on also kept the game from starting
+     in testing.
+  2. In the copy, rename game\steam_api64.dll to steam_api64.stock.dll and
+     put steam-free\steam_api64.dll in its place.
+  3. Set "install" in openlink-server.json to the copy's folder (the one
+     holding version.txt). Without Steam it cannot be found automatically.
+  4. Run openlink-server.exe as usual.
+  If the game server stops with code 0xe0534645, the game made a Steam call
+  this DLL does not have. The file game\steamfree-<number>.jsonl in the copy
+  names it; include it when you ask for help. To undo, put
+  steam_api64.stock.dll back.
 
 Disclaimer
   OpenLink is community software provided as is, without warranty. Hosting a

@@ -102,6 +102,15 @@ For the first three, set `"lobby_leader_xuid"` to your own XUID so you get the l
 - [ ] **Diagnostics**: the `lobby` log line shows `player_mask` next to `mask`, and `peer_teams` lists the players in `player_mask`.
 - [ ] **App leaves a server that went away**: join in the app, play, then stop OpenLink Server (Ctrl+C). Within about 15 s the app leaves by itself (no session bar) and shows "… went offline and is no longer in the server list, so OpenLink left it." Then restart only the game server (watchdog or Task Manager) while OpenLink Server keeps running: the app stays joined, since the listing remains, and you can rejoin once the server is back.
 
+### Without Steam (experimental; needs a separate Windows server PC)
+
+Server copy set up as in docs/HOSTING.md "Without Steam", using the CI-built `steam-free\steam_api64.dll` (a newer compiler than the DLL tested so far). A second copy of the game folder on the PC kept the player's game from starting (2026-10-09; it started again once the copy was removed), so the server copy must be on another PC.
+
+- [x] **Idle lobby without Steam** (tester build, 2026-10-08/09): ready lobby, control DLL connected, beacons, listed and reachable; only the replacement Steam DLL loaded; no unsupported calls in about 5 minutes.
+- [ ] **CI build starts** on the server PC with no Steam installed or running: ready lobby, listed, `game\steamfree-<pid>.jsonl` has no `unsupported_` records.
+- [ ] **Join and play**: a player joins, votes and plays a whole match, then the next vote opens. If the game server stops with `0xe0534645`, keep the `steamfree-<pid>.jsonl` file: its last `unsupported_` record names the missing Steam call.
+- [ ] **Long run**: several matches and an empty lobby in between, with no unsupported calls.
+
 ## 2. Tests that need a second player
 
 **Group session plan** (for the larger lobby the user is gathering). Claude starts the directory and OpenLink Server and watches the logs; players only join with the app (memory: live test roles). Use one voting server with a curated playlist holding:

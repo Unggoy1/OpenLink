@@ -88,8 +88,8 @@ Set `"bot_backfill": {}` in openlink-server.json and `"bots": true` on the playl
 
 - [x] **Probe** (R030, 2026-10-08): `supported=true`, `thread_role=1` (main thread). The BOT8 Fiesta mode reports its own FFA bots (`mode_spawns_bots=4`, `state=mode_bots`) and is left alone. Regular Fiesta Slayer and CTF Arena have bots enabled with no built-in bots and all four difficulties registered.
 - [x] **One player, regular modes** (R030): Fiesta Slayer on Interference and CTF Arena on Kusini Bay each filled to `fill_to` 4 with 3 bots added one by one; CTF split 2 against 2 (player + 1 bot vs 2 bots); a whole CTF match played; nothing refused; when the player left, bots started leaving.
-- [ ] **Bot difficulty**: Marine played poorly (user); ODST was used for the CTF match, how it felt not noted yet. Try `"spartan"`.
-- [ ] **Navmesh check**: Forge maps with bot navigation read `navmesh=yes` (Interference 521 faces, Kusini Bay 3063; R030). Still to try: a 343 map, and a Forge map without bot navigation (`navmesh=none`, no bots added).
+- [ ] **Bot difficulty**: Marine played poorly (user). ODST used again in R035 (2026-10-10, 4v4 fill): judged only on Interference, where navigation was the problem (next item). Still to try: `"spartan"`, and ODST on a map with good navigation.
+- [ ] **Navmesh check**: Forge maps with bot navigation read `navmesh=yes` (Interference 521 faces, Kusini Bay 3063; R030, same again in R035). **A thin navmesh plays badly**: on Interference (521 faces) the bots paced back and forth near their spawns and one jumped off the map (user, R035). The playlist should leave backfill off for such maps. Still to try: a 343 map, and a Forge map without bot navigation (`navmesh=none`, no bots added).
 
 ### Server hardening (released in v0.7.6, 2026-10-08; not run live yet)
 
@@ -110,6 +110,7 @@ Server copy set up as in docs/HOSTING.md "Without Steam", using the CI-built `st
 - [ ] **CI build starts** on the server PC with no Steam installed or running: ready lobby, listed, `game\steamfree-<pid>.jsonl` has no `unsupported_` records.
 - [ ] **Join and play**: a player joins, votes and plays a whole match, then the next vote opens. If the game server stops with `0xe0534645`, keep the `steamfree-<pid>.jsonl` file: its last `unsupported_` record names the missing Steam call.
 - [ ] **Long run**: several matches and an empty lobby in between, with no unsupported calls.
+- [ ] **Linux (Docker + Wine)**: packaging/linux/README.md test plan, steps 1–7 (build, `simulate`, game server ready with beacons, join and play, clean stop).
 
 ## 2. Tests that need a second player
 
@@ -134,6 +135,7 @@ Use `team_balance` `"even"` and `bot_backfill` with `fill_to` about 8. Suggested
 6. Bot backfill: start the bots entry with few players, others join mid-match; bots leave from the larger team.
 7. The `teams` size-2 entry, then the Big Team Battle mode with everyone.
 8. During a match, the host runs `openlink-server end-match`. At the very end, stop OpenLink Server: every player's app should leave by itself (section 1 item).
+9. Throughout: Claude samples the game server process (scripts/measure/run_resources.ps1: CPU, RAM, threads per second) and OpenLink Server's traffic, so hosting specs come from real players. The bots-only baseline is R035: about 1 core of a Ryzen 7 5800X3D and 1.1 GB in a 4v4 match.
 
 Keep the logs in a new private/runtime/R0xx folder and note anything players saw that the log does not show.
 
@@ -213,6 +215,7 @@ Keep the logs in a new private/runtime/R0xx folder and note anything players saw
 - Mid-match rebalance (idea, user 2026-10-06; next after the friend test passes, or after its issues are debugged). Decided: **always a vote, never an automatic move** (yes/no ballot through the app overlay, a new ballot type on the existing vote system, with a cooldown; players without the app cannot vote). Open decision: does the vote start by itself when the server sees teams differ by 2 or more (for about 30–60 s, since imbalance mostly comes from players leaving), or only when a player asks for it in the app, or either (a server config setting)? If the vote passes, move as few players as possible (most recent joiners or players who switched) and tell them through the overlay. First check with players what a server-made team change does mid-match (death/respawn, score, weapons, a carried flag).
 
 ## Future ideas (not started)
+Roadmap update (2026-10-10): [the 16-feature priority note](../../docs/OPENLINK-FEATURE-ROADMAP.md) records the user's requested backlog and the recommendation to prioritize reliability and stock-client-compatible OpenLink improvements before optional client-extension implementation. The engine-dependent candidates need feasibility proof; this does not mark any test complete or require every candidate to ship. Existing ideas below retain their evidence and decisions.
 
 Ideas collected 2026-10-06 so they are not lost. None is decided or researched beyond the leads given; addresses are for Halo build B002 (see the field notes in the discovery kit). Ideas listed elsewhere in this file: mid-match rebalance and blocking team changes (above), the `end-match` admin command and the Docker host (section 4).
 

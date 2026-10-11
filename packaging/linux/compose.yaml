@@ -1,0 +1,22 @@
+# One OpenLink Server per service. Run from this folder:
+#   docker compose run --rm openlink simulate   (first check, no game)
+#   docker compose up -d                        (the real server)
+#   docker compose exec openlink openlink status
+services:
+  openlink:
+    build:
+      context: .
+      args:
+        # Release to download; ignored when OpenLink-Server-windows-amd64.zip
+        # is in this folder.
+        OPENLINK_VERSION: ${OPENLINK_VERSION:-}
+    image: openlink-server-wine
+    # The image runs as UID/GID 1000; /halo and ./data must be writable by it.
+    volumes:
+      - ${HALO_INSTALL:?set HALO_INSTALL to the Halo Infinite folder (with version.txt)}:/halo
+      - ./data:/data
+    ports:
+      # Container port 1343 to your public_port (the one players connect to).
+      - "${PUBLIC_PORT:-1343}:1343/udp"
+    restart: unless-stopped
+    stop_grace_period: 30s

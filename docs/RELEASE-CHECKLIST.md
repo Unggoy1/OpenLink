@@ -110,6 +110,7 @@ Server copy set up as in docs/HOSTING.md "Without Steam", using the CI-built `st
 - [ ] **CI build starts** on the server PC with no Steam installed or running: ready lobby, listed, `game\steamfree-<pid>.jsonl` has no `unsupported_` records.
 - [ ] **Join and play**: a player joins, votes and plays a whole match, then the next vote opens. If the game server stops with `0xe0534645`, keep the `steamfree-<pid>.jsonl` file: its last `unsupported_` record names the missing Steam call.
 - [ ] **Long run**: several matches and an empty lobby in between, with no unsupported calls.
+- [ ] **Linux (Docker + Wine)**: packaging/linux/README.md test plan, steps 1–7 (build, `simulate`, game server ready with beacons, join and play, clean stop).
 
 ## 2. Tests that need a second player
 

@@ -93,6 +93,8 @@ The host package includes `steam-free\steam_api64.dll`, a replacement for the ga
 
 The DLL implements only the Steam calls the game server makes. Any other call stops the game server with code `0xe0534645` and is named in `game\steamfree-<pid>.jsonl` in the copy; include that file when you ask for help. To undo, put `steam_api64.stock.dll` back. Details: [native/steamfree/README.md](../native/steamfree/README.md).
 
+A Docker image for Linux hosts, running OpenLink Server and the game server under Wine with this DLL, is in [packaging/linux](../packaging/linux/README.md). It has not run on Linux yet; its README has the test plan.
+
 ## Proxy mode (default)
 
 OpenLink Server listens on the public port and passes each player's traffic to the server on 127.0.0.1. Packets are never read or changed. This gives you:

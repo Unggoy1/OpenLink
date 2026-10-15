@@ -15,7 +15,7 @@ import (
 )
 
 // voteConfig turns on playlist voting: whenever the lobby has players and no
-// match is queued, players vote in the OpenLink app between up to Options
+// match is queued, players vote in OpenLink Launcher between up to Options
 // random playlist entries; the winner is selected and the match starts after
 // StartDelaySeconds. It replaces auto_start and playlist rotation order.
 type voteConfig struct {

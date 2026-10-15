@@ -33,7 +33,7 @@ func TestBallotRejectsMalformed(t *testing.T) {
 		func(b *Ballot) { b.Closed = true },
 		func(b *Ballot) { b.Counts[0] = -1 },
 		func(b *Ballot) { b.Options[0].ID = "" },
-		func(b *Ballot) { b.Options[1].ID = b.Options[0].ID }, // duplicate IDs break the app's keyed list
+		func(b *Ballot) { b.Options[1].ID = b.Options[0].ID }, // duplicate IDs break the launcher's keyed list
 		func(b *Ballot) {
 			for len(b.Options) <= MaxOptions {
 				b.Options = append(b.Options, Option{ID: "x", Name: "x"})

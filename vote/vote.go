@@ -1,10 +1,10 @@
 // Package vote is the playlist-voting protocol between a host agent in proxy
-// mode and the players' OpenLink apps. Messages travel as small UDP datagrams
+// mode and the players' OpenLink Launchers. Messages travel as small UDP datagrams
 // on the game port, beside the game's own traffic, like reachability probes:
 //
 //   - the agent sends each connected player a Ballot (BallotPrefix + JSON)
 //     about once a second while a vote is open and while its result is shown;
-//   - the app answers with a Cast (CastPrefix + JSON) through the same socket
+//   - the launcher answers with a Cast (CastPrefix + JSON) through the same socket
 //     it forwards the player's game traffic with, so the agent can count one
 //     vote per connected game session without any account or sign-in data.
 //
@@ -67,7 +67,7 @@ func (b *Ballot) Validate() error {
 			return errors.New("vote: malformed ballot option")
 		}
 		for _, p := range b.Options[:i] {
-			if p.ID == o.ID { // the app keys options by ID
+			if p.ID == o.ID { // the launcher keys options by ID
 				return errors.New("vote: duplicate ballot option")
 			}
 		}

@@ -24,10 +24,10 @@ func TestSemverOrder(t *testing.T) {
 func page(tag string) string { return Pages + "tag/" + tag }
 
 func TestPickOnlyOpensReleasePages(t *testing.T) {
-	app := AppAsset("windows", "amd64")
-	files := []Asset{{Name: app}}
+	launcher := LauncherAsset
+	files := []Asset{{Name: launcher}}
 	cur, _ := ParseSemver("v0.7.1")
-	got := Pick(Update{Current: "v0.7.1"}, cur, app, []Release{
+	got := Pick(Update{Current: "v0.7.1"}, cur, launcher, []Release{
 		{Tag: "v0.9.0", URL: "search-ms:query=evil", Assets: files},
 		{Tag: "v0.8.5", URL: "https://evil.example/OpenLink/releases/tag/v0.8.5", Assets: files},
 		{Tag: "v0.8.0", URL: page("v0.8.0"), Assets: files},
@@ -37,18 +37,18 @@ func TestPickOnlyOpensReleasePages(t *testing.T) {
 	}
 }
 
-// A server-only release must not tell players to update the app, and the
+// A server-only release must not tell players to update the launcher, and the
 // server looks only at releases that carry the server package.
 func TestPickSkipsReleasesWithoutTheProgram(t *testing.T) {
-	app := AppAsset("windows", "amd64")
+	launcher := LauncherAsset
 	releases := []Release{
 		{Tag: "v0.8.2", URL: page("v0.8.2"), Assets: []Asset{{Name: ServerAsset}, {Name: "SHA256SUMS"}}},
 		{Tag: "v0.8.1", URL: page("v0.8.1"), Assets: []Asset{{Name: ServerAsset}}},
-		{Tag: "v0.8.0", URL: page("v0.8.0"), Assets: []Asset{{Name: app}, {Name: ServerAsset}}},
+		{Tag: "v0.8.0", URL: page("v0.8.0"), Assets: []Asset{{Name: launcher}, {Name: ServerAsset}}},
 	}
 	cur, _ := ParseSemver("v0.8.0")
-	if got := Pick(Update{Current: "v0.8.0"}, cur, app, releases); got.Available {
-		t.Fatalf("app offered a server-only release: %+v", got)
+	if got := Pick(Update{Current: "v0.8.0"}, cur, launcher, releases); got.Available {
+		t.Fatalf("launcher offered a server-only release: %+v", got)
 	}
 	if got := Pick(Update{Current: "v0.8.0"}, cur, ServerAsset, releases); !got.Available || got.Latest != "v0.8.2" {
 		t.Fatalf("server picked %+v", got)
@@ -66,14 +66,5 @@ func TestPickPrereleaseTrack(t *testing.T) {
 	tester, _ := ParseSemver("v0.8.0-alpha.3")
 	if got := Pick(Update{}, tester, ServerAsset, releases); !got.Available {
 		t.Fatal("pre-release build was not offered the newer pre-release")
-	}
-}
-
-func TestAppAsset(t *testing.T) {
-	if got := AppAsset("windows", "amd64"); got != "OpenLink-windows-amd64.exe" {
-		t.Fatal(got)
-	}
-	if got := AppAsset("linux", "amd64"); got != "OpenLink-linux-amd64" {
-		t.Fatal(got)
 	}
 }

@@ -1,6 +1,9 @@
 package main
 
-import "halocommunity/internal/api"
+import (
+	"halocommunity/internal/api"
+	"halocommunity/vote"
+)
 
 // Server lifecycle states reported by the DLL (docs/HOST-CONTROL.md);
 // statePreGame (8, the lobby) is in voting.go.
@@ -58,6 +61,7 @@ func (a *agent) match() *api.Match {
 		if e.ID == entry {
 			o := ballotOption(e) // the same ID, name and thumbnail players see on ballots
 			m.Entry, m.Name, m.Thumb = o.ID, o.Name, o.Thumb
+			m.Mode = vote.MapThumbRef(e.Mode.AssetID, e.Mode.VersionID) // same asset/version form as Thumb
 			break
 		}
 	}

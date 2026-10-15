@@ -154,7 +154,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	go func() {
-		// Only releases that carry the server package count; app-only ones are skipped.
+		// Only releases that carry the server package count; launcher-only ones are skipped.
 		if u := release.Check(ctx, version, release.ServerAsset); u.Available {
 			a.log.Warn("a newer OpenLink Server is available", "current", version, "latest", u.Latest, "download", u.URL)
 		}

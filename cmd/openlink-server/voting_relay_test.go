@@ -10,7 +10,7 @@ import (
 	"halocommunity/vote"
 )
 
-// A vote sent the way the app sends it reaches the voter through a real proxy.
+// A vote sent the way the launcher sends it reaches the voter through a real proxy.
 func TestVoteThroughRealProxy(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

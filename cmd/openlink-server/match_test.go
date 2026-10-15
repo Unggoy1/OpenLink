@@ -5,6 +5,7 @@ import (
 
 	"halocommunity/internal/api"
 	"halocommunity/internal/playlist"
+	"halocommunity/vote"
 )
 
 func TestMatchReport(t *testing.T) {
@@ -59,7 +60,7 @@ func TestMatchReport(t *testing.T) {
 		}
 		switch got.Entry {
 		case "interference-fiesta":
-			if got.Name != fiesta.Name || got.Thumb != fiesta.Thumb {
+			if got.Name != fiesta.Name || got.Thumb != fiesta.Thumb || got.Mode != vote.MapThumbRef(f.Entries[0].Mode.AssetID, f.Entries[0].Mode.VersionID) || got.Mode == "" {
 				t.Errorf("%s: name/thumb %+v", c.name, got)
 			}
 		case "kusini-ctf":

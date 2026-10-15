@@ -17,6 +17,7 @@ browser/frontend/node_modules/
 
 # Files OpenLink Server and the app write at run time (keys, player IPs, logs)
 openlink-server.json
+openlink-launcher.json
 bans.json
 saved.json
 settings.json

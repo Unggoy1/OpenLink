@@ -3,13 +3,17 @@
 > [!CAUTION]
 > This project is in early development and lots of things are broken or buggy. Use at your own risk
 
-**Community dedicated servers for Halo Infinite.** Run your own Halo Infinite server, list it in a community directory, and let players anywhere join it, using the game's own LAN server mode. Players' games are never modified.
+**Community dedicated servers for Halo Infinite.** Run your own Halo Infinite server, list it in a community directory, and let players anywhere join it, using the game's own LAN server mode. With the OpenLink app, players' games are never modified.
 
 Three parts:
 
 - **OpenLink** (the app, `browser/`): players browse servers and join.
 - **OpenLink Server** (`openlink-server.exe`, `openlink-control.dll`, `openlink-loader.exe`): hosts run a server from a playlist.
 - **OpenLink Directory** (`openlink-directory`): the public server list.
+
+Optional, experimental:
+
+- **OpenLink Launcher** (`openlink-launcher.exe`, `openlink-launcher.dll`, `native/launcher/`): instead of the app, adds an **OpenLink Servers** browser inside Halo Infinite (Play → Custom Game). It starts your game without anti-cheat and changes it in memory. See [native/launcher/README.md](native/launcher/README.md).
 
 > Unofficial fan project. Not affiliated with or endorsed by Microsoft, Xbox or Halo Studios. Halo is a trademark of Microsoft.
 
@@ -33,7 +37,7 @@ Halo Infinite ships with a LAN server mode. A LAN server announces itself with a
 
 The app forwards game packets unchanged. They are encrypted by the game, and this project never reads, decrypts or alters them.
 
-**What this project does not do:** it never modifies players' games: the app only relays network traffic. On the host, OpenLink Server loads its control DLL into the host's own game server process (to pick maps and modes and run the lobby); it does not modify game files. Hosting this way is at the host's own risk with respect to the game's terms. It does not handle Xbox/Microsoft credentials: players sign in inside the game as usual, and the directory stores only what hosts send it (name, address, build, status, beacon).
+**What this project does not do:** the app never modifies players' games: it only relays network traffic. (The optional OpenLink Launcher is the exception: it starts the player's own game without anti-cheat and loads a DLL into it, in memory only, at the player's own risk with respect to the game's terms. It never changes game files or anti-cheat files, services or settings.) On the host, OpenLink Server loads its control DLL into the host's own game server process (to pick maps and modes and run the lobby); it does not modify game files. Hosting this way is at the host's own risk with respect to the game's terms. It does not handle Xbox/Microsoft credentials: players sign in inside the game as usual, and the directory stores only what hosts send it (name, address, build, status, beacon).
 
 ## Requirements
 
@@ -57,6 +61,8 @@ Open the OpenLink app, click **Join** on a server, then in Halo Infinite go to *
 
 - Windows is the main platform. A Linux build of the app (for the game under Proton) is produced by CI but has not been tested yet.
 - If the server is not listed in the game, switch Settings to **LAN broadcast**. When the server runs on the same PC, the app does this by itself.
+
+With the optional **OpenLink Launcher** instead of the app: run `openlink-launcher.exe`, then in Halo Infinite go to **Play → Custom Game → OpenLink Servers** and join from there. See [native/launcher/README.md](native/launcher/README.md).
 
 ## Running a directory
 
@@ -121,7 +127,7 @@ Requires Go 1.27+. On Windows:
 .\build.ps1
 ```
 
-This runs the tests and writes `bin\openlink-server.exe`, `bin\openlink-directory.exe` and `bin\linux-amd64\openlink-directory`. These use only the Go standard library. The player app is built separately in `browser/` (see its README).
+This runs the tests and writes `bin\openlink-server.exe`, `bin\openlink-directory.exe` and `bin\linux-amd64\openlink-directory`. These use only the Go standard library. The player app is built separately in `browser/` (see its README). The optional OpenLink Launcher is C++ and needs the Visual Studio C++ x64 tools: `native\launcher\test.cmd <output-folder>` builds it and runs its tests (see [native/launcher/README.md](native/launcher/README.md)).
 
 ## Versions and releases
 

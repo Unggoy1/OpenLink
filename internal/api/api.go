@@ -138,6 +138,9 @@ type Match struct {
 	Entry string `json:"entry,omitempty"` // playlist entry ID
 	Name  string `json:"name,omitempty"`  // display name (the entry's name, or its ID)
 	Thumb string `json:"thumb,omitempty"` // map thumbnail reference (vote.ThumbURLs builds the URLs)
+	// Mode is the published game variant as "<asset id>/<version id>", for clients that
+	// show the mode themselves (the optional in-game browser).
+	Mode string `json:"mode,omitempty"`
 }
 
 // Valid reports whether m is safe to list: a known phase, and an entry, name
@@ -154,7 +157,7 @@ func (m *Match) Valid() bool {
 			return false
 		}
 	}
-	return vote.ValidThumbRef(m.Thumb)
+	return vote.ValidThumbRef(m.Thumb) && vote.ValidThumbRef(m.Mode)
 }
 
 // Reachability values in ServerInfo.

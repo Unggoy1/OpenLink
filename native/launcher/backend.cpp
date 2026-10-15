@@ -13,6 +13,9 @@
 #include "browser_lua.h"
 #include "cbrowser.h"
 #include "version.h"
+#include "vote.h"
+#include "overlay.h"
+#include "mapheader.h"
 namespace clientjoin {
 namespace {
 constexpr uintptr_t kFrontSlot=0x3706f18,kPreSlot=0x3706fc8,kFront=0xcaf72c,kPre=0x6a772c;
@@ -295,7 +298,16 @@ void TickPersistentUi() noexcept {
         else browser::Log(!e && shown ? "join refusal dialog requested" : "join refusal dialog failed");
     }
     TickPostMatch(now);
-    if(now<ui_next) return;
+    // Lobby vote panel: the script reports whether the lobby is showing and where its host rows are.
+    static ULONGLONG vote_next=0; static uint32_t vote_busy=0;
+    if(ui_stage==UiRunning && now>=vote_next) {
+        static const char kVoteTick[]="if OpenLinkUI and OpenLinkUI.voteTick then OpenLinkUI.voteTick() end";
+        uint32_t ran=0;
+        if(RunUiChunk(kVoteTick,sizeof(kVoteTick)-1,ran)!=ERROR_BUSY) {
+            if(vote_busy>=20) { char note[80]; sprintf_s(note,"vote tick ran after %u busy tries",vote_busy); browser::Log(note); }
+            vote_next=now+500; vote_busy=0;
+        } else ++vote_busy;
+    }    if(now<ui_next) return;
     static const char kReady[]="assert(type(AddListItemsToCUI)=='function' and type(stringid)=='function')";
     static const char kHealthy[]="assert(OpenLinkUI ~= nil and type(OpenLink)=='table' and AddListItemsToCUI ~= OpenLinkUI.original); if OpenLinkUI.wrapDispose then pcall(OpenLinkUI.wrapDispose) end";
     uint32_t ok=0; DWORD e=ERROR_SUCCESS;
@@ -447,6 +459,10 @@ DWORD StartPersistent(const char* directory,const char* lan_ip) noexcept {
     if(!watcher) { browser::Log("boundary watcher failed to start"); return GetLastError(); }
     CloseHandle(watcher);
     // Customs Browser OpenLink mode; without it the simple list page is the fallback.
+    overlay::SetLog(&browser::Log);
+    // The lobby's map header shows the map the server will really play (optional).
+    if(const DWORD header=mapheader::Install(image,&browser::Log)) { char note[96]; sprintf_s(note,"lobby map header hook unavailable (%lu)",header); browser::Log(note); }
+    vote::Install(); // playlist votes from the relay; the overlay starts with the first ballot
     if(const DWORD hooks=cbrowser::Install(image)) { char note[96]; sprintf_s(note,"customs browser hooks unavailable (%lu); using the list page",hooks); browser::Log(note); }
     persistent.store(true); browser::SetActive(true);
     char line[512]; sprintf_s(line,"OpenLink Launcher %s started (directory %s, %s)",OPENLINK_VERSION,directory,lan_ip[0] ? lan_ip : "loopback relay"); browser::Log(line);

@@ -9,6 +9,7 @@
 using Fn=uintptr_t (*)(uintptr_t);
 Fn original=nullptr;
 uintptr_t Handler(uintptr_t x) { return original(x)*10; }
+uintptr_t Replacement(uintptr_t x) { return x+100; }
 void check(bool ok,const char* why) { if(!ok) { std::fprintf(stderr,"FAIL: %s\n",why); std::exit(1); } }
 int main() {
     // Mov [rsp+8],rbx ; lea rax,[rcx+1] ; ret  (first 5 bytes are one RIP-free instruction)
@@ -25,6 +26,12 @@ int main() {
     check(original!=nullptr && !e,"detour installed");
     check(target(4)==50,"handler runs and the trampoline reaches the original");
     check(original(7)==8,"trampoline alone is the original");
+    // Replace(): a second copy of the function is replaced whole by a handler.
+    std::memcpy(page+0x100,code,sizeof(code));
+    const Fn replaced=reinterpret_cast<Fn>(page+0x100);
+    check(!clientjoin::detour::Replace(uintptr_t(page),0x100,wrong,5,reinterpret_cast<const void*>(&Replacement),&e) && e==ERROR_BAD_EXE_FORMAT,"replace mismatch refused");
+    check(clientjoin::detour::Replace(uintptr_t(page),0x100,code,10,reinterpret_cast<const void*>(&Replacement),&e) && !e,"replace installed");
+    check(replaced(4)==104 && target(4)==50,"replacement runs alone; the other detour is unchanged");
     check(clientjoin::cbrowser::TestParseGuid(),"GUID text to Windows GUID layout");
     std::puts("detour tests passed");
 }

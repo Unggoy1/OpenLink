@@ -20,7 +20,11 @@ namespace {
 constexpr uint16_t kGamePort=1343,kDiscoveryPort=7117;
 constexpr ULONGLONG kBeaconInterval=1000,kBeaconFresh=15000,kBeaconPoll=2000,kGoneAfter=10000,kIdle=120000;
 constexpr size_t kMaxBeacon=512,kMaxBody=1<<20,kMaxSessions=4;
-constexpr char kBallotPrefix[]="HICOMM-BALLOT ";
+constexpr char kBallotPrefix[]="HICOMM-BALLOT ",kCastPrefix[]="HICOMM-VOTE ";
+// Votes waiting for the relay loop (one slot: a newer vote replaces an unsent one).
+SRWLOCK outbox_lock=SRWLOCK_INIT;
+char outbox[256]={}; size_t outbox_size=0;
+std::atomic<void (*)(const Ballot&)> ballot_callback{nullptr};
 
 SRWLOCK lock=SRWLOCK_INIT;
 Config config={};
@@ -242,6 +246,13 @@ DWORD Run(uint32_t mine) {
             }
         }
         for(auto& s:sessions) if(s.upstream!=INVALID_SOCKET && now-s.last>=kIdle) { closesocket(s.upstream); s.upstream=INVALID_SOCKET; }
+        // A queued vote leaves on every live session socket, like the app's relay: the server
+        // accepts it from whichever session its game server answered.
+        {
+            char out[sizeof(outbox)]; size_t n=0;
+            AcquireSRWLockExclusive(&outbox_lock); if(outbox_size) { std::memcpy(out,outbox,outbox_size); n=outbox_size; outbox_size=0; } ReleaseSRWLockExclusive(&outbox_lock);
+            if(n) for(auto& s:sessions) if(s.upstream!=INVALID_SOCKET) send(s.upstream,out,int(n),0);
+        }
         fd_set readable; FD_ZERO(&readable); FD_SET(listen_socket,&readable);
         for(auto& s:sessions) if(s.upstream!=INVALID_SOCKET) FD_SET(s.upstream,&readable);
         timeval slice={0,100000};
@@ -268,7 +279,13 @@ DWORD Run(uint32_t mine) {
             const int got=recv(s.upstream,reinterpret_cast<char*>(buffer),sizeof(buffer),0);
             if(got<=0) continue;
             s.last=now; last_down.store(now);
-            if(IsBallot(buffer,size_t(got))) continue; // vote traffic belongs to the app, never the game
+            // Vote traffic is for OpenLink, never the game.
+            if(IsBallot(buffer,size_t(got))) {
+                Ballot b; const auto callback=ballot_callback.load();
+                if(callback && generation.load()==mine && ParseBallot(buffer,size_t(got),b)) callback(b);
+                continue;
+            }
+            if(size_t(got)>=sizeof(kCastPrefix)-1 && !std::memcmp(buffer,kCastPrefix,sizeof(kCastPrefix)-1)) continue;
             if(sendto(listen_socket,reinterpret_cast<const char*>(buffer),got,0,reinterpret_cast<sockaddr*>(&s.client),sizeof(s.client))==got) {
                 const bool first=!s.answered; s.answered=true;
                 Update([&](Status& st){ ++st.down; if(first || st.state==Advertising) st.state=Answered; });
@@ -358,6 +375,93 @@ uint32_t ListServers(const char* directory,Row* rows,size_t capacity,size_t& cou
     ReleaseSRWLockExclusive(&list_lock); return result;
 }
 bool IsBallot(const uint8_t* d,size_t n) noexcept { const size_t p=sizeof(kBallotPrefix)-1; return n>=p && !std::memcmp(d,kBallotPrefix,p); }
+namespace {
+// Parses a JSON array, calling item(c) for each element (which must consume it).
+template<class F> bool Array(Cursor& c,F item) {
+    Space(c); if(c.p>=c.end || *c.p!='[') return false; ++c.p; Space(c);
+    if(c.p<c.end && *c.p==']') { ++c.p; return true; }
+    for(;;) {
+        if(!item(c)) return false;
+        Space(c); if(c.p>=c.end) return false;
+        if(*c.p==',') { ++c.p; continue; } if(*c.p==']') { ++c.p; return true; } return false;
+    }
+}
+// Parses a JSON object, calling field(c,key) for each member (which must consume the value).
+template<class F> bool Object(Cursor& c,F field) {
+    Space(c); if(c.p>=c.end || *c.p!='{') return false; ++c.p; Space(c);
+    if(c.p<c.end && *c.p=='}') { ++c.p; return true; }
+    for(;;) {
+        char key[32]; const Cursor saved=c; if(!String(c,key,sizeof(key))) { c=saved; if(!String(c,nullptr,0)) return false; key[0]=0; }
+        Space(c); if(c.p>=c.end || *c.p!=':') return false; ++c.p; Space(c);
+        if(!field(c,key)) return false;
+        Space(c); if(c.p>=c.end) return false;
+        if(*c.p==',') { ++c.p; continue; } if(*c.p=='}') { ++c.p; return true; } return false;
+    }
+}
+bool Bool(Cursor& c,bool& v) {
+    Space(c);
+    if(c.end-c.p>=4 && !std::strncmp(c.p,"true",4)) { c.p+=4; v=true; return true; }
+    if(c.end-c.p>=5 && !std::strncmp(c.p,"false",5)) { c.p+=5; v=false; return true; }
+    return false;
+}
+bool ThumbRef(const char* s) { // "" or "<uuid>/<uuid>", lower-case hex (vote.ValidThumbRef)
+    const size_t n=std::strlen(s); if(!n) return true; if(n!=73 || s[36]!='/') return false;
+    for(size_t i=0;i<n;++i) {
+        if(i==36) continue; const size_t j=i%37;
+        if(j==8 || j==13 || j==18 || j==23) { if(s[i]!='-') return false; continue; }
+        if(!((s[i]>='0' && s[i]<='9') || (s[i]>='a' && s[i]<='f'))) return false;
+    }
+    return true;
+}
+}
+bool ParseBallot(const uint8_t* d,size_t n,Ballot& b) noexcept {
+    const size_t p=sizeof(kBallotPrefix)-1;
+    if(n<=p || n>1200 || std::memcmp(d,kBallotPrefix,p)) return false;
+    b={}; b.mine=-1; b.winner=-1; b.start_ms=-1;
+    Cursor c={reinterpret_cast<const char*>(d)+p,reinterpret_cast<const char*>(d)+n};
+    bool have_round=false,have_options=false,have_counts=false; uint32_t counts=0;
+    const bool ok=Object(c,[&](Cursor& v,const char* key) {
+        int64_t x=0;
+        if(!std::strcmp(key,"round")) { if(!Number(v,x) || x<=0) return false; b.round=uint64_t(x); have_round=true; return true; }
+        if(!std::strcmp(key,"remaining_ms")) { if(!Number(v,x) || x<0) return false; b.remaining_ms=x; return true; }
+        if(!std::strcmp(key,"start_ms")) { if(!Number(v,x)) return false; b.start_ms=x; return true; }
+        if(!std::strcmp(key,"mine")) { if(!Number(v,x)) return false; b.mine=int32_t(x<-1 ? -2 : x>8 ? 8 : x); return true; }
+        if(!std::strcmp(key,"winner")) { if(!Number(v,x)) return false; b.winner=int32_t(x<-1 ? -2 : x>8 ? 8 : x); return true; }
+        if(!std::strcmp(key,"closed")) return Bool(v,b.closed);
+        if(!std::strcmp(key,"counts")) { have_counts=true; return Array(v,[&](Cursor& e) { if(!Number(e,x) || x<0 || counts>=kMaxVoteOptions) return false; b.counts[counts++]=int32_t(x>1000000 ? 1000000 : x); return true; }); }
+        if(!std::strcmp(key,"options")) {
+            have_options=true;
+            return Array(v,[&](Cursor& e) {
+                if(b.count>=kMaxVoteOptions) return false;
+                BallotOption& o=b.options[b.count++];
+                return Object(e,[&](Cursor& f,const char* k) {
+                    if(!std::strcmp(k,"id")) return String(f,o.id,sizeof(o.id));
+                    if(!std::strcmp(k,"name")) return String(f,o.name,sizeof(o.name));
+                    if(!std::strcmp(k,"thumb")) return String(f,o.thumb,sizeof(o.thumb));
+                    return Skip(f);
+                });
+            });
+        }
+        return Skip(v);
+    });
+    Space(c);
+    if(!ok || c.p!=c.end || !have_round || !have_options || !have_counts || !b.count || counts!=b.count) return false;
+    for(uint32_t i=0;i<b.count;++i) {
+        if(!b.options[i].id[0] || !ThumbRef(b.options[i].thumb)) return false;
+        for(uint32_t j=0;j<i;++j) if(!std::strcmp(b.options[i].id,b.options[j].id)) return false;
+    }
+    const int32_t count=int32_t(b.count);
+    if(b.mine<-1 || b.mine>=count || b.winner<-1 || b.winner>=count || (b.closed && b.winner<0)) return false;
+    return true;
+}
+void SetBallotCallback(void (*callback)(const Ballot&)) noexcept { ballot_callback.store(callback); }
+bool SendToServer(const char* data,size_t size) noexcept {
+    if(!data || !size || size>sizeof(outbox)) return false;
+    AcquireSRWLockShared(&lock); const uint32_t live=status.sessions; ReleaseSRWLockShared(&lock);
+    if(!live) return false;
+    AcquireSRWLockExclusive(&outbox_lock); std::memcpy(outbox,data,size); outbox_size=size; ReleaseSRWLockExclusive(&outbox_lock);
+    return true;
+}
 
 size_t Base64Decode(const char* text,size_t length,uint8_t* out,size_t capacity) noexcept {
     auto value=[](char c)->int { if(c>='A'&&c<='Z') return c-'A'; if(c>='a'&&c<='z') return c-'a'+26; if(c>='0'&&c<='9') return c-'0'+52; if(c=='+') return 62; if(c=='/') return 63; return -1; };

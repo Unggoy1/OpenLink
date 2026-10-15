@@ -212,6 +212,50 @@ if OpenLinkUI == nil and type(AddListItemsToCUI) == "function" then
       pcall(function() local s = GetObject(cls); if s then OpenLinkUI.screen = s; hideStock(s) end end)
     end
   end
+  -- Vote panel placement: on the server lobby screen (CustomGameScreen, not loading) the DLL draws
+  -- the vote over the lobby's greyed-out host rows; elsewhere it floats. The rows' rectangle comes
+  -- from the widgets themselves: position + scale x size, up the parent chain (as the game's own
+  -- LocalToGlobal does, FN068), in UI units. Logged once per screen.
+  local function globalRect(w)
+    local x0, y0, x1, y1 = 0, 0, w.Width, w.Height
+    if type(x1) ~= "number" or type(y1) ~= "number" then return nil end
+    local n = w
+    for depth = 1, 32 do
+      if n == nil then break end
+      local px, py, sx, sy = nil, nil, nil, nil
+      if not pcall(function() px, py, sx, sy = n.PositionX, n.PositionY, n.ScaleX, n.ScaleY end) then break end
+      if type(px) ~= "number" or type(py) ~= "number" then break end
+      if type(sx) ~= "number" or sx == 0 then sx = 1 end
+      if type(sy) ~= "number" or sy == 0 then sy = 1 end
+      x0, x1, y0, y1 = px + sx * x0, px + sx * x1, py + sy * y0, py + sy * y1
+      local parent = nil
+      if not pcall(function() parent = n.Parent end) then break end
+      n = parent
+    end
+    return x0, y0, x1, y1
+  end
+  OpenLinkUI.voteTick = function()
+    if type(OpenLink) ~= "table" or not OpenLink.SetLobbyVote then return end
+    local on, x0, y0, x1, y1, bottom = false, 0, 0, 0, 0, 0
+    if type(CustomGameScreen) == "table" and type(GetObject) == "function" then
+      local s = nil
+      pcall(function() s = GetObject(CustomGameScreen) end)
+      if s then
+        local loading, lan = nil, nil
+        pcall(function() loading = s.dc.IsLoadingData; lan = s.dc.IsLANLobby end)
+        on = loading ~= true
+        pcall(function() x0, y0, x1, y1 = globalRect(s.modeOptionsList) end)
+        pcall(function() local a, b, c, d = globalRect(s.playButton); bottom = d end)
+        x0, y0, x1, y1, bottom = x0 or 0, y0 or 0, x1 or 0, y1 or 0, bottom or 0
+        if s ~= OpenLinkUI.lobbySeen then
+          OpenLinkUI.lobbySeen = s
+          log("lobby screen: IsLoadingData=" .. tostring(loading) .. " IsLANLobby=" .. tostring(lan) ..
+              " rows=" .. tostring(x0) .. "," .. tostring(y0) .. "," .. tostring(x1) .. "," .. tostring(y1) .. " play bottom=" .. tostring(bottom))
+        end
+      end
+    end
+    OpenLink.SetLobbyVote(on, x0, y0, x1, y1, bottom)
+  end
   AddListItemsToCUI = function(items, list, typename, ...)
     if not isLanding(items, typename) then return original(items, list, typename, ...) end
     -- The stock Customs Browser item must always open the official browser.

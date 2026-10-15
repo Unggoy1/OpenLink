@@ -71,12 +71,16 @@ uint8_t* Build(size_t& count,TileName (&tile_names)[kMaxRecords],size_t& tile_co
     auto* set=static_cast<uint8_t*>(HeapAlloc(GetProcessHeap(),HEAP_ZERO_MEMORY,total*kRecord));
     if(!set) return nullptr;
     for(size_t i=0;i<total;++i) {
+        // A server between matches (for example while its players vote) has no map yet: it is
+        // listed without map art. Listings with neither art nor open slots (a server's
+        // reachability check) stay out.
         uint8_t map_asset[16],map_version[16];
-        if(!ParsePair(rows[i].thumb,map_asset,map_version)) continue;
+        const bool art=ParsePair(rows[i].thumb,map_asset,map_version);
+        if(!art && !rows[i].joinable) continue;
         uint8_t* r=set+count*kRecord; Game<Ctor>(kCtor)(r); ++count;
         AssignText(r+0x00,rows[i].name);
         char handle[64]; sprintf_s(handle,"%s%s",kSentinel,rows[i].id); AssignText(r+0x20,handle);
-        std::memcpy(r+0x50,map_asset,16); std::memcpy(r+0x60,map_version,16);
+        if(art) { std::memcpy(r+0x50,map_asset,16); std::memcpy(r+0x60,map_version,16); }
         // The playlist's published game variant is the UGC variant (+0x90/+0xa0).
         ParsePair(rows[i].mode,r+0x90,r+0xa0);
         // Only a full listing (16+ players) shows full; other non-joinable listings keep
@@ -85,7 +89,11 @@ uint8_t* Build(size_t& count,TileName (&tile_names)[kMaxRecords],size_t& tile_co
         std::memcpy(r+0x118,&players,4); std::memcpy(r+0x11c,&max,4);
         TileName& t=tile_names[tile_count++]; t={}; strcpy_s(t.id,rows[i].id);
         const int n=MultiByteToWideChar(CP_UTF8,0,rows[i].name,-1,t.name,96); t.length=n>0 ? size_t(n-1) : 0;
-        const int m=MultiByteToWideChar(CP_UTF8,0,rows[i].match,-1,t.mode,96); t.mode_length=m>0 ? size_t(m-1) : 0;
+        const char* phase=rows[i].phase;
+        const char* label=rows[i].match[0] ? rows[i].match :
+            !std::strcmp(phase,"voting") ? "Voting for the next match" : !std::strcmp(phase,"starting") ? "Starting a match" :
+            !std::strcmp(phase,"in_game") ? "In a match" : !std::strcmp(phase,"post_game") ? "Match ending" : "In the lobby";
+        const int m=MultiByteToWideChar(CP_UTF8,0,label,-1,t.mode,96); t.mode_length=m>0 ? size_t(m-1) : 0;
         const int d=MultiByteToWideChar(CP_UTF8,0,rows[i].description,-1,t.description,484); t.description_length=d>0 ? size_t(d-1) : 0;
     }
     if(!count) { HeapFree(GetProcessHeap(),0,set); return nullptr; }
@@ -361,6 +369,7 @@ bool SetMode(bool on) noexcept {
     if(was && !on) { clear_pending.store(true); text::SetOverlayActive(false); browser::Log("customs browser OpenLink mode off"); }
     return true;
 }
+bool ParseThumbRef(const char* ref,uint8_t (&asset)[16],uint8_t (&version)[16]) noexcept { return ref && ParsePair(ref,asset,version); }
 bool TakeNotice() noexcept { return notice_pending.exchange(false); }
 void RequeueNotice() noexcept { notice_pending.store(true); }
 void Disable() noexcept { disabled.store(true); text::SetOverlayActive(false); if(mode.exchange(false)) browser::Log("customs browser OpenLink mode disabled"); }

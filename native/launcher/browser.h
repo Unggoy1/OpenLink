@@ -20,6 +20,8 @@ void JoinResult(uint32_t code) noexcept;           // reported back to Lua via O
 void SetActive(bool active) noexcept;              // false once OpenLink stopped (anti-cheat boundary)
 const Config& Current() noexcept;
 uint32_t Fetches() noexcept;
+// The current match's map ("<asset>/<version>") of the listing last joined, if listed.
+bool JoinedThumb(char (&thumb)[96]) noexcept;
 uint32_t FetchError() noexcept;                    // last directory fetch result (0 = ok)
 bool Configured() noexcept;                        // Configure started the fetch thread
 bool Fetched() noexcept;                           // a fetch has succeeded at least once
@@ -32,7 +34,7 @@ const char* RequestJoin(const char* listing) noexcept;
 // RequestJoin refusal for a listing whose OpenLink Server needs a newer launcher (app protocol).
 constexpr const char* kNeedsUpdate="server needs a newer OpenLink Launcher";
 // Copy of the current snapshot for the Customs Browser records; rev changes with it.
-struct BrowserRow { char id[40]; char name[96]; char thumb[96]; char mode[96]; char match[96]; char description[484]; int32_t players; bool joinable; };
+struct BrowserRow { char id[40]; char name[96]; char thumb[96]; char mode[96]; char match[96]; char phase[16]; char description[484]; int32_t players; bool joinable; };
 size_t CopyRows(BrowserRow* out,size_t capacity,uint32_t& rev) noexcept;
 }
 }

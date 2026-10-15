@@ -6,6 +6,7 @@
 #include <windows.h>
 #include "backend.h"
 #include "boundary.h"
+#include "overlay.h"
 #include <cstring>
 #include <cstdio>
 #include <cwchar>
@@ -26,7 +27,8 @@ volatile LONG started=0;
 // Starts OpenLink for the whole game process. Settings come from openlink-launcher.json
 // next to this DLL, all optional: "directory" (default: the public OpenLink Directory) and
 // "lan_ip" (empty: loopback relay, the normal mode; set it to this PC's LAN address only
-// when an OpenLink Server runs on the same PC and owns the loopback game port).
+// when an OpenLink Server runs on the same PC and owns the loopback game port) and
+// "vote_overlay" ("off" hides the in-game vote panel).
 extern "C" __declspec(dllexport) DWORD WINAPI HiOpenLinkStart(void*) {
     if(InterlockedCompareExchange(&started,1,0)) return ERROR_ALREADY_EXISTS;
     const DWORD boundary=clientjoin::CheckNoEac(GetCurrentProcessId()); if(boundary) return boundary;
@@ -48,6 +50,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI HiOpenLinkStart(void*) {
         char value[160];
         if(ConfigString(json,"directory",value,sizeof(value)) && value[0]) strcpy_s(directory,value);
         if(ConfigString(json,"lan_ip",value,sizeof(value))) { if(std::strlen(value)>=sizeof(lan_ip)) return ERROR_INVALID_PARAMETER; strcpy_s(lan_ip,value); }
+        if(ConfigString(json,"vote_overlay",value,sizeof(value)) && !_stricmp(value,"off")) clientjoin::overlay::SetEnabled(false);
     }
     WSADATA data; if(WSAStartup(MAKEWORD(2,2),&data)) return ERROR_NETWORK_UNREACHABLE; // kept for the process lifetime
     return clientjoin::StartPersistent(directory,lan_ip);

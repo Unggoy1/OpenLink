@@ -55,5 +55,25 @@ int main() {
         check(ParseServerList(servers,std::strlen(servers),rows,1,count) && count==1,"capacity bounds rows");
         check(!ParseServerList("[{\"id\":\"a\"",10,rows,4,count),"truncated list refused");
     }
+    {
+        auto parse=[](const char* text,Ballot& out) { return ParseBallot(reinterpret_cast<const uint8_t*>(text),std::strlen(text),out); };
+        Ballot v;
+        const char open[]="HICOMM-BALLOT {\"round\":3,\"options\":[{\"id\":\"interference-fiesta\",\"name\":\"Fiesta Slayer on Interference\","
+                          "\"thumb\":\"70f884d7-6869-469d-b4d2-4219627e2d83/cc791b4b-054a-4653-9034-5dc13c809c54\"},{\"id\":\"kusini-ctf\",\"name\":\"CTF: Arena on Kusini Bay\"}],"
+                          "\"remaining_ms\":12500,\"counts\":[1,0],\"mine\":0,\"closed\":false,\"winner\":-1,\"start_ms\":-1}";
+        check(parse(open,v) && v.round==3 && v.count==2 && !std::strcmp(v.options[1].id,"kusini-ctf") && !std::strcmp(v.options[0].name,"Fiesta Slayer on Interference") &&
+              !v.options[1].thumb[0] && v.remaining_ms==12500 && v.counts[0]==1 && v.mine==0 && !v.closed && v.winner==-1 && v.start_ms==-1,"open ballot parsed");
+        const char closed[]="HICOMM-BALLOT {\"round\":3,\"options\":[{\"id\":\"a\",\"name\":\"A\"},{\"id\":\"b\",\"name\":\"B\"}],\"remaining_ms\":0,\"counts\":[0,2],\"mine\":-1,\"closed\":true,\"winner\":1,\"start_ms\":4000}";
+        check(parse(closed,v) && v.closed && v.winner==1 && v.start_ms==4000 && v.mine==-1,"closed ballot parsed");
+        check(!parse("HICOMM-BALLOT {\"round\":3,\"options\":[{\"id\":\"a\",\"name\":\"A\"}],\"remaining_ms\":1,\"counts\":[0,1],\"mine\":-1,\"closed\":false,\"winner\":-1,\"start_ms\":-1}",v),"counts must match options");
+        check(!parse("HICOMM-BALLOT {\"round\":0,\"options\":[{\"id\":\"a\",\"name\":\"A\"}],\"remaining_ms\":1,\"counts\":[0],\"mine\":-1,\"closed\":false,\"winner\":-1,\"start_ms\":-1}",v),"round 0 refused");
+        check(!parse("HICOMM-BALLOT {\"round\":1,\"options\":[{\"id\":\"a\",\"name\":\"A\"}],\"remaining_ms\":1,\"counts\":[0],\"mine\":1,\"closed\":false,\"winner\":-1,\"start_ms\":-1}",v),"own vote out of range refused");
+        check(!parse("HICOMM-BALLOT {\"round\":1,\"options\":[{\"id\":\"a\",\"name\":\"A\"}],\"remaining_ms\":0,\"counts\":[0],\"mine\":-1,\"closed\":true,\"winner\":-1,\"start_ms\":-1}",v),"closed ballot needs a winner");
+        check(!parse("HICOMM-BALLOT {\"round\":1,\"options\":[{\"id\":\"a\",\"name\":\"A\"},{\"id\":\"a\",\"name\":\"B\"}],\"remaining_ms\":1,\"counts\":[0,0],\"mine\":-1,\"closed\":false,\"winner\":-1,\"start_ms\":-1}",v),"duplicate option ids refused");
+        check(!parse("HICOMM-BALLOT {\"round\":1,\"options\":[{\"id\":\"a\",\"name\":\"A\",\"thumb\":\"nope\"}],\"remaining_ms\":1,\"counts\":[0],\"mine\":-1,\"closed\":false,\"winner\":-1,\"start_ms\":-1}",v),"bad thumbnail reference refused");
+        check(!parse("HICOMM-BALLOT {\"round\":1,\"options\":[{\"id\":\"a\",\"name\":\"A\"}],\"remaining_ms\":1,\"counts\":[0],\"mine\":-1,\"closed\":false,\"winner\":-1,\"start_ms\":-1}x",v),"trailing bytes refused");
+        check(!parse("HICOMM-VOTE {\"round\":1,\"choice\":0}",v),"a cast is not a ballot");
+        check(!SendToServer("x",1),"no vote is sent without a live relay session");
+    }
     std::puts("relay tests passed");
 }

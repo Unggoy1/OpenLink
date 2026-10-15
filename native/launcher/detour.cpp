@@ -22,9 +22,14 @@ uint8_t* NearPage(uintptr_t image) {
 }
 void AbsoluteJump(uint8_t* at,const void* target) { at[0]=0xff; at[1]=0x25; std::memset(at+2,0,4); const uintptr_t t=reinterpret_cast<uintptr_t>(target); std::memcpy(at+6,&t,8); }
 }
+bool Replace(uintptr_t image,uintptr_t rva,const uint8_t* expected,size_t expected_length,const void* handler,uint32_t* error) noexcept {
+    // Install with relocate 0: the slot's trampoline half is never built or used.
+    return Install(image,rva,expected,expected_length,0,handler,error)!=nullptr;
+}
 void* Install(uintptr_t image,uintptr_t rva,const uint8_t* expected,size_t expected_length,size_t relocate,const void* handler,uint32_t* error) noexcept {
     auto fail=[&](uint32_t e)->void* { if(error) *error=e; return nullptr; };
-    if(!image || !expected || expected_length<relocate || relocate<5 || relocate>16 || !handler) return fail(ERROR_INVALID_PARAMETER);
+    const bool replace=relocate==0; // Replace(): jump to handler only, no trampoline
+    if(!image || !expected || expected_length<relocate || expected_length<5 || (!replace && (relocate<5 || relocate>16)) || !handler) return fail(ERROR_INVALID_PARAMETER);
     const uintptr_t function=image+rva;
     if(std::memcmp(reinterpret_cast<const void*>(function),expected,expected_length)) return fail(ERROR_BAD_EXE_FORMAT);
     AcquireSRWLockExclusive(&lock);
@@ -33,8 +38,10 @@ void* Install(uintptr_t image,uintptr_t rva,const uint8_t* expected,size_t expec
     uint8_t* slot=page+used; used+=kSlot;
     // Slot+0: jmp handler (14 bytes); slot+0x10: relocated prologue + jmp function+relocate.
     AbsoluteJump(slot,handler);
-    std::memcpy(slot+0x10,expected,relocate);
-    AbsoluteJump(slot+0x10+relocate,reinterpret_cast<const void*>(function+relocate));
+    if(!replace) {
+        std::memcpy(slot+0x10,expected,relocate);
+        AbsoluteJump(slot+0x10+relocate,reinterpret_cast<const void*>(function+relocate));
+    }
     FlushInstructionCache(GetCurrentProcess(),slot,kSlot);
     const int64_t rel=reinterpret_cast<intptr_t>(slot)-intptr_t(function+5);
     uint32_t e=ERROR_SUCCESS;

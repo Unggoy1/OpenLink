@@ -5,13 +5,14 @@
 #include "relay.h"
 #include "text_hook.h"
 #include "cbrowser.h"
+#include "overlay.h"
 #include <atomic>
 #include <cstdio>
 #include <cstring>
 namespace clientjoin {
 namespace browser {
 namespace {
-struct Row { char id[40]; char title_key[64]; char desc_key[64]; char name[96]; char thumb[96]; char mode[96]; char match[96]; char description[484]; int32_t players; bool joinable,needs_update; };
+struct Row { char id[40]; char title_key[64]; char desc_key[64]; char name[96]; char thumb[96]; char mode[96]; char match[96]; char phase[16]; char description[484]; int32_t players; bool joinable,needs_update; };
 SRWLOCK lock=SRWLOCK_INIT;
 Config config={};
 std::atomic<bool> configured{false},active{true},join_pending{false};
@@ -19,7 +20,7 @@ std::atomic<uintptr_t> registered_state{0}; // lua_State the OpenLink table was 
 Row rows[kMaxRows]; size_t row_count=0; bool fetched=false;
 std::atomic<uint32_t> fetches{0},joins{0},last_join_code{0},fetch_error{0};
 uint32_t revision=0; // bumped (under lock) whenever the row snapshot changes
-char pending[40]={};
+char pending[40]={},joined[40]={}; // joined: the last listing a join was queued for
 HANDLE wake=nullptr;
 uintptr_t image=0;
 SRWLOCK log_lock=SRWLOCK_INIT;
@@ -88,7 +89,17 @@ int NativeSetBrowserMode(uintptr_t L) {
 }
 // OpenLink.BrowserMode() -> bool (the Customs Browser is in OpenLink mode).
 int NativeBrowserMode(uintptr_t L) { if(!Room(L,1)) return 0; PushBool(L,cbrowser::Mode()); return 1; }
-int NativeRefresh(uintptr_t L) { if(wake) SetEvent(wake); if(!Room(L,1)) return 0; PushBool(L,configured.load()); return 1; }
+// OpenLink.SetLobbyVote(bool): the server lobby screen is showing, so the vote panel takes the
+// place of its greyed-out host rows (overlay.cpp).
+// Optional numbers after the flag: the rows' rectangle x0,y0,x1,y1 and the start button's bottom,
+// in UI units (from the widgets' own geometry), so the panel can follow the real layout.
+int NativeSetLobbyVote(uintptr_t L) {
+    const uint8_t* tv=Arg(L,1); const bool on=Type(tv)==1 && *reinterpret_cast<const int32_t*>(tv+8)!=0;
+    float r[5]={};
+    for(int i=0;i<5;++i) if(!ArgNumber(L,i+2,r[i])) r[i]=0;
+    overlay::SetLobbyBlock(on,r[0],r[1],r[2],r[3],r[4]);
+    return 0;
+}int NativeRefresh(uintptr_t L) { if(wake) SetEvent(wake); if(!Room(L,1)) return 0; PushBool(L,configured.load()); return 1; }
 int NativeStatus(uintptr_t L) {
     if(!Room(L,4)) return 0;
     PushNumber(L,float(fetches.load())); PushNumber(L,float(joins.load())); PushNumber(L,float(last_join_code.load())); PushNumber(L,float(fetch_error.load()));
@@ -115,7 +126,7 @@ DWORD WINAPI Fetch(void*) {
                 // Simulator listings (status "simulated") are shown but never joinable.
                 Row& r=next[i]; strcpy_s(r.id,list[i].id); r.needs_update=list[i].app_protocol>relay::kAppProtocol;
                 r.joinable=list[i].joinable && std::strcmp(list[i].status,"simulated")!=0 && !r.needs_update;
-                strcpy_s(r.name,list[i].name[0] ? list[i].name : "OpenLink server"); strcpy_s(r.thumb,list[i].thumb); strcpy_s(r.mode,list[i].mode); strcpy_s(r.match,list[i].match); strcpy_s(r.description,list[i].description); r.players=list[i].players<0 ? 0 : list[i].players;
+                strcpy_s(r.name,list[i].name[0] ? list[i].name : "OpenLink server"); strcpy_s(r.thumb,list[i].thumb); strcpy_s(r.mode,list[i].mode); strcpy_s(r.match,list[i].match); strcpy_s(r.phase,list[i].phase); strcpy_s(r.description,list[i].description); r.players=list[i].players<0 ? 0 : list[i].players;
                 sprintf_s(r.title_key,"openlink/srv/%s/t",r.id); sprintf_s(r.desc_key,"openlink/srv/%s/d",r.id);
                 char desc[256]; Describe(list[i],desc,sizeof(desc));
                 text::Set(r.title_key,list[i].name[0] ? list[i].name : "OpenLink server"); text::Set(r.desc_key,desc);
@@ -141,7 +152,7 @@ const char* RequestJoin(const char* id) noexcept {
     if(!known) return "server is not listed or not joinable";
     bool expected=false;
     if(!join_pending.compare_exchange_strong(expected,true)) return "a join is already in progress";
-    AcquireSRWLockExclusive(&lock); strcpy_s(pending,id); ReleaseSRWLockExclusive(&lock);
+    AcquireSRWLockExclusive(&lock); strcpy_s(pending,id); strcpy_s(joined,id); ReleaseSRWLockExclusive(&lock);
     joins.fetch_add(1); char line[96]; sprintf_s(line,"join requested %s",id); Log(line);
     return nullptr;
 }
@@ -149,7 +160,7 @@ size_t CopyRows(BrowserRow* out,size_t capacity,uint32_t& rev) noexcept {
     AcquireSRWLockShared(&lock);
     const size_t n=row_count<capacity ? row_count : capacity;
     for(size_t i=0;i<n;++i) {
-        BrowserRow& b=out[i]; b={}; strcpy_s(b.id,rows[i].id); strcpy_s(b.name,rows[i].name); strcpy_s(b.thumb,rows[i].thumb); strcpy_s(b.mode,rows[i].mode); strcpy_s(b.match,rows[i].match); strcpy_s(b.description,rows[i].description);
+        BrowserRow& b=out[i]; b={}; strcpy_s(b.id,rows[i].id); strcpy_s(b.name,rows[i].name); strcpy_s(b.thumb,rows[i].thumb); strcpy_s(b.mode,rows[i].mode); strcpy_s(b.match,rows[i].match); strcpy_s(b.phase,rows[i].phase); strcpy_s(b.description,rows[i].description);
         b.players=rows[i].players; b.joinable=rows[i].joinable;
     }
     rev=revision; ReleaseSRWLockShared(&lock); return n;
@@ -188,7 +199,8 @@ bool RegisterNatives(uintptr_t module_image,uintptr_t L) noexcept {
     if(registered_state.load()==L) return true;
     image=module_image;
     if(!Room(L,4)) return false;
-    struct { const char* name; CFunction fn; } natives[]={{"Log",NativeLog},{"Count",NativeCount},{"Row",NativeRow},{"Join",NativeJoin},{"Refresh",NativeRefresh},{"Status",NativeStatus},{"SetBrowserMode",NativeSetBrowserMode},{"BrowserMode",NativeBrowserMode}};
+    struct { const char* name; CFunction fn; } natives[]={{"Log",NativeLog},{"Count",NativeCount},{"Row",NativeRow},{"Join",NativeJoin},{"Refresh",NativeRefresh},{"Status",NativeStatus},{"SetBrowserMode",NativeSetBrowserMode},{"BrowserMode",NativeBrowserMode},
+        {"SetLobbyVote",NativeSetLobbyVote}};
     Api<CreateTable>(0x7c7e7c)(L,0,int(sizeof(natives)/sizeof(natives[0])));
     for(const auto& n:natives) { Api<PushCClosure>(0xa3f47c)(L,n.fn,0,n.name,0); Api<SetField>(0x6f980c)(L,-2,n.name); }
     Api<SetField>(0x6f980c)(L,kGlobals,"OpenLink");
@@ -210,6 +222,13 @@ void SetActive(bool value) noexcept { active.store(value); }
 const Config& Current() noexcept { return config; }
 uint32_t Fetches() noexcept { return fetches.load(); }
 uint32_t FetchError() noexcept { return fetch_error.load(); }
+bool JoinedThumb(char (&thumb)[96]) noexcept {
+    thumb[0]=0;
+    AcquireSRWLockShared(&lock);
+    if(joined[0]) for(size_t i=0;i<row_count;++i) if(!std::strcmp(rows[i].id,joined)) { strcpy_s(thumb,rows[i].thumb); break; }
+    ReleaseSRWLockShared(&lock);
+    return thumb[0]!=0;
+}
 bool Configured() noexcept { return configured.load(); }
 bool Fetched() noexcept { AcquireSRWLockShared(&lock); const bool f=fetched; ReleaseSRWLockShared(&lock); return f; }
 uint32_t RowCount() noexcept { AcquireSRWLockShared(&lock); const uint32_t n=uint32_t(row_count); ReleaseSRWLockShared(&lock); return n; }

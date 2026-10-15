@@ -21,7 +21,7 @@ type config struct {
 	Directory   string `json:"directory"`
 	RegisterKey string `json:"register_key,omitempty"`
 	Name        string `json:"name"`
-	Description string `json:"description,omitempty"` // one line shown under the name in the app
+	Description string `json:"description,omitempty"` // one line shown under the name in the server browser
 	Region      string `json:"region,omitempty"`
 	PublicHost  string `json:"public_host,omitempty"`
 	PublicPort  int    `json:"public_port"`
@@ -71,7 +71,7 @@ type config struct {
 	// AutoStart: the server starts each match itself. A real server without
 	// Vote gets the defaults, since no player can press Play.
 	AutoStart *autoStart `json:"auto_start,omitempty"`
-	// Vote, with a playlist and proxy mode: players vote in the OpenLink app
+	// Vote, with a playlist and proxy mode: players vote in OpenLink Launcher
 	// for the next match, which then starts by itself. Replaces AutoStart.
 	Vote *voteConfig `json:"vote,omitempty"`
 	// BotBackfill: top matches up with bots (bots.go); off when absent.
@@ -110,7 +110,7 @@ func loadConfig(fs *flag.FlagSet, args []string) (config, error) {
 	fs.StringVar(&f.Directory, "directory", c.Directory, "directory URL (env OPENLINK_DIRECTORY); empty = do not list")
 	fs.StringVar(&f.RegisterKey, "register-key", api.Getenv("REGISTER_KEY"), "directory registration key, if the directory requires one (env OPENLINK_REGISTER_KEY)")
 	fs.StringVar(&f.Name, "name", c.Name, "server name shown in the browser")
-	fs.StringVar(&f.Description, "description", "", "one line about the server, shown under its name in the app (up to 120 characters)")
+	fs.StringVar(&f.Description, "description", "", "one line about the server, shown under its name in the server browser (up to 120 characters)")
 	fs.StringVar(&f.Region, "region", "", "region label, e.g. us-west")
 	fs.StringVar(&f.PublicHost, "public-host", "", "address players connect to; empty = the directory uses this machine's public IP")
 	fs.IntVar(&f.PublicPort, "public-port", c.PublicPort, "external UDP port players connect to (your port forward)")

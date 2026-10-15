@@ -1,10 +1,10 @@
-// In-game vote panel (OpenLink, AGPL-3.0). Behaviour follows the OpenLink app's passive vote
-// overlay (browser/overlay_windows.go, overlay_pad*.go): a small always-on-top window drawn with
-// GDI on its own thread that never takes focus or the mouse, shows only while Halo Infinite (this
-// process) is in front and a vote is open (plus the result for 8 s), and votes with Ctrl+Alt+1-4
-// or View + D-pad. Its look follows Halo's own menus: on the server lobby screen it covers the
-// lobby's greyed-out host rows (Mode editor .. Server), elsewhere it floats at the top left. Map
-// thumbnails come from the Halo Waypoint image host the app uses. No sound.
+// In-game vote panel (OpenLink, AGPL-3.0). Behaviour follows the retired OpenLink app's passive vote
+// overlay (its overlay_windows.go and overlay_pad*.go, archived): a small always-on-top window drawn with
+// GDI on its own thread that never takes focus, shows only while Halo Infinite (this process) is
+// in front and a vote is open (plus the result for 8 s), and votes with the vote keys (default
+// Alt+1-4), View + D-pad or a click. Its look follows Halo's own menus: on the server lobby screen
+// it covers the lobby's greyed-out host rows (Mode editor .. Server), elsewhere it floats at the
+// top left. Map thumbnails come from the Halo Waypoint image host. No sound.
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <winhttp.h>
@@ -12,6 +12,7 @@
 #include <shlwapi.h>
 #include "overlay.h"
 #include "vote.h"
+#include "hotkey.h"
 #include <atomic>
 #include <cstdio>
 #include <cstring>
@@ -137,23 +138,31 @@ bool visible=false;
 uint64_t closed_round=0; ULONGLONG closed_at=0;
 bool registered[4]={}; wchar_t key_error[96]={};
 bool pad_timer=false,pad_seen=false,pad_conn[4]={}; WORD pad_prev[4]={}; ULONGLONG pad_next[4]={};
+int hover=-1; bool mouse_tracked=false; // the choice under the mouse (-1: none)
 using XInputGetStateFn=DWORD (WINAPI*)(DWORD,void*);
 XInputGetStateFn xinput=nullptr;
 std::atomic<bool> lobby_block{false}; // the server lobby screen is showing (set from the UI script)
+std::atomic<bool> held{false};        // hidden while the "Leave server?" dialog and the leave run
 
 bool GameInFront(HWND self) {
     const HWND fg=GetForegroundWindow(); if(!fg) return false; if(fg==self) return true;
     DWORD pid=0; GetWindowThreadProcessId(fg,&pid); return pid==GetCurrentProcessId();
 }
-void Hide(HWND h) { if(visible) { ShowWindow(h,SW_HIDE); visible=false; } }
-// Vote keys are held only while a vote is open (Ctrl+Alt+1..n); keys another app holds are noted.
+void Hide(HWND h) { if(visible) { ShowWindow(h,SW_HIDE); visible=false; } hover=-1; }
+// Vote keys are held only while a vote is open (default Alt+1..n); keys another app holds are noted.
+hotkey::Key vote_keys[hotkey::kVoteKeys]={}; bool vote_keys_set=false; // set once before the overlay thread starts
+const hotkey::Key& VoteKey(uint32_t i) {
+    if(!vote_keys_set) { hotkey::DefaultVoteKeys(vote_keys); vote_keys_set=true; }
+    return vote_keys[i];
+}
+std::wstring WideName(const char* s) { std::wstring w; for(;*s;++s) w+=wchar_t(static_cast<unsigned char>(*s)); return w; } // ASCII key names
 void SetKeys(HWND h,uint32_t n) {
     std::wstring taken;
     for(uint32_t i=0;i<4;++i) {
         const bool want=i<n;
         if(want && !registered[i]) {
-            registered[i]=RegisterHotKey(h,int(i+1),MOD_CONTROL|MOD_ALT|MOD_NOREPEAT,'1'+i)!=FALSE;
-            if(!registered[i]) { if(!taken.empty()) taken+=L", "; taken+=L"Ctrl+Alt+"+std::to_wstring(i+1); }
+            registered[i]=RegisterHotKey(h,int(i+1),VoteKey(i).mods|MOD_NOREPEAT,VoteKey(i).vk)!=FALSE;
+            if(!registered[i]) { if(!taken.empty()) taken+=L", "; taken+=WideName(VoteKey(i).name); }
         }
         else if(!want && registered[i]) { UnregisterHotKey(h,int(i+1)); registered[i]=false; }
     }
@@ -228,6 +237,13 @@ void Box(HDC dc,RECT r,COLORREF fill,COLORREF border,int width) {
 constexpr double kHeadUnits=30,kTopGap=6,kRowUnits=62;
 // Height in units of a panel for n choices that is not tied to the lobby block (floating).
 double FloatingUnits(uint32_t n) { return kHeadUnits+kTopGap+double(n)*kRowUnits; }
+// Where the rows are in a panel h pixels tall: the first row's top and the row pitch (painting and clicks).
+struct RowLayout { int top,row; };
+RowLayout Rows(int h,double unit,bool fill,int n) {
+    auto U=[unit](double units) { return int(units*unit+0.5); };
+    const int top=U(kHeadUnits)+U(kTopGap),avail=h-top;
+    return {top,n ? (fill || avail/n<U(kRowUnits) ? avail/n : U(kRowUnits)) : 0};
+}
 // fill: the rows share the panel's whole height (lobby); otherwise each is at most kRowUnits tall.
 void PaintHalo(HDC dc,const vote::View& v,int w,int h,double unit,bool fill) {
     const relay::Ballot& b=v.ballot;
@@ -245,9 +261,8 @@ void PaintHalo(HDC dc,const vote::View& v,int w,int h,double unit,bool fill) {
     Spaced(dc,Fit(dc,title,head,U(2.4),w-timer_w-U(16)),{U(4),0,w,head_h-U(4)},head,U(2.4),kHaloText,DT_VCENTER);
     Spaced(dc,timer,{w-U(4)-timer_w,0,w,head_h-U(4)},minor,U(1.2),timer_col,DT_VCENTER);
     Fill(dc,{0,head_h-U(2),w,head_h},kHaloRule);
-    const int top=head_h+U(kTopGap),avail=h-top;
     const int n=int(b.count);
-    const int row=n ? (fill || avail/n<U(kRowUnits) ? avail/n : U(kRowUnits)) : 0;
+    const RowLayout layout=Rows(h,unit,fill,n); const int top=layout.top,row=layout.row;
     const int name_px=row*36/100<U(20) ? row*36/100 : U(20); // smaller names when four rows share the block
     HFONT name=HaloFont(name_px,600);
     int total=0; for(int i=0;i<n;++i) total+=b.counts[i];
@@ -255,8 +270,12 @@ void PaintHalo(HDC dc,const vote::View& v,int w,int h,double unit,bool fill) {
     for(int i=0;i<n;++i) {
         const RECT r={0,top+i*row,w,top+(i+1)*row-U(4)};
         const bool mine=!b.closed && i==v.mine, winner=b.closed && i==b.winner, faded=b.closed && !winner;
+        // Your vote / the winner: Halo's focused row (fill + outline); under the mouse: the fill only.
         if(mine || winner) Box(dc,r,kHaloFocus,kHaloOutline,U(1.6));
-        else Fill(dc,{r.left,r.bottom-U(1),r.right,r.bottom},kHaloRule);
+        else {
+            if(!b.closed && i==hover) Fill(dc,r,kHaloFocus);
+            Fill(dc,{r.left,r.bottom-U(1),r.right,r.bottom},kHaloRule);
+        }
         // Map art, 16:9, inset in the row.
         const int ih=(r.bottom-r.top)-U(8), iw=ih*16/9;
         const RECT art={r.left+U(5),r.top+U(4),r.left+U(5)+iw,r.top+U(4)+ih};
@@ -277,7 +296,7 @@ void PaintHalo(HDC dc,const vote::View& v,int w,int h,double unit,bool fill) {
         if(fitted) DeleteObject(fitted);
         std::wstring hint;
         if(winner) hint=L"NEXT";
-        else if(!b.closed) { hint=L"CTRL+ALT+"+std::to_wstring(i+1); if(pad_seen) hint+=std::wstring(L"  \x00b7  ")+kPadWords[i]; if(mine) hint+=L"  \x00b7  YOUR VOTE"; }
+        else if(!b.closed) { hint=Upper(WideName(VoteKey(uint32_t(i)).name)); if(pad_seen) hint+=std::wstring(L"  \x00b7  ")+kPadWords[i]; if(mine) hint+=L"  \x00b7  YOUR VOTE"; }
         Spaced(dc,Fit(dc,hint,winner ? tag : minor,U(1.2),right-tx),{tx,name_mid+U(3),right,r.bottom-U(2)},winner ? tag : minor,U(1.2),winner ? kHaloBlue : (mine ? kHaloText : kHaloMuted),DT_TOP);
         Spaced(dc,votes,{right-votes_w,r.top,right+U(8),r.bottom},minor,U(1),faded ? kHaloDim : kHaloMuted,DT_VCENTER);
         // Thin vote meter along the bottom of the row.
@@ -347,7 +366,7 @@ void Place(HWND h,const vote::View& v,RECT& rect,double& unit,bool& fill) {
 RECT placed={}; double placed_unit=1; bool placed_fill=false;
 void Refresh(HWND h) {
     vote::View v={};
-    if(!enabled.load() || !vote::Current(v) || !v.ballot.count) { SetKeys(h,0); SetPadTimer(h,false); Hide(h); return; }
+    if(!enabled.load() || held.load() || !vote::Current(v) || !v.ballot.count) { SetKeys(h,0); SetPadTimer(h,false); Hide(h); return; }
     SetKeys(h,v.ballot.closed ? 0 : v.ballot.count);
     SetPadTimer(h,!v.ballot.closed);
     if(v.ballot.closed) {
@@ -372,9 +391,36 @@ void Paint(HWND h) {
     }
     EndPaint(h,&ps);
 }
+// The open ballot's choice at client y, or -1.
+int RowAt(HWND h,int y) {
+    vote::View v={};
+    if(!vote::Current(v) || v.ballot.closed || !v.ballot.count) return -1;
+    RECT cr; GetClientRect(h,&cr);
+    const RowLayout l=Rows(cr.bottom,placed_unit,placed_fill,int(v.ballot.count));
+    if(y<l.top || l.row<=0) return -1;
+    const int i=(y-l.top)/l.row;
+    return i<int(v.ballot.count) ? i : -1;
+}
+void SetHover(HWND h,int i) { if(i!=hover) { hover=i; InvalidateRect(h,nullptr,FALSE); } }
+void MouseMove(HWND h,int y) {
+    if(!mouse_tracked) { TRACKMOUSEEVENT t={sizeof(t),TME_LEAVE,h,0}; mouse_tracked=TrackMouseEvent(&t)!=FALSE; }
+    SetHover(h,RowAt(h,y));
+}
+void Click(HWND h,int y) {
+    const int i=RowAt(h,y); if(i<0) return;
+    char line[64]; sprintf_s(line,"vote panel: mouse vote for choice %d",i+1);
+    if(const auto sink=log_sink.load()) sink(line);
+    Choose(h,i);
+}
 LRESULT CALLBACK Proc(HWND h,UINT msg,WPARAM wp,LPARAM lp) {
     switch(msg) {
+    // Clicks vote without taking focus from the game; the arrow is set here because the game may hide
+    // the system cursor.
     case WM_MOUSEACTIVATE: return MA_NOACTIVATE;
+    case WM_SETCURSOR: SetCursor(LoadCursorW(nullptr,MAKEINTRESOURCEW(32512))); return TRUE; // IDC_ARROW
+    case WM_MOUSEMOVE: MouseMove(h,short(HIWORD(lp))); return 0;
+    case WM_MOUSELEAVE: mouse_tracked=false; SetHover(h,-1); return 0;
+    case WM_LBUTTONDOWN: Click(h,short(HIWORD(lp))); return 0;
     case WM_ERASEBKGND: return 1;
     case WM_PAINT: Paint(h); return 0;
     case WM_TIMER: if(wp==kPadTimer) PollPads(h); else Refresh(h); return 0;
@@ -396,7 +442,7 @@ DWORD WINAPI Thread(void*) {
     WNDCLASSEXW wc={}; wc.cbSize=sizeof(wc); wc.lpfnWndProc=Proc; wc.hInstance=self; wc.hCursor=LoadCursorW(nullptr,MAKEINTRESOURCEW(32512)); // IDC_ARROW
     wc.lpszClassName=L"OpenLinkLauncherVoteOverlay";
     if(!RegisterClassExW(&wc)) return GetLastError();
-    HWND h=CreateWindowExW(WS_EX_TOPMOST|WS_EX_TOOLWINDOW|WS_EX_LAYERED|WS_EX_NOACTIVATE|WS_EX_TRANSPARENT,wc.lpszClassName,L"OpenLink vote",
+    HWND h=CreateWindowExW(WS_EX_TOPMOST|WS_EX_TOOLWINDOW|WS_EX_LAYERED|WS_EX_NOACTIVATE,wc.lpszClassName,L"OpenLink vote",
                            WS_POPUP,0,0,0,0,nullptr,nullptr,self,nullptr);
     if(!h) return GetLastError();
     SetLayeredWindowAttributes(h,0,255,LWA_ALPHA); // opaque: it covers the lobby's greyed rows
@@ -448,13 +494,13 @@ bool DrawBackground(IWICImagingFactory* wic,HDC dc,const wchar_t* path,int& w,in
     return ok;
 }
 }
-bool RenderPreview(const vote::View& v,RECT block,bool controller,bool fetch_thumbs,const wchar_t* background,const wchar_t* path) noexcept {
+bool RenderPreview(const vote::View& v,RECT block,bool controller,int hover_row,bool fetch_thumbs,const wchar_t* background,const wchar_t* path) noexcept {
     if(!v.ballot.count || !path || block.right<=block.left || block.bottom<=block.top) return false;
     const HRESULT com=CoInitializeEx(nullptr,COINIT_MULTITHREADED);
     IWICImagingFactory* wic=nullptr;
     if(FAILED(CoCreateInstance(CLSID_WICImagingFactory,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&wic)))) { if(SUCCEEDED(com)) CoUninitialize(); return false; }
     if(fetch_thumbs) FetchNow(wic,v);
-    pad_seen=controller;
+    pad_seen=controller; hover=hover_row;
     // The block is the lobby placement; the floating fallback is as wide, as tall as its choices.
     // Pixels per canvas unit, from the block's height; placed as in game.
     const double k=double(block.bottom-block.top)/double(kLobbyBlock.bottom-kLobbyBlock.top), unit=k*kUnitPerCanvas;
@@ -481,6 +527,8 @@ bool RenderPreview(const vote::View& v,RECT block,bool controller,bool fetch_thu
     return ok;
 }
 void SetEnabled(bool on) noexcept { enabled.store(on); Wake(); }
+void Hold(bool on) noexcept { held.store(on); Wake(); }
+void SetVoteKeys(const hotkey::Key (&keys)[hotkey::kVoteKeys]) noexcept { for(size_t i=0;i<hotkey::kVoteKeys;++i) vote_keys[i]=keys[i]; vote_keys_set=true; }
 void SetLog(void (*sink)(const char*)) noexcept { log_sink.store(sink); }
 bool LobbyShowing() noexcept { return lobby_block.load(); }
 void SetLobbyBlock(bool on,float x0,float y0,float x1,float y1,float button_bottom) noexcept {

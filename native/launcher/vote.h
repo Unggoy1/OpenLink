@@ -1,6 +1,6 @@
 #pragma once
 // Playlist voting for the OpenLink Launcher: the current ballot from the relay (see relay.h),
-// as the app's BallotView (browser/vote.go), and casting a vote.
+// as the retired app's BallotView (its vote.go), and casting a vote.
 #include "relay.h"
 namespace clientjoin {
 namespace vote {
@@ -15,6 +15,9 @@ struct View {
 void Install() noexcept;
 // The current vote: false when there is none (no ballot for ~4 s).
 bool Current(View& out) noexcept;
+// The player left the server: forget the ballot and ignore ballots until Accept() (the next join).
+void Drop() noexcept;
+void Accept() noexcept;
 // Votes for option `choice` of the current round. nullptr when sent, else why not (also kept
 // in View::error).
 const char* Cast(int choice) noexcept;

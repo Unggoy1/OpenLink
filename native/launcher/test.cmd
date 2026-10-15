@@ -17,7 +17,7 @@ cl /nologo /W4 /WX /EHsc /MT /std:c++17 /utf-8 "%~dp0join_machine_test.cpp" /Fo"
 if errorlevel 1 exit /b 1
 "%TESTS%\join-machine-test.exe"
 if errorlevel 1 exit /b 1
-cl /nologo /W4 /WX /EHsc /MT /std:c++17 /utf-8 "%~dp0relay_test.cpp" "%~dp0relay.cpp" /Fo"%TESTS%\\" /Fe"%TESTS%\relay-test.exe" /link /INCREMENTAL:NO ws2_32.lib winhttp.lib
+cl /nologo /W4 /WX /EHsc /MT /std:c++17 /utf-8 "%~dp0relay_test.cpp" "%~dp0relay.cpp" "%~dp0netcheck.cpp" "%~dp0hotkey.cpp" "%~dp0update.cpp" /Fo"%TESTS%\\" /Fe"%TESTS%\relay-test.exe" /link /INCREMENTAL:NO ws2_32.lib winhttp.lib iphlpapi.lib
 if errorlevel 1 exit /b 1
 "%TESTS%\relay-test.exe"
 if errorlevel 1 exit /b 1
@@ -25,11 +25,11 @@ cl /nologo /W4 /WX /EHsc /MT /std:c++17 /utf-8 "%~dp0text_test.cpp" "%~dp0text_h
 if errorlevel 1 exit /b 1
 "%TESTS%\text-test.exe"
 if errorlevel 1 exit /b 1
-cl /nologo /W4 /WX /EHsc /MT /std:c++17 /utf-8 "%~dp0detour_test.cpp" "%~dp0detour.cpp" "%~dp0cbrowser.cpp" "%~dp0browser.cpp" "%~dp0relay.cpp" "%~dp0text_hook.cpp" "%~dp0vote.cpp" "%~dp0overlay.cpp" /Fo"%TESTS%\\" /Fe"%TESTS%\detour-test.exe" /link /INCREMENTAL:NO ws2_32.lib winhttp.lib user32.lib gdi32.lib ole32.lib shlwapi.lib windowscodecs.lib
+cl /nologo /W4 /WX /EHsc /MT /std:c++17 /utf-8 "%~dp0detour_test.cpp" "%~dp0detour.cpp" "%~dp0cbrowser.cpp" "%~dp0browser.cpp" "%~dp0relay.cpp" "%~dp0netcheck.cpp" "%~dp0hotkey.cpp" "%~dp0text_hook.cpp" "%~dp0vote.cpp" "%~dp0overlay.cpp" /Fo"%TESTS%\\" /Fe"%TESTS%\detour-test.exe" /link /INCREMENTAL:NO ws2_32.lib winhttp.lib iphlpapi.lib user32.lib gdi32.lib ole32.lib shlwapi.lib windowscodecs.lib
 if errorlevel 1 exit /b 1
 "%TESTS%\detour-test.exe"
 if errorlevel 1 exit /b 1
-cl /nologo /W4 /WX /EHsc /MT /std:c++17 /utf-8 "%~dp0overlay_preview.cpp" "%~dp0overlay.cpp" "%~dp0vote.cpp" "%~dp0relay.cpp" /Fo"%TESTS%\\" /Fe"%TESTS%\overlay-preview.exe" /link /INCREMENTAL:NO ws2_32.lib winhttp.lib user32.lib gdi32.lib ole32.lib shlwapi.lib windowscodecs.lib
+cl /nologo /W4 /WX /EHsc /MT /std:c++17 /utf-8 "%~dp0overlay_preview.cpp" "%~dp0overlay.cpp" "%~dp0vote.cpp" "%~dp0relay.cpp" "%~dp0netcheck.cpp" "%~dp0hotkey.cpp" /Fo"%TESTS%\\" /Fe"%TESTS%\overlay-preview.exe" /link /INCREMENTAL:NO ws2_32.lib winhttp.lib iphlpapi.lib user32.lib gdi32.lib ole32.lib shlwapi.lib windowscodecs.lib
 if errorlevel 1 exit /b 1
 cl /nologo /W4 /WX /EHsc /MT /std:c++17 /utf-8 "%~dp0rejection_test.cpp" "%~dp0boundary.cpp" /Fo"%TESTS%\\" /Fe"%TESTS%\rejection-test.exe" /link /INCREMENTAL:NO bcrypt.lib advapi32.lib
 if errorlevel 1 exit /b 1

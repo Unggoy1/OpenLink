@@ -36,11 +36,11 @@ int wmain(int argc,wchar_t** argv) {
     four.remaining_s=17.4; four.starts_in_s=-1; four.mine=1;
     vote::View two=four; two.ballot.count=2; two.mine=0; two.ballot.counts[0]=1; two.ballot.counts[1]=0;
     vote::View closed=two; closed.ballot.closed=true; closed.ballot.winner=0; closed.remaining_s=0; closed.starts_in_s=3.2;
-    struct { const vote::View* v; bool pad; const wchar_t* name; } shots[]={
-        {&two,false,L"open-2.png"},{&four,true,L"open-4.png"},{&closed,false,L"closed-2.png"}};
+    struct { const vote::View* v; bool pad; int hover; const wchar_t* name; } shots[]={
+        {&two,false,-1,L"open-2.png"},{&four,true,2,L"open-4.png"},{&closed,false,-1,L"closed-2.png"}};
     for(const auto& s:shots) {
         const std::wstring path=out+L"\\"+(lobby ? L"lobby-" : L"floating-")+s.name;
-        const bool ok=overlay::RenderPreview(*s.v,block,s.pad,thumbs,lobby,path.c_str());
+        const bool ok=overlay::RenderPreview(*s.v,block,s.pad,s.hover,thumbs,lobby,path.c_str());
         std::printf("%ls: %s\n",path.c_str(),ok ? "ok" : "FAILED");
         if(!ok) return 1;
     }

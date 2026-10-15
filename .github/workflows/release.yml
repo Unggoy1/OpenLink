@@ -2,13 +2,13 @@
 # Manual runs (Actions tab -> Release -> Run workflow) build and upload
 # artifacts without publishing a release.
 #
-# All programs share one tag series, but a release carries the OpenLink app
+# All programs share one tag series, but a release carries OpenLink Launcher
 # and OpenLink Server only when something they are built from changed since
-# the last release that carried them (the plan job). The app's update check
-# and the website look for the newest release with each program's file, so a
-# server-only release never asks players to update. Override the choice with
-# [app] / [no-app] and [server] / [no-server] in the annotated tag's message,
-# or with the inputs of a manual run on the tag.
+# the last release that carried them (the plan job). The launcher's update
+# check and the website look for the newest release with each program's file,
+# so a server-only release never asks players to update. Override the choice
+# with [launcher] / [no-launcher] and [server] / [no-server] in the annotated
+# tag's message, or with the inputs of a manual run on the tag.
 name: Release
 
 on:
@@ -16,8 +16,8 @@ on:
     tags: ["v*"]
   workflow_dispatch:
     inputs:
-      app:
-        description: "Build the OpenLink app (auto: on a tag, only if it changed since the last release with the app)"
+      launcher:
+        description: "Build OpenLink Launcher (auto: on a tag, only if it changed since the last release with the launcher)"
         type: choice
         options: ["auto", "yes", "no"]
         default: "auto"
@@ -31,10 +31,10 @@ permissions:
   contents: read
 
 env:
-  WAILS_VERSION: v2.16.0 # keep in step with browser/go.mod
-  # Stamped into every program (main.version): the tag for releases, else dev-<commit>.
+  # Stamped into every program (main.version, the launcher's OPENLINK_VERSION): the tag for
+  # releases, else dev-<commit> (a dev build never offers updates).
   VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('dev-{0}', github.sha) }}
-  APP_ASSET: OpenLink-windows-amd64.exe # keep in step with internal/release
+  LAUNCHER_ASSET: OpenLink-Launcher-windows-amd64.zip # keep in step with native/launcher/update.h and internal/release
   SERVER_ASSET: OpenLink-Server-windows-amd64.zip
 
 jobs:
@@ -42,7 +42,7 @@ jobs:
   plan:
     runs-on: ubuntu-latest
     outputs:
-      app: ${{ steps.plan.outputs.app }}
+      launcher: ${{ steps.plan.outputs.launcher }}
       server: ${{ steps.plan.outputs.server }}
       name: ${{ steps.plan.outputs.name }}
       notes: ${{ steps.plan.outputs.notes }}
@@ -58,7 +58,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          INPUT_APP: ${{ inputs.app }}
+          INPUT_LAUNCHER: ${{ inputs.launcher }}
           INPUT_SERVER: ${{ inputs.server }}
         run: |
           set -euo pipefail
@@ -109,19 +109,20 @@ jobs:
             printf -v "build_$name" '%s' "$build"
             printf -v "last_$name" '%s' "$last"
           }
-          mapfile -t app_paths < <({ src_files browser . windows; src_files browser . linux; } | sort -u)
           mapfile -t server_paths < <(src_files . ./cmd/openlink-server windows | sort -u)
-          printf '%s\n' "app inputs outside browser/:" "${app_paths[@]}" | grep -v '^browser/'
-          decide app "${INPUT_APP:-auto}" "$APP_ASSET" browser go.mod go.sum "${app_paths[@]}"
-          decide server "${INPUT_SERVER:-auto}" "$SERVER_ASSET" native packaging/host go.mod go.sum "${server_paths[@]}"
+          # The launcher is C++ (native/launcher), with the engine-tick slot helper and the MSVC
+          # setup it shares with the server's DLL.
+          decide launcher "${INPUT_LAUNCHER:-auto}" "$LAUNCHER_ASSET" native/launcher packaging/launcher \
+            native/hostctl/tick_slot.cpp native/hostctl/tick_slot.h native/hostctl/vcvars.cmd
+          decide server "${INPUT_SERVER:-auto}" "$SERVER_ASSET" native/hostctl native/steamfree packaging/host go.mod go.sum "${server_paths[@]}"
 
           name=$tag; notes=""
-          case "$build_app,$build_server" in
-            true,false) name="$tag · OpenLink app" ;;
+          case "$build_launcher,$build_server" in
+            true,false) name="$tag · OpenLink Launcher" ;;
             false,true) name="$tag · OpenLink Server" ;;
             false,false) name="$tag · OpenLink Directory" ;;
           esac
-          [[ "$build_app" == true ]] || notes+="**OpenLink app:** unchanged in this release${last_app:+, the current version is $last_app}. Players do not need to update."$'\n\n'
+          [[ "$build_launcher" == true ]] || notes+="**OpenLink Launcher:** unchanged in this release${last_launcher:+, the current version is $last_launcher}. Players do not need to update."$'\n\n'
           [[ "$build_server" == true ]] || notes+="**OpenLink Server:** unchanged in this release${last_server:+, the current version is $last_server}. Hosts do not need to update."$'\n\n'
           echo "name=$name" >>"$GITHUB_OUTPUT"
           { echo "notes<<EOF_NOTES"; printf '%s' "$notes"; echo; echo "EOF_NOTES"; } >>"$GITHUB_OUTPUT"
@@ -217,64 +218,39 @@ jobs:
           name: host-windows
           path: OpenLink-Server-windows-amd64.zip
 
-  browser-windows:
+  # OpenLink Launcher package: openlink-launcher.exe and openlink-launcher.dll plus
+  # README.txt and an example config, in one zip. Built with the runner's MSVC x64 tools
+  # (native/hostctl/vcvars.cmd finds them) and a static C runtime; test.cmd builds, then
+  # runs the unit tests and the DLL's refusal test (no game needed).
+  launcher-windows:
     needs: [test, plan]
-    if: needs.plan.outputs.app == 'true'
+    if: needs.plan.outputs.launcher == 'true'
     runs-on: windows-latest
-    defaults:
-      run:
-        working-directory: browser
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
-        with:
-          go-version-file: browser/go.mod
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: 22
-      - run: go install github.com/wailsapp/wails/v2/cmd/wails@${{ env.WAILS_VERSION }}
-      - name: Type-check frontend
-        working-directory: browser/frontend
+      - name: Build and test
+        shell: cmd
+        env:
+          OPENLINK_RELEASE_VERSION: ${{ env.VERSION }}
+        run: call native\launcher\test.cmd "%GITHUB_WORKSPACE%\launcher-out"
+      - name: Package
+        shell: pwsh
         run: |
-          npm ci
-          npm run check
-      - run: wails build -clean -platform windows/amd64 -o OpenLink-windows-amd64.exe -ldflags "-X main.version=$env:VERSION"
+          New-Item -ItemType Directory launcher | Out-Null
+          Copy-Item launcher-out\openlink-launcher.exe, launcher-out\openlink-launcher.dll launcher\
+          Copy-Item packaging\launcher\* launcher\
+          Compress-Archive -Path launcher\* -DestinationPath $env:LAUNCHER_ASSET
+          Get-ChildItem -File launcher | Format-Table Name, Length
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: browser-windows
-          path: browser/build/bin/OpenLink-windows-amd64.exe
-
-  # Experimental: the Linux app has not been tested yet. A failure here does
-  # not block the release.
-  browser-linux:
-    needs: [test, plan]
-    if: needs.plan.outputs.app == 'true'
-    runs-on: ubuntu-24.04
-    continue-on-error: true
-    defaults:
-      run:
-        working-directory: browser
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
-        with:
-          go-version-file: browser/go.mod
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: 22
-      - run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
-      - run: go install github.com/wailsapp/wails/v2/cmd/wails@${{ env.WAILS_VERSION }}
-      - run: wails build -clean -platform linux/amd64 -tags webkit2_41 -o OpenLink-linux-amd64 -ldflags "-X main.version=$VERSION"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: browser-linux
-          path: browser/build/bin/OpenLink-linux-amd64
+          name: launcher-windows
+          path: ${{ env.LAUNCHER_ASSET }}
 
   # Runs when the planned builds succeeded; programs the plan left out are
   # skipped jobs, which must not stop the release.
   release:
     if: ${{ !cancelled() && !failure() && startsWith(github.ref, 'refs/tags/v') }}
-    needs: [plan, tools, host-windows, browser-windows, browser-linux]
+    needs: [plan, tools, host-windows, launcher-windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write

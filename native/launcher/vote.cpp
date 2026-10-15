@@ -1,5 +1,5 @@
-// Playlist voting state (OpenLink, AGPL-3.0): mirrors the app's BallotView and Vote
-// (browser/vote.go) on top of the relay's ballots.
+// Playlist voting state (OpenLink, AGPL-3.0): mirrors the retired app's BallotView and Vote
+// (its vote.go, archived) on top of the relay's ballots.
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include "vote.h"
@@ -11,10 +11,11 @@ namespace vote {
 namespace {
 constexpr ULONGLONG kFresh=4000; // the server repeats ballots about once a second
 SRWLOCK lock=SRWLOCK_INIT;
-relay::Ballot current={}; ULONGLONG received=0; bool have=false;
+relay::Ballot current={}; ULONGLONG received=0; bool have=false; bool ignoring=false; // ignoring: left the server
 uint64_t pending_round=0; int pending_choice=-1; char error[96]={};
 void OnBallot(const relay::Ballot& b) {
     AcquireSRWLockExclusive(&lock);
+    if(ignoring) { ReleaseSRWLockExclusive(&lock); return; }
     if(!have || b.round!=current.round) { pending_round=0; pending_choice=-1; error[0]=0; }
     if(pending_round==b.round && b.mine==pending_choice) { pending_round=0; pending_choice=-1; } // echoed back
     current=b; received=GetTickCount64(); have=true;
@@ -23,6 +24,11 @@ void OnBallot(const relay::Ballot& b) {
 }
 }
 void Install() noexcept { relay::SetBallotCallback(&OnBallot); }
+void Drop() noexcept {
+    AcquireSRWLockExclusive(&lock); have=false; ignoring=true; pending_round=0; pending_choice=-1; error[0]=0; ReleaseSRWLockExclusive(&lock);
+    overlay::Wake();
+}
+void Accept() noexcept { AcquireSRWLockExclusive(&lock); ignoring=false; ReleaseSRWLockExclusive(&lock); }
 bool Current(View& v) noexcept {
     AcquireSRWLockShared(&lock);
     const ULONGLONG age=have ? GetTickCount64()-received : kFresh+1;

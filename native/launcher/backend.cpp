@@ -233,6 +233,9 @@ DWORD WINAPI WatchBoundary(void*) {
 std::atomic<bool> post_armed{false};
 bool post_watch=false; int post_step=0; uint32_t post_stuck=0,post_redirects=0; uint32_t post_down=0; ULONGLONG post_until=0,post_next=0,post_cooldown=0,post_down_at=0;
 void ArmPostMatch() noexcept { post_armed.store(true); post_watch=false; } // a new join ends any watch
+// The player left the server from its lobby (Back -> "Leave server?"): no redirect for that leave.
+std::atomic<bool> post_cancel{false};
+void CancelPostMatch() { post_armed.store(false); post_cancel.store(true); }
 void StartPostMatchWatch(ULONGLONG now) {
     // A watch still pending (its window spent in a match: no front-end ticks there) restarts too.
     if(!post_armed.exchange(false) && !post_watch) return;
@@ -240,6 +243,7 @@ void StartPostMatchWatch(ULONGLONG now) {
     browser::Log("returned from an OpenLink match; watching for the stuck lobby");
 }
 void TickPostMatch(ULONGLONG now) {
+    if(post_cancel.exchange(false)) post_watch=false;
     if(!post_watch || ui_stage!=UiRunning || now<post_next) return;
     post_next=now+1000;
     // Packets from the server still arriving = the player stayed (a match ended normally and
@@ -364,7 +368,7 @@ void EngineTick(void* self,bool front) {
             RelayJoin j={}; const auto& c=browser::Current();
             std::memcpy(j.directory,c.directory,sizeof(j.directory)); strcpy_s(j.listing,listing); std::memcpy(j.lan_ip,c.lan_ip,sizeof(j.lan_ip));
             const Code queued=QueueOpenLink(j); browser::JoinResult(uint32_t(queued));
-            if(queued==Pending) ArmPostMatch();
+            if(queued==Pending) { ArmPostMatch(); vote::Accept(); overlay::Hold(false); } // a new server's votes count again
         }
     }
     AcquireSRWLockExclusive(&mailbox);
@@ -460,6 +464,7 @@ DWORD StartPersistent(const char* directory,const char* lan_ip) noexcept {
     CloseHandle(watcher);
     // Customs Browser OpenLink mode; without it the simple list page is the fallback.
     overlay::SetLog(&browser::Log);
+    browser::SetLeaveHook(&CancelPostMatch); // leaving from the lobby is not a post-match return
     // The lobby's map header shows the map the server will really play (optional).
     if(const DWORD header=mapheader::Install(image,&browser::Log)) { char note[96]; sprintf_s(note,"lobby map header hook unavailable (%lu)",header); browser::Log(note); }
     vote::Install(); // playlist votes from the relay; the overlay starts with the first ballot
@@ -486,6 +491,7 @@ void ResetJoin() noexcept {
     char line[64]; sprintf_s(line,"previous join reset (joins so far %u)",report_joins); browser::Log(line);
 }
 void RelayReady(const char* local_ip) {
+    char note[128]; sprintf_s(note,"relay announces the server on %s%s",local_ip,relay::Snapshot().lan_auto ? " (LAN broadcast: a server runs on this PC)" : ""); browser::Log(note);
     Request r={}; strcpy_s(r.host,local_ip); r.flags=16;
     const Code code=Queue(r);
     if(code!=Pending) {

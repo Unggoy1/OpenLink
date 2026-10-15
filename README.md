@@ -3,17 +3,15 @@
 > [!CAUTION]
 > This project is in early development and lots of things are broken or buggy. Use at your own risk
 
-**Community dedicated servers for Halo Infinite.** Run your own Halo Infinite server, list it in a community directory, and let players anywhere join it, using the game's own LAN server mode. With the OpenLink app, players' games are never modified.
+**Community dedicated servers for Halo Infinite.** Run your own Halo Infinite server, list it in a community directory, and let players anywhere join it, using the game's own LAN server mode. Players find, join and vote on servers from inside the game with OpenLink Launcher.
 
 Three parts:
 
-- **OpenLink** (the app, `browser/`): players browse servers and join.
+- **OpenLink Launcher** (`openlink-launcher.exe`, `openlink-launcher.dll`, `native/launcher/`): players browse servers, join and vote, from an **OpenLink Servers** browser inside Halo Infinite (Play → Custom Game). It starts your game without anti-cheat and changes it in memory. See [native/launcher/README.md](native/launcher/README.md).
 - **OpenLink Server** (`openlink-server.exe`, `openlink-control.dll`, `openlink-loader.exe`): hosts run a server from a playlist.
 - **OpenLink Directory** (`openlink-directory`): the public server list.
 
-Optional, experimental:
-
-- **OpenLink Launcher** (`openlink-launcher.exe`, `openlink-launcher.dll`, `native/launcher/`): instead of the app, adds an **OpenLink Servers** browser inside Halo Infinite (Play → Custom Game). It starts your game without anti-cheat and changes it in memory. See [native/launcher/README.md](native/launcher/README.md).
+(The earlier desktop OpenLink app was retired on 2026-10-15; the launcher replaced it.)
 
 > Unofficial fan project. Not affiliated with or endorsed by Microsoft, Xbox or Halo Studios. Halo is a trademark of Microsoft.
 
@@ -24,7 +22,7 @@ Halo Infinite ships with a LAN server mode. A LAN server announces itself with a
 ```
  server host                         directory                        player PC
 ┌───────────────────────┐   beacons  ┌──────────┐   beacons   ┌──────────────────────────┐
-│ Halo Infinite         │──────────▶ │ OpenLink │ ──────────▶ │ OpenLink app             │
+│ Halo Infinite         │──────────▶ │ OpenLink │ ──────────▶ │ OpenLink Launcher (DLL)  │
 │ LAN server  (UDP 1343)│            │ Directory│             │  replays beacon locally  │
 │ OpenLink Server       │            └──────────┘             │  forwards UDP 1343 ──┐   │
 └──────────▲────────────┘                                     │ Halo Infinite ◀──────┘   │
@@ -33,17 +31,17 @@ Halo Infinite ships with a LAN server mode. A LAN server announces itself with a
 
 - **OpenLink Server** (`openlink-server.exe`) runs on the server machine. It starts the LAN server with the control DLL, picks each match from the playlist (or the players' vote), restarts the server if it exits, picks up the server's beacon and keeps the directory listing fresh.
 - **OpenLink Directory** (`openlink-directory`) is the public server list. Hosts register and send heartbeats; players list servers and fetch beacons.
-- **The OpenLink app** (`browser/`) runs on each player's PC: a desktop server list with a Join button. For the chosen server it replays that server's own beacon to the local game and forwards the game's traffic to the server. To the game, it looks like an ordinary LAN game.
+- **OpenLink Launcher** runs on each player's PC. `openlink-launcher.exe` starts the player's own game without anti-cheat and loads `openlink-launcher.dll` into it. Inside the game the DLL adds the OpenLink Servers browser, and for the chosen server it replays that server's own beacon to the game and forwards the game's traffic to the server. To the game, it looks like an ordinary LAN game. Votes, the lobby's vote panel and leaving a server run there too.
 
-The app forwards game packets unchanged. They are encrypted by the game, and this project never reads, decrypts or alters them.
+The launcher forwards game packets unchanged. They are encrypted by the game, and this project never reads, decrypts or alters them.
 
-**What this project does not do:** the app never modifies players' games: it only relays network traffic. (The optional OpenLink Launcher is the exception: it starts the player's own game without anti-cheat and loads a DLL into it, in memory only, at the player's own risk with respect to the game's terms. It never changes game files or anti-cheat files, services or settings.) On the host, OpenLink Server loads its control DLL into the host's own game server process (to pick maps and modes and run the lobby); it does not modify game files. Hosting this way is at the host's own risk with respect to the game's terms. It does not handle Xbox/Microsoft credentials: players sign in inside the game as usual, and the directory stores only what hosts send it (name, address, build, status, beacon).
+**What this project does and does not do:** OpenLink Launcher starts the player's own game without anti-cheat and changes it in memory only, at the player's own risk with respect to the game's terms. It never changes game files or anti-cheat files, services or settings, and Halo Infinite started from Steam afterwards runs as usual with anti-cheat. On the host, OpenLink Server loads its control DLL into the host's own game server process (to pick maps and modes and run the lobby); it does not modify game files. Hosting this way is at the host's own risk with respect to the game's terms. It does not handle Xbox/Microsoft credentials: players sign in inside the game as usual, and the directory stores only what hosts send it (name, address, build, status, beacon).
 
 ## Requirements
 
 - Halo Infinite on Steam, **the same game build on the server and on every player's PC**. The game refuses a version mismatch, and the tools check the build for you.
 - Server host: Windows, a public IPv4 address, and **UDP 1343 forwarded** to the server machine.
-- Players: Windows, or Linux with the game running under Proton. No port forwarding needed.
+- Players: Windows. No port forwarding needed.
 
 ## Hosting a server
 
@@ -57,12 +55,7 @@ By default OpenLink Server runs in **proxy mode**: the game server listens only 
 
 ## Playing
 
-Open the OpenLink app, click **Join** on a server, then in Halo Infinite go to **Custom Game → Create Match → Server** and click the server's name, which the bar at the bottom of the app shows as the game lists it (in capitals). The bar also shows when you are connected. Keep the app open while you play. See [browser/README.md](browser/README.md).
-
-- Windows is the main platform. A Linux build of the app (for the game under Proton) is produced by CI but has not been tested yet.
-- If the server is not listed in the game, switch Settings to **LAN broadcast**. When the server runs on the same PC, the app does this by itself.
-
-With the optional **OpenLink Launcher** instead of the app: run `openlink-launcher.exe`, then in Halo Infinite go to **Play → Custom Game → OpenLink Servers** and join from there. See [native/launcher/README.md](native/launcher/README.md).
+Unzip OpenLink Launcher, run `openlink-launcher.exe`, then in Halo Infinite go to **Play → Custom Game → OpenLink Servers** and join from there. Vote for the next match in the lobby; **Back** in a server's lobby asks before leaving it. When the server runs on the same PC, the launcher switches to LAN broadcast by itself. See [native/launcher/README.md](native/launcher/README.md).
 
 ## Running a directory
 
@@ -127,24 +120,24 @@ Requires Go 1.27+. On Windows:
 .\build.ps1
 ```
 
-This runs the tests and writes `bin\openlink-server.exe`, `bin\openlink-directory.exe` and `bin\linux-amd64\openlink-directory`. These use only the Go standard library. The player app is built separately in `browser/` (see its README). The optional OpenLink Launcher is C++ and needs the Visual Studio C++ x64 tools: `native\launcher\test.cmd <output-folder>` builds it and runs its tests (see [native/launcher/README.md](native/launcher/README.md)).
+This runs the tests and writes `bin\openlink-server.exe`, `bin\openlink-directory.exe` and `bin\linux-amd64\openlink-directory`. These use only the Go standard library. OpenLink Launcher is C++ and needs the Visual Studio C++ x64 tools: `native\launcher\test.cmd <output-folder>` builds it and runs its tests (see [native/launcher/README.md](native/launcher/README.md)).
 
 ## Versions and releases
 
-The programs share one version series (`v0.8.0`, `v0.8.1`, …), but a release carries only the programs that changed. A server-only fix ships OpenLink Server and the directory, and the app keeps its version, so the app's version can skip numbers (for example `v0.8.0`, then `v0.9.0`).
+The programs share one version series (`v0.8.0`, `v0.8.1`, …), but a release carries only the programs that changed. A server-only fix ships OpenLink Server and the directory, and the launcher keeps its version, so the launcher's version can skip numbers (for example `v0.8.0`, then `v0.9.0`).
 
-- **Players** update the app when it says a newer version is out. It only says so for releases that contain the app.
+- **Players** update OpenLink Launcher when it says a newer version is out (it checks at start). It only says so for releases that contain the launcher (`OpenLink-Launcher-windows-amd64.zip`).
 - **Hosts** run the newest OpenLink Server. Its log warns at startup when a newer one is out.
-- **Compatibility** between the two is one number, `api.AppProtocol`. OpenLink Server lists the level it needs; an app below that level shows the server as "Update OpenLink to join". Raise it only when a server change needs new app code.
+- **Compatibility** between the two is one number, `api.AppProtocol` (the launcher's `kAppProtocol`; a Go test keeps them equal). OpenLink Server lists the level it needs; a launcher below that level shows "Update OpenLink Launcher" instead of joining. Raise it only when a server change needs new launcher code.
 
-Releasing: push an annotated tag (`git tag -a v0.8.3 -m "..."`). The release workflow builds the app and the server only if something they compile from changed since the last release that carried them, and names the release after what it contains. To override, put `[app]` / `[no-app]` or `[server]` / `[no-server]` in the tag message.
+Releasing: push an annotated tag (`git tag -a v0.8.3 -m "..."`). The release workflow builds the launcher and the server only if something they compile from changed since the last release that carried them, and names the release after what it contains. To override, put `[launcher]` / `[no-launcher]` or `[server]` / `[no-server]` in the tag message.
 
 ## Status and known limitations
 
-- **Tested:** remote players on Windows and on Linux/Proton listed a hosted server through the command-line connector (since retired in favour of the app) and played several full matches in a row. In that test the host's UDP 1343 was exposed through a tunnel rather than a router port forward. A direct port-forwarded host should behave the same, but it has not been tested yet.
-- **Lobby control:** the first player to join owns the lobby and picks the map and mode. There is no server-side map rotation yet.
-- **Updates:** every game update requires hosts and players to update together. The directory filters servers by build.
-- Player counts, ping and reachability need proxy mode on the host (the default). The app's Linux build is untested.
+- **Tested:** remote players on Windows and on Linux/Proton listed a hosted server through the command-line connector (since retired, as was the desktop app that replaced it) and played several full matches in a row. In that test the host's UDP 1343 was exposed through a tunnel rather than a router port forward. A direct port-forwarded host should behave the same, but it has not been tested yet.
+- **Lobby control:** the server owns its lobby: it picks each match from its playlist or the players' vote, and no player gets the host menus.
+- **One game build:** the final PC build of Halo Infinite; the tools check it.
+- Player counts, ping and reachability need proxy mode on the host (the default).
 - Proxy mode, bans and several servers on one PC are new and have not been tested with the real game yet.
 - Untested: many simultaneous players, long-running uptime, and host CPU and memory use.
 
@@ -152,4 +145,4 @@ Releasing: push an annotated tag (`git tag -a v0.8.3 -m "..."`). The release wor
 
 - `go test ./...` runs the unit tests: directory (auth, validation, expiry, limits), UDP forwarder, beacon relay, BootstrapLog parsing, UDP port-owner lookup and the simulator.
 - `openlink-server -simulate -loopback` keeps simulated beacons on 127.0.0.1.
-- `OPENLINK_DEV_PORTS=21343,27117` moves only the simulator and the app to other ports, so they can be tested on a machine already running a server. The game itself always uses 1343 and 7117.
+- `OPENLINK_DEV_PORTS=21343,27117` moves only the simulator to other ports, so they can be tested on a machine already running a server. The game itself always uses 1343 and 7117.

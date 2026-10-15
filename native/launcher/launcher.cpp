@@ -10,7 +10,14 @@
 #include <shobjidl.h>
 #include "boundary.h"
 #include "version.h"
+#include "config.h"
+#include "netcheck.h"
+#include "hotkey.h"
+#include "update.h"
+#include <winhttp.h>
+#include <shellapi.h>
 #include <cstdio>
+#include <cstring>
 #include <cwchar>
 #include <string>
 #include <vector>
@@ -201,6 +208,48 @@ std::string ErrorText(DWORD code) {
     while(n && (text[n-1]=='\r' || text[n-1]=='\n' || text[n-1]==' ' || text[n-1]=='.')) text[--n]=0;
     char out[300]; sprintf_s(out,"%s (%lu)",n ? text : "error",code); return out;
 }
+// GET https://<host><path> (body at most 4 MB, 5 s timeouts). False on any failure.
+bool HttpsGet(const wchar_t* host,const wchar_t* path,std::string& body) {
+    body.clear(); bool ok=false;
+    const std::wstring agent=L"OpenLink-Launcher/"+std::wstring(OPENLINK_VERSION,OPENLINK_VERSION+std::strlen(OPENLINK_VERSION));
+    HINTERNET session=WinHttpOpen(agent.c_str(),WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,WINHTTP_NO_PROXY_NAME,WINHTTP_NO_PROXY_BYPASS,0);
+    if(!session) return false;
+    WinHttpSetTimeouts(session,5000,5000,5000,5000);
+    HINTERNET connect=WinHttpConnect(session,host,INTERNET_DEFAULT_HTTPS_PORT,0);
+    HINTERNET request=connect ? WinHttpOpenRequest(connect,L"GET",path,nullptr,WINHTTP_NO_REFERER,WINHTTP_DEFAULT_ACCEPT_TYPES,WINHTTP_FLAG_SECURE) : nullptr;
+    if(request && WinHttpSendRequest(request,L"Accept: application/vnd.github+json\r\n",DWORD(-1),WINHTTP_NO_REQUEST_DATA,0,0,0) && WinHttpReceiveResponse(request,nullptr)) {
+        DWORD status=0,size=sizeof(status);
+        if(WinHttpQueryHeaders(request,WINHTTP_QUERY_STATUS_CODE|WINHTTP_QUERY_FLAG_NUMBER,WINHTTP_HEADER_NAME_BY_INDEX,&status,&size,WINHTTP_NO_HEADER_INDEX) && status==200) {
+            ok=true; char buffer[16384];
+            for(DWORD got=0;WinHttpReadData(request,buffer,sizeof(buffer),&got) && got;) {
+                if(body.size()+got>(4u<<20)) { ok=false; break; }
+                body.append(buffer,got);
+            }
+        }
+    }
+    if(request) WinHttpCloseHandle(request); if(connect) WinHttpCloseHandle(connect); WinHttpCloseHandle(session);
+    return ok;
+}
+// Before the game starts: a newer launcher release asks whether to open its download page.
+// True when the player chose to update now (the launcher then ends). Offline or any error: no notice.
+bool OfferUpdate() {
+    using namespace clientjoin::update;
+    if(!Released(OPENLINK_VERSION)) return false; // development builds never ask
+    std::wstring host(kListHost,kListHost+sizeof(kListHost)-1),path(kListPath,kListPath+sizeof(kListPath)-1);
+    std::string body; Found found;
+    if(!HttpsGet(host.c_str(),path.c_str(),body) || !Pick(body.data(),body.size(),OPENLINK_VERSION,kAsset,found)) return false;
+    std::printf("A newer OpenLink Launcher is available: %s (you have %s).\n",found.latest,OPENLINK_VERSION);
+    DWORD mode=0;
+    if(!GetConsoleMode(GetStdHandle(STD_INPUT_HANDLE),&mode)) { std::printf("Download it from %s\n\n",found.url); return false; }
+    std::printf("Open the download page now? [Y/n] "); std::fflush(stdout);
+    char answer[16]={};
+    if(!std::fgets(answer,sizeof(answer),stdin)) answer[0]=0;
+    if(answer[0]=='n' || answer[0]=='N') { std::puts(""); return false; }
+    const std::wstring url(found.url,found.url+std::strlen(found.url));
+    ShellExecuteW(nullptr,L"open",url.c_str(),nullptr,nullptr,SW_SHOWNORMAL);
+    std::printf("Opened %s\nStart OpenLink again after updating.\n",found.url);
+    return true;
+}
 void Usage() {
     std::puts("Starts Halo Infinite without anti-cheat and adds the OpenLink Servers browser to\n"
               "Play > Custom Game. Run it with no options; settings are in openlink-launcher.json.\n\n"
@@ -252,6 +301,21 @@ int wmain(int argc,wchar_t** argv) {
     }
     const std::wstring dll=Directory(self)+L"\\openlink-launcher.dll";
     if(GetFileAttributesW(dll.c_str())==INVALID_FILE_ATTRIBUTES) { std::puts("openlink-launcher.dll is missing. Keep it in the same folder as openlink-launcher.exe."); return Finish(1); }
+    {
+        // The DLL refuses the same settings; saying why here, before the game starts, is clearer.
+        char json[4096],directory[160];
+        if(const DWORD c=clientjoin::config::Read(nullptr,json)) { std::printf("Could not read openlink-launcher.json: %s\n",ErrorText(c).c_str()); return Finish(1); }
+        if(clientjoin::config::String(json,"directory",directory,sizeof(directory)) && directory[0] && !clientjoin::netcheck::DirectoryAllowed(directory)) {
+            std::printf("openlink-launcher.json: %s.\n",clientjoin::netcheck::kDirectoryRule); return Finish(1);
+        }
+        char keys[160],why[128]; clientjoin::hotkey::Key parsed[clientjoin::hotkey::kVoteKeys];
+        if(std::strstr(json,"\"vote_keys\"") && (!clientjoin::config::String(json,"vote_keys",keys,sizeof(keys)) || !clientjoin::hotkey::ParseVoteKeys(keys,parsed,why,sizeof(why)))) {
+            std::printf("openlink-launcher.json: vote_keys: %s.\nWrite four different keys, e.g. \"Alt+1, Alt+2, Alt+3, Alt+4\".\n",
+                        clientjoin::config::String(json,"vote_keys",keys,sizeof(keys)) ? why : "not a short text value");
+            return Finish(1);
+        }
+    }
+    if(OfferUpdate()) return Finish(0);
     DWORD e=clientjoin::CheckNoEac(0);
     if(e) {
         std::printf("Easy Anti-Cheat is running or could not be checked (%s).\n"

@@ -30,11 +30,13 @@ LookupA original_a=nullptr; LookupB original_b=nullptr;
 std::atomic<bool> overlay_active{false};
 Entry overlay[16]; size_t overlay_used=0;
 std::atomic<bool (*)(uint32_t,wchar_t*,size_t)> overlay_provider{nullptr}; // Dynamic overlay text (e.g. selected server name)
+std::atomic<bool (*)(uint32_t,wchar_t*,size_t)> always_provider{nullptr};
 bool Find(uint32_t sid,wchar_t* out,size_t capacity) noexcept {
     if(!sid || sid==0xffffffffu || !out || capacity<1) return false;
     bool found=false;
     AcquireSRWLockShared(&lock);
-    const auto provider=overlay_provider.load(); if(overlay_active.load() && provider && provider(sid,out,capacity)) found=true;
+    if(const auto always=always_provider.load(); always && always(sid,out,capacity)) found=true;
+    const auto provider=overlay_provider.load(); if(!found && overlay_active.load() && provider && provider(sid,out,capacity)) found=true;
     if(!found && overlay_active.load()) for(size_t i=0;i<overlay_used;++i) if(overlay[i].id==sid) {
         const size_t n=overlay[i].length<capacity-1 ? overlay[i].length : capacity-1;
         std::memcpy(out,overlay[i].text,n*sizeof(wchar_t)); out[n]=0; found=true; break;
@@ -160,5 +162,6 @@ void SetOverlayActive(bool on) noexcept { overlay_active.store(on); }
 namespace clientjoin {
 namespace text {
 void SetOverlayProvider(bool (*provider)(uint32_t,wchar_t*,size_t)) noexcept { overlay_provider=provider; }
+void SetAlwaysProvider(bool (*provider)(uint32_t,wchar_t*,size_t)) noexcept { always_provider=provider; }
 }
 }

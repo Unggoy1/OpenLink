@@ -22,6 +22,8 @@ const Config& Current() noexcept;
 uint32_t Fetches() noexcept;
 // The current match's map ("<asset>/<version>") of the listing last joined, if listed.
 bool JoinedThumb(char (&thumb)[96]) noexcept;
+// Called when the player leaves the server from the lobby (OpenLink.LeaveServer).
+void SetLeaveHook(void (*hook)()) noexcept;
 uint32_t FetchError() noexcept;                    // last directory fetch result (0 = ok)
 bool Configured() noexcept;                        // Configure started the fetch thread
 bool Fetched() noexcept;                           // a fetch has succeeded at least once

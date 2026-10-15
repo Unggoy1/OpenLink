@@ -15,6 +15,7 @@ struct Config {
 enum State : uint32_t { Idle,Resolving,Bound,Advertising,Answered,Gone,Failed };
 struct Status {
     State state=Idle; uint32_t error=0,adverts=0,beacons=0,up=0,down=0,sessions=0; uint8_t local[4]={};
+    bool lan_auto=false; // broadcasting from the LAN address because a server runs on this PC
 };
 // Ready is called once from the relay thread when beacons are being advertised;
 // it receives the local IPv4 text the game will see as the server's address.
@@ -22,6 +23,12 @@ using ReadyCallback=void (*)(const char* local_ip);
 bool ValidConfig(const Config&) noexcept;
 uint32_t Start(const Config&,ReadyCallback) noexcept; // Windows error; one relay per process
 Status Snapshot() noexcept;
+// A relay session is live: the server's packets arrived within the last 5 s (the player is on an
+// OpenLink server, in its lobby or a match).
+bool Live() noexcept;
+// Ends the current relay session after delay_ms (its sockets close; the server stops hearing the
+// player), unless a new join replaced it meanwhile.
+void StopAfter(uint32_t delay_ms) noexcept;
 // Pure helpers, exposed for tests.
 size_t Base64Decode(const char* text,size_t length,uint8_t* out,size_t capacity) noexcept; // 0 = invalid
 bool FindListing(const char* json,size_t length,const char* id,char* host,size_t host_capacity,uint16_t& port) noexcept;
@@ -45,13 +52,15 @@ void SetBallotCallback(void (*callback)(const Ballot&)) noexcept;
 // Sends one datagram to the server on every live session of the current relay (the next relay
 // loop pass, within ~100 ms). False when no session is live or the datagram is too large.
 bool SendToServer(const char* data,size_t size) noexcept;
-// The OpenLink app protocol level this launcher implements (joins through the OpenLink Server
+// The OpenLink protocol level (api.AppProtocol) this launcher implements (joins through the OpenLink Server
 // proxy). Keep it equal to api.AppProtocol in internal/api (a Go test checks); a listing that
 // needs a higher level is shown but not joined ("update OpenLink Launcher").
 constexpr int32_t kAppProtocol=1;
 // Browser rows from GET /v1/servers.
-struct Row { char id[40]; char name[96]; char match[96]; char phase[16]; char status[16]; char thumb[96]; char mode[96]; char description[484]; int32_t players; int32_t app_protocol; bool joinable; };
-bool ParseServerList(const char* json,size_t length,Row* rows,size_t capacity,size_t& count) noexcept;
+struct Row { char id[40]; char host[256]; char name[96]; char match[96]; char phase[16]; char status[16]; char thumb[96]; char mode[96]; char description[484]; int32_t players; int32_t app_protocol; bool joinable; };
+// With a directory, listings whose host it may not send players to (netcheck) and repeated IDs
+// are skipped, so they never take a place in rows.
+bool ParseServerList(const char* json,size_t length,Row* rows,size_t capacity,size_t& count,const char* directory=nullptr) noexcept;
 uint32_t ListServers(const char* directory,Row* rows,size_t capacity,size_t& count) noexcept; // 0 or Windows error
 }
 }

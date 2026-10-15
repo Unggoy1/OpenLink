@@ -7,7 +7,7 @@ import (
 
 // Map thumbnails come only from Halo Infinite's public UGC blob host, and the
 // URL is computed from the map's asset and version IDs. A ballot never carries
-// a URL, only the reference "<map asset>/<map version>"; the app builds the
+// a URL, only the reference "<map asset>/<map version>"; the launcher builds the
 // URLs from it, so a server cannot make players' apps fetch anything else.
 const thumbHost = "https://blobs-infiniteugc.svc.halowaypoint.com/ugcstorage/map/"
 

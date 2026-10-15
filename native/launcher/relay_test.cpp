@@ -2,6 +2,9 @@
 #define WIN32_LEAN_AND_MEAN
 #include <winsock2.h>
 #include "relay.h"
+#include "netcheck.h"
+#include "hotkey.h"
+#include "update.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -74,6 +77,57 @@ int main() {
         check(!parse("HICOMM-BALLOT {\"round\":1,\"options\":[{\"id\":\"a\",\"name\":\"A\"}],\"remaining_ms\":1,\"counts\":[0],\"mine\":-1,\"closed\":false,\"winner\":-1,\"start_ms\":-1}x",v),"trailing bytes refused");
         check(!parse("HICOMM-VOTE {\"round\":1,\"choice\":0}",v),"a cast is not a ballot");
         check(!SendToServer("x",1),"no vote is sent without a live relay session");
+    }
+    {   // Directory and server address rules (netcheck; the retired app's netcheck.go had the same rules).
+        using namespace clientjoin::netcheck;
+        check(DirectoryAllowed("https://openlink-dir.unggoy.xyz") && DirectoryAllowed("HTTPS://example.org/x"),"https directories allowed");
+        check(DirectoryAllowed("http://127.0.0.1:8090") && DirectoryAllowed("http://localhost:8090") && DirectoryAllowed("http://192.168.1.5")
+              && DirectoryAllowed("http://10.0.0.2/") && DirectoryAllowed("http://[::1]:8090"),"http only for this PC or the local network");
+        check(!DirectoryAllowed("http://openlink-dir.unggoy.xyz") && !DirectoryAllowed("http://8.8.8.8") && !DirectoryAllowed("ftp://x")
+              && !DirectoryAllowed("http://user@127.0.0.1") && !DirectoryAllowed("https://") && !DirectoryAllowed(""),"other directories refused");
+        const char* net="https://openlink-dir.unggoy.xyz";
+        check(ServerHostAllowed(net,"stamina-escrow.tun.ply.gg") && ServerHostAllowed(net,"147.185.221.216") && ServerHostAllowed(net,"2602:fbaf:800::d8"),"public servers allowed");
+        check(!ServerHostAllowed(net,"127.0.0.1") && !ServerHostAllowed(net,"192.168.11.78") && !ServerHostAllowed(net,"172.20.0.1")
+              && !ServerHostAllowed(net,"169.254.1.1") && !ServerHostAllowed(net,"0.0.0.0") && !ServerHostAllowed(net,"239.1.1.1")
+              && !ServerHostAllowed(net,"::1") && !ServerHostAllowed(net,"fd00::1") && !ServerHostAllowed(net,"fe80::1")
+              && !ServerHostAllowed(net,"::ffff:10.0.0.1") && !ServerHostAllowed(net,"localhost") && !ServerHostAllowed(net,""),"an internet directory cannot send players to their own network");
+        check(ServerHostAllowed("http://127.0.0.1:8090","127.0.0.1") && ServerHostAllowed("http://192.168.1.2","192.168.1.9"),"a local test directory may list local servers");
+        const char* listing="[{\"id\":\"a\",\"host\":\"192.168.1.9\",\"port\":1},{\"id\":\"b\",\"host\":\"example.org\",\"port\":1},{\"id\":\"b\",\"host\":\"example.org\",\"port\":2},{\"id\":\"c\",\"host\":\"8.8.8.8\",\"port\":1}]";
+        Row rows[2]; size_t count=0;
+        check(ParseServerList(listing,std::strlen(listing),rows,2,count,net) && count==2 && !std::strcmp(rows[0].id,"b") && !std::strcmp(rows[1].id,"c"),
+              "local and repeated listings skipped without taking a place");
+    }
+    {   // Vote hotkeys (hotkey; the same rules as the retired app's overlay_keys.go).
+        using namespace clientjoin::hotkey;
+        Key k; char why[128];
+        check(Parse("ctrl + alt + 1",k,why,sizeof(why)) && k.mods==0x3 && k.vk=='1' && !std::strcmp(k.name,"Ctrl+Alt+1"),"hotkey parsed and normalized");
+        check(Parse("Shift+Win+num7",k,why,sizeof(why)) && k.vk==0x67 && !std::strcmp(k.name,"Shift+Win+Num7"),"numpad key with Win");
+        check(Parse("F13",k,why,sizeof(why)) && k.mods==0 && k.vk==0x7C && Parse("Pause",k,why,sizeof(why)),"F-keys and Pause may stand alone");
+        check(!Parse("1",k,why,sizeof(why)) && !Parse("Shift+A",k,why,sizeof(why)) && !Parse("Ctrl+",k,why,sizeof(why))
+              && !Parse("Hyper+1",k,why,sizeof(why)) && !Parse("Ctrl+F25",k,why,sizeof(why)) && !Parse("Ctrl+Space",k,why,sizeof(why)),"bad hotkeys refused");
+        Key keys[kVoteKeys];
+        check(ParseVoteKeys("Ctrl+Alt+Q, Ctrl+Alt+W,Ctrl+Alt+E , F9",keys,why,sizeof(why)) && keys[3].vk==0x78 && !std::strcmp(keys[2].name,"Ctrl+Alt+E"),"four vote keys");
+        check(!ParseVoteKeys("Ctrl+Alt+1, Ctrl+Alt+2, Ctrl+Alt+3",keys,why,sizeof(why)) && !ParseVoteKeys("F1,F2,F3,F4,F5",keys,why,sizeof(why)),"exactly four");
+        check(!ParseVoteKeys("Ctrl+Alt+1, alt+ctrl+1, F3, F4",keys,why,sizeof(why)) && std::strstr(why,"different"),"distinct keys");
+        DefaultVoteKeys(keys); check(!std::strcmp(keys[3].name,"Alt+4") && keys[0].mods==0x1 && keys[0].vk==0x31,"defaults are Alt+1..4");
+    }
+    {   // Launcher update check (update, as internal/release).
+        using namespace clientjoin::update;
+        check(Released("v0.8.0") && Released("v1.2.3-rc.1") && !Released("v0.7.6-7-gcc5dd6a") && !Released("v0.7.6-7-gcc5dd6a-dirty") && !Released("dev") && !Released("v1.2"),
+              "release versions vs development builds");
+        const char* releases=
+            "[{\"tag_name\":\"v0.9.1\",\"html_url\":\"https://github.com/Unggoy1/OpenLink/releases/tag/v0.9.1\",\"draft\":false,\"prerelease\":false,\"assets\":[{\"name\":\"OpenLink-Server-windows-amd64.zip\"}]},"
+            "{\"tag_name\":\"v0.9.0\",\"html_url\":\"https://github.com/Unggoy1/OpenLink/releases/tag/v0.9.0\",\"draft\":false,\"prerelease\":false,\"body\":\"notes \\\"quoted\\\" \u00e9\",\"assets\":[{\"name\":\"OpenLink-Launcher-windows-amd64.zip\",\"size\":5}]},"
+            "{\"tag_name\":\"v1.0.0-rc.1\",\"html_url\":\"https://github.com/Unggoy1/OpenLink/releases/tag/v1.0.0-rc.1\",\"draft\":false,\"prerelease\":true,\"assets\":[{\"name\":\"OpenLink-Launcher-windows-amd64.zip\"}]},"
+            "{\"tag_name\":\"v2.0.0\",\"html_url\":\"https://evil.example/releases/v2\",\"draft\":false,\"prerelease\":false,\"assets\":[{\"name\":\"OpenLink-Launcher-windows-amd64.zip\"}]},"
+            "{\"tag_name\":\"v3.0.0\",\"html_url\":\"https://github.com/Unggoy1/OpenLink/releases/tag/v3.0.0\",\"draft\":true,\"prerelease\":false,\"assets\":[{\"name\":\"OpenLink-Launcher-windows-amd64.zip\"}]},"
+            "{\"tag_name\":\"v0.8.5\",\"html_url\":\"https://github.com/Unggoy1/OpenLink/releases/tag/v0.8.5\",\"draft\":false,\"prerelease\":false,\"assets\":[{\"name\":\"OpenLink-Launcher-windows-amd64.zip\"}]}]";
+        Found f;
+        check(Pick(releases,std::strlen(releases),"v0.8.0",kAsset,f) && !std::strcmp(f.latest,"v0.9.0") && std::strstr(f.url,"/tag/v0.9.0"),
+              "newest release with the launcher; server-only, draft, pre-release and foreign links skipped");
+        check(Pick(releases,std::strlen(releases),"v1.0.0-beta.2",kAsset,f) && !std::strcmp(f.latest,"v1.0.0-rc.1"),"testers see newer pre-releases");
+        check(!Pick(releases,std::strlen(releases),"v0.9.0",kAsset,f) && !Pick(releases,std::strlen(releases),"v0.7.6-7-gcc5dd6a",kAsset,f),"up to date or a development build: no notice");
+        check(!Pick("[{\"tag_name\":",13,"v0.1.0",kAsset,f) && !Pick("{}",2,"v0.1.0",kAsset,f),"malformed lists give no notice");
     }
     std::puts("relay tests passed");
 }

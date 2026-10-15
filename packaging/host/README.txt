@@ -11,7 +11,7 @@ Files
 Setup
   1. Keep all files in one folder.
   2. Copy openlink-server.example.json to openlink-server.json and fill in name,
-     description (optional, one line shown in the app) and public_port (your
+     description (optional, one line shown in the server browser) and public_port (your
      port forward). To let openlink-server ask your router to forward the port,
      set "auto_port_forward" to true (opt-in; UPnP or NAT-PMP; see the
      disclaimer below). No key is needed. register_key and
@@ -46,7 +46,7 @@ What the example config does
   - The third playlist entry has "teams": {"size": 2}: Fiesta Slayer in
     teams of 2 (8 players get 4 teams).
   - "vote": when the lobby gets its first player, and after every match,
-    players vote in the OpenLink app between up to 4 random playlist entries
+    players vote in OpenLink Launcher between up to 4 random playlist entries
     (30 s). The winner starts 5 s later; with no votes, a random one.
     Without "vote", matches start in playlist order 10 s after a player
     joins; "auto_start": {"min_players": 2, "delay_seconds": 30} changes
@@ -54,7 +54,7 @@ What the example config does
 
 The log should show "host control transport connected", "playlist voting on"
 and, once someone joins, "vote open". The lobby screen may show another map
-name until the match loads; the OpenLink app shows the real next match.
+name until the match loads; OpenLink Launcher shows the real next match.
 
 Notes
   - Each release supports one Halo build. After a Halo update openlink-server
@@ -62,7 +62,7 @@ Notes
   - This modifies your own server process (never players' games). Hosting
     this way is at your own risk with respect to the game's terms.
   - With a tunnel pointed at 127.0.0.1:1343, keep "server_ip": "127.0.0.2".
-  - Playing on the hosting PC: the OpenLink app switches to LAN broadcast by
+  - Playing on the hosting PC: OpenLink Launcher switches to LAN broadcast by
     itself when it sees the server running on the same PC.
   - Check status: openlink-server.exe status
   - End the running match: openlink-server.exe end-match

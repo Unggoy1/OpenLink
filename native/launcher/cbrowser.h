@@ -16,6 +16,8 @@ bool TakeNotice() noexcept;
 // "<asset>/<version>" (lower-case UUIDs) to the game's GUID byte layout.
 bool ParseThumbRef(const char* ref,uint8_t (&asset)[16],uint8_t (&version)[16]) noexcept;
 void RequeueNotice() noexcept;              // the UI was busy: try again next tick
+// The next ~15 s the leave dialog's text is the "Leave server?" confirmation (OpenLink.LeaveNotice).
+void LeaveNotice() noexcept;
 }
 }
 namespace clientjoin { namespace cbrowser { bool TestParseGuid() noexcept; } }

@@ -99,7 +99,7 @@ If the game server exits at once, run it again with
 (`OPENLINK_NO_REUSEADDR=1` in the service's `environment`): it should then fail
 the same way, which shows the preload is what makes it work.
 
-**6. Join and play.** From a player PC, join the server in the OpenLink app,
+**6. Join and play.** From a player PC, join the server with OpenLink Launcher,
 vote and play one whole match, then let the next vote open. Send the log,
 `status` and the `steamfree-*.jsonl` file, plus what the players saw.
 

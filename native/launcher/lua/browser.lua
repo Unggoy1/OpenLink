@@ -94,7 +94,9 @@ if OpenLinkUI == nil and type(AddListItemsToCUI) == "function" then
   OpenLinkUI.leaveStuck = function()
     local s = GetObject(CustomGameScreen)
     if not s then return false end
+    OpenLinkUI.leaving = true -- our own Back after a match: never the leave dialog
     local ok, e = pcall(function() s:ContentGoBack() end)
+    OpenLinkUI.leaving = false
     if not ok then fail("post-match back", e) end
     return ok
   end
@@ -234,8 +236,163 @@ if OpenLinkUI == nil and type(AddListItemsToCUI) == "function" then
     end
     return x0, y0, x1, y1
   end
+  -- On an OpenLink server the lobby's Server row (custom_games_server_selection) does nothing: the
+  -- server owns the lobby and the vote panel covers the row, and Halo reads the mouse itself, so a
+  -- click on the panel also lands on the row under it (O192). Wrapped on the class, so it holds
+  -- whenever the row is activated, even while the engine tick is paused (O190).
+  local serverRowUri = "custom_games_server_selection"
+  local function wrapServerRow()
+    if type(CustomGameScreen) ~= "table" or CustomGameScreen.OpenLinkServerRow then return end
+    local stock = CustomGameScreen.OpenNewScreen
+    if type(stock) ~= "function" then return end
+    CustomGameScreen.OpenNewScreen = function(self, sender, eventArgs, ...)
+      local uri, blocked = nil, false
+      pcall(function() uri = sender.DataContext.URI end)
+      if not OpenLinkUI.rowUriLogged then
+        OpenLinkUI.rowUriLogged = true
+        log("lobby row opened: uri=" .. tostring(uri) .. " (" .. type(uri) .. ")")
+      end
+      pcall(function()
+        blocked = (uri == serverRowUri or (type(stringid) == "function" and uri == stringid(serverRowUri)))
+          and type(OpenLink) == "table" and OpenLink.OnServer ~= nil and OpenLink.OnServer() == true
+      end)
+      if blocked then
+        log("lobby Server row ignored (on an OpenLink server)")
+        return
+      end
+      return stock(self, sender, eventArgs, ...)
+    end
+    CustomGameScreen.OpenLinkServerRow = true
+    log("lobby Server row guarded")
+  end
+  -- Back on an OpenLink server's lobby leaves the server (stock Back only pops the screen and the
+  -- player stays in the server's lobby). A "Leave server?" confirmation first, with OKAY and CANCEL:
+  -- the front-end's quit dialog with our text (the game's own "Leave local host?" dialog, 0xe4580ccc,
+  -- is not loaded in the lobby and opens as a bare ERROR box, O195/O197). OKAY: the game's own
+  -- DisconnectFromLANServer, as the main menu runs before leaving a LAN lobby (O194), on the first
+  -- screen alive that has it; in the lobby none usually is, so the stock Back goes to the Custom Game
+  -- landing and its data context disconnects when it activates. Then our relay session ends
+  -- (OpenLink.LeaveServer). CANCEL, or Back on the dialog, stays (the lobby's Back that comes with
+  -- Back is dropped).
+  -- The lobby's own Back was bound when the screen was built, so the hook is on SLAMS.ContentGoBack
+  -- (looked up on every Back), limited to the active lobby screen.
+  local function wrapLobbyState()
+    if type(CustomGameScreen) ~= "table" or CustomGameScreen.OpenLinkState then return end
+    local function track(name, active)
+      local stock = CustomGameScreen[name]
+      if type(stock) ~= "function" then return end
+      CustomGameScreen[name] = function(self, ...)
+        OpenLinkUI.lobbyActive = active
+        if active and OpenLinkUI.dialogOpen then OpenLinkUI.dialogOpen = false; pcall(OpenLink.LeaveNotice, false) end
+        return stock(self, ...)
+      end
+    end
+    track("ScreenActivated", true)
+    track("ScreenDeactivated", false)
+    track("OnDispose", false)
+    CustomGameScreen.OpenLinkState = true
+    local s = nil
+    pcall(function() s = GetObject(CustomGameScreen) end)
+    OpenLinkUI.lobbyActive = s ~= nil
+  end
+  local function finishLeave(dc, where)
+    local done, err = pcall(function() dc:DisconnectFromLANServer() end)
+    log("leave server: game disconnect " .. tostring(done) .. " (" .. where .. ") " .. tostring(err))
+    pcall(OpenLink.LeaveServer)
+  end
+  -- A screen alive now whose data context has DisconnectFromLANServer (the Play menu's DC type).
+  local function lanDc()
+    local classes = { CustomGamesLandingScreen, MainMenuScreen, WatchScreen }
+    local seen = ""
+    for i = 1, 3 do
+      local cls, o, dc, f = classes[i], nil, nil, nil
+      if type(cls) == "table" then
+        pcall(function() o = GetObject(cls) end)
+        pcall(function() dc = o.dc end)
+        pcall(function() f = dc.DisconnectFromLANServer end)
+        seen = seen .. " " .. i .. ":" .. tostring(o ~= nil) .. "/" .. tostring(dc ~= nil) .. "/" .. tostring(f ~= nil)
+        if dc ~= nil and f ~= nil then log("leave server: data contexts" .. seen); return dc, i end
+      else
+        seen = seen .. " " .. i .. ":noclass"
+      end
+    end
+    log("leave server: data contexts" .. seen)
+    return nil, 0
+  end
+  -- The landing finishes a pending leave as soon as it is up (new or re-activated).
+  local function wrapLanding()
+    if type(CustomGamesLandingScreen) ~= "table" or CustomGamesLandingScreen.OpenLinkLeave then return end
+    local function finish(name)
+      local stock = CustomGamesLandingScreen[name]
+      if type(stock) ~= "function" then return end
+      CustomGamesLandingScreen[name] = function(self, ...)
+        if OpenLinkUI.pendingLeave then
+          OpenLinkUI.pendingLeave = false
+          local dc, f = nil, nil
+          pcall(function() dc = self.dc end)
+          pcall(function() f = dc.DisconnectFromLANServer end)
+          if dc ~= nil and f ~= nil then finishLeave(dc, "landing " .. name)
+          else log("leave server: landing " .. name .. " has no LAN disconnect (dc " .. tostring(dc ~= nil) .. ")"); pcall(OpenLink.LeaveServer) end
+        end
+        return stock(self, ...)
+      end
+    end
+    finish("ScreenInitialize")
+    finish("ScreenActivated")
+    CustomGamesLandingScreen.OpenLinkLeave = true
+  end
+  local function wrapLobbyBack()
+    if type(SLAMS) ~= "table" or type(SLAMS.ContentGoBack) ~= "function" or SLAMS.OpenLinkBack then return end
+    local stockBack = SLAMS.ContentGoBack
+    SLAMS.ContentGoBack = function(ci, ...)
+      if OpenLinkUI.dialogOpen and not OpenLinkUI.leaving then
+        OpenLinkUI.dialogOpen = false
+        pcall(OpenLink.LeaveNotice, false)
+        log("leave server: cancelled")
+        return
+      end
+      local intercept = false
+      pcall(function()
+        if OpenLinkUI.lobbyActive and not OpenLinkUI.leaving and type(OpenLink) == "table" and OpenLink.OnServer and OpenLink.OnServer() == true then
+          local s = GetObject(CustomGameScreen)
+          intercept = s ~= nil and s.dc.IsLoadingData ~= true
+        end
+      end)
+      if not intercept then return stockBack(ci, ...) end
+      pcall(OpenLink.LeaveNotice)
+      OpenLinkUI.dialogOpen = true
+      -- The front-end's quit dialog (0x266ab009, FrontendPauseScreen:ExitApplication): OKAY + CANCEL
+      -- and loaded in the lobby (O198). Its title and question read ours (cbrowser NoticeText) and its
+      -- buttons run only the callbacks given here: OKAY leaves, CANCEL stays. The generic one-button
+      -- dialog if the ID cannot be made.
+      local dialog = nil
+      pcall(function() dialog = OpenLink.RawId(stringid("custom_games_landing"), "266ab009") end)
+      if dialog == nil then dialog = "campaign_generic_dialog" end
+      local ok, e = pcall(SLAMS.OpenDialog, ci, dialog, function()
+        OpenLinkUI.dialogOpen = false
+        OpenLinkUI.leaving = true
+        local dc, which = lanDc()
+        if dc ~= nil then finishLeave(dc, "screen " .. tostring(which)) else OpenLinkUI.pendingLeave = true end
+        local back, berr = pcall(stockBack, ci)
+        if not back then fail("leave server back", berr) end
+        OpenLinkUI.leaving = false
+      end, function()
+        OpenLinkUI.dialogOpen = false
+        pcall(OpenLink.LeaveNotice, false)
+        log("leave server: stay pressed")
+      end)
+      log("leave server: dialog " .. tostring(ok) .. " " .. tostring(e))
+      if not ok then OpenLinkUI.dialogOpen = false; pcall(OpenLink.LeaveNotice, false); return stockBack(ci, ...) end
+    end
+    SLAMS.OpenLinkBack = true
+    log("lobby Back guarded")
+  end
   OpenLinkUI.voteTick = function()
     if type(OpenLink) ~= "table" or not OpenLink.SetLobbyVote then return end
+    pcall(wrapServerRow)
+    pcall(wrapLobbyState)
+    pcall(wrapLobbyBack)
+    pcall(wrapLanding)
     local on, x0, y0, x1, y1, bottom = false, 0, 0, 0, 0, 0
     if type(CustomGameScreen) == "table" and type(GetObject) == "function" then
       local s = nil

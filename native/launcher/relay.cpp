@@ -4,11 +4,13 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <mstcpip.h>
+#include <iphlpapi.h>
 #ifndef SIO_UDP_CONNRESET
 #define SIO_UDP_CONNRESET _WSAIOW(IOC_VENDOR,12)
 #endif
 #include <winhttp.h>
 #include "relay.h"
+#include "netcheck.h"
 #include "version.h"
 #include <atomic>
 #include <new>
@@ -205,6 +207,46 @@ DWORD WINAPI PollBeacons(void* parameter) {
 
 struct Session { sockaddr_in client; SOCKET upstream; ULONGLONG last; bool answered; };
 
+// Hosting and playing on one PC (as internal/game/localserver.go): a server on this PC
+// (another process, HaloInfinite.exe or openlink-server.exe, holds UDP 1343) is in the way of
+// loopback beacons, so that session announces the server from the PC's LAN address instead.
+bool ServerProcess(DWORD pid) {
+    HANDLE p=OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION,FALSE,pid); if(!p) return false;
+    wchar_t path[MAX_PATH]; DWORD n=MAX_PATH; const BOOL ok=QueryFullProcessImageNameW(p,0,path,&n); CloseHandle(p);
+    if(!ok) return false;
+    const wchar_t* base=wcsrchr(path,L'\\'); base=base ? base+1 : path;
+    return !_wcsicmp(base,L"HaloInfinite.exe") || !_wcsicmp(base,L"openlink-server.exe");
+}
+template<class Table> bool OwnedByServer(ULONG family,DWORD self) {
+    DWORD size=0;
+    for(int attempt=0;attempt<4;++attempt) {
+        uint8_t* buffer=size ? new(std::nothrow) uint8_t[size] : nullptr;
+        const DWORD r=GetExtendedUdpTable(buffer,&size,FALSE,family,UDP_TABLE_OWNER_PID,0);
+        if(r==NO_ERROR && buffer) {
+            const Table* t=reinterpret_cast<const Table*>(buffer); bool found=false;
+            for(DWORD i=0;i<t->dwNumEntries && !found;++i)
+                found=ntohs(u_short(t->table[i].dwLocalPort))==kGamePort && t->table[i].dwOwningPid!=self && ServerProcess(t->table[i].dwOwningPid);
+            delete[] buffer; return found;
+        }
+        delete[] buffer;
+        if(r!=ERROR_INSUFFICIENT_BUFFER) return false;
+        size+=4096;
+    }
+    return false;
+}
+bool LocalServerRunning() {
+    const DWORD self=GetCurrentProcessId();
+    return OwnedByServer<MIB_UDPTABLE_OWNER_PID>(AF_INET,self) || OwnedByServer<MIB_UDP6TABLE_OWNER_PID>(AF_INET6,self);
+}
+// The address of the default route (nothing is sent: a UDP socket only picks its source).
+bool PrimaryIPv4(char (&out)[16]) {
+    SOCKET s=socket(AF_INET,SOCK_DGRAM,IPPROTO_UDP); if(s==INVALID_SOCKET) return false;
+    sockaddr_in to={}; to.sin_family=AF_INET; to.sin_port=htons(9); inet_pton(AF_INET,"192.0.2.1",&to.sin_addr); // TEST-NET-1
+    sockaddr_in me={}; int size=sizeof(me);
+    const bool ok=!connect(s,reinterpret_cast<sockaddr*>(&to),sizeof(to)) && !getsockname(s,reinterpret_cast<sockaddr*>(&me),&size)
+                  && me.sin_addr.s_addr && inet_ntop(AF_INET,&me.sin_addr,out,sizeof(out));
+    closesocket(s); return ok;
+}
 DWORD Run(uint32_t mine) {
     Set(Resolving);
     WSADATA data; if(WSAStartup(MAKEWORD(2,2),&data)) { Set(Failed,ERROR_NETWORK_UNREACHABLE); return 1; }
@@ -212,11 +254,16 @@ DWORD Run(uint32_t mine) {
     if(!ParseDirectory(config.directory,u)) { Set(Failed,ERROR_INVALID_PARAMETER); return 1; }
     const DWORD code=Get(u,"/v1/servers",body,sizeof(body),size);
     if(code!=200 || !FindListing(body,size,config.listing,server_host,sizeof(server_host),server_port)) { Set(Failed,code==200 ? ERROR_NOT_FOUND : ERROR_CONNECTION_REFUSED); return 1; }
+    // A directory on the internet may not send the player to their own network (netcheck).
+    if(!netcheck::ServerHostAllowed(config.directory,server_host)) { Set(Failed,ERROR_ACCESS_DENIED); return 1; }
     sockaddr_in upstream={};
     if(!Resolve(server_host,server_port,upstream)) { Set(Failed,ERROR_HOST_UNREACHABLE); return 1; }
     sockaddr_in local={}; local.sin_family=AF_INET; local.sin_port=htons(kGamePort);
     uint32_t lan=0; sockaddr_in target={}; target.sin_family=AF_INET; target.sin_port=htons(kDiscoveryPort);
-    if(config.lan_ip[0]) { inet_pton(AF_INET,config.lan_ip,&local.sin_addr); lan=local.sin_addr.s_addr; target.sin_addr.s_addr=INADDR_BROADCAST; }
+    char lan_ip[16]={}; strcpy_s(lan_ip,config.lan_ip); // "lan_ip" set by hand wins
+    const bool lan_auto=!lan_ip[0] && LocalServerRunning() && PrimaryIPv4(lan_ip);
+    Update([&](Status& s){ s.lan_auto=lan_auto; });
+    if(lan_ip[0]) { inet_pton(AF_INET,lan_ip,&local.sin_addr); lan=local.sin_addr.s_addr; target.sin_addr.s_addr=INADDR_BROADCAST; }
     else { local.sin_addr.s_addr=htonl(INADDR_LOOPBACK); target.sin_addr.s_addr=htonl(INADDR_LOOPBACK); }
     SOCKET listen_socket=socket(AF_INET,SOCK_DGRAM,IPPROTO_UDP), advert=socket(AF_INET,SOCK_DGRAM,IPPROTO_UDP);
     BOOL yes=TRUE;
@@ -246,7 +293,7 @@ DWORD Run(uint32_t mine) {
             }
         }
         for(auto& s:sessions) if(s.upstream!=INVALID_SOCKET && now-s.last>=kIdle) { closesocket(s.upstream); s.upstream=INVALID_SOCKET; }
-        // A queued vote leaves on every live session socket, like the app's relay: the server
+        // A queued vote leaves on every live session socket: the server
         // accepts it from whichever session its game server answered.
         {
             char out[sizeof(outbox)]; size_t n=0;
@@ -298,7 +345,8 @@ DWORD Run(uint32_t mine) {
     closesocket(listen_socket); closesocket(advert);
     // The poller shares this session's state; a successor starts only after it exits.
     if(poller) { WaitForSingleObject(poller,INFINITE); CloseHandle(poller); }
-    if(generation.load()!=mine) Set(Gone);
+    // Replaced or stopped (StopAfter): this session no longer counts as live.
+    if(generation.load()!=mine) { Update([](Status& s){ s.sessions=0; }); last_down.store(0); Set(Gone); }
     return 0;
 }
 // Start() hands each session to a launcher thread that first waits for the
@@ -329,6 +377,7 @@ bool ReadRow(Cursor& c,Row& r) {
         bool ok; int64_t n=0;
         const bool text=c.p<c.end && *c.p=='"';
         if(text && !std::strcmp(key,"id")) ok=String(c,r.id,sizeof(r.id));
+        else if(text && !std::strcmp(key,"host")) { const Cursor s=c; ok=String(c,r.host,sizeof(r.host)); if(!ok) { c=s; ok=String(c,nullptr,0); r.host[0]=0; } }
         else if(text && !std::strcmp(key,"name")) { const Cursor s=c; ok=String(c,r.name,sizeof(r.name)); if(!ok) { c=s; ok=String(c,nullptr,0); r.name[0]=0; } }
         else if(text && !std::strcmp(key,"status")) { const Cursor s=c; ok=String(c,r.status,sizeof(r.status)); if(!ok) { c=s; ok=String(c,nullptr,0); r.status[0]=0; } }
         else if(text && !std::strcmp(key,"description")) { const Cursor s=c; ok=String(c,r.description,sizeof(r.description)); if(!ok) { c=s; ok=String(c,nullptr,0); r.description[0]=0; } }
@@ -357,21 +406,23 @@ bool ReadRow(Cursor& c,Row& r) {
     }
 }
 }
-bool ParseServerList(const char* json,size_t length,Row* rows,size_t capacity,size_t& count) noexcept {
+bool ParseServerList(const char* json,size_t length,Row* rows,size_t capacity,size_t& count,const char* directory) noexcept {
     count=0; Cursor c={json,json+length}; Space(c); if(c.p>=c.end || *c.p!='[') return false; ++c.p; Space(c);
     if(c.p<c.end && *c.p==']') return true;
     for(;;) {
         Row r; if(!ReadRow(c,r)) return false;
-        if(r.id[0] && count<capacity) rows[count++]=r;
+        bool keep=r.id[0] && count<capacity && (!directory || netcheck::ServerHostAllowed(directory,r.host));
+        for(size_t i=0;keep && directory && i<count;++i) if(!std::strcmp(rows[i].id,r.id)) keep=false;
+        if(keep) rows[count++]=r;
         Space(c); if(c.p>=c.end) return false; if(*c.p==',') { ++c.p; continue; } if(*c.p==']') return true; return false;
     }
 }
 uint32_t ListServers(const char* directory,Row* rows,size_t capacity,size_t& count) noexcept {
-    count=0; Url u={}; if(!directory || !ParseDirectory(directory,u)) return ERROR_INVALID_PARAMETER;
+    count=0; Url u={}; if(!directory || !netcheck::DirectoryAllowed(directory) || !ParseDirectory(directory,u)) return ERROR_INVALID_PARAMETER;
     static char body[kMaxBody]; static SRWLOCK list_lock=SRWLOCK_INIT; size_t size=0;
     AcquireSRWLockExclusive(&list_lock);
     const DWORD code=Get(u,"/v1/servers",body,sizeof(body),size);
-    const uint32_t result=code!=200 ? (code ? ERROR_BAD_NET_RESP : ERROR_CONNECTION_REFUSED) : ParseServerList(body,size,rows,capacity,count) ? 0u : uint32_t(ERROR_INVALID_DATA);
+    const uint32_t result=code!=200 ? (code ? ERROR_BAD_NET_RESP : ERROR_CONNECTION_REFUSED) : ParseServerList(body,size,rows,capacity,count,directory) ? 0u : uint32_t(ERROR_INVALID_DATA);
     ReleaseSRWLockExclusive(&list_lock); return result;
 }
 bool IsBallot(const uint8_t* d,size_t n) noexcept { const size_t p=sizeof(kBallotPrefix)-1; return n>=p && !std::memcmp(d,kBallotPrefix,p); }
@@ -509,6 +560,7 @@ bool ValidConfig(const Config& c) noexcept {
     if(c.directory[sizeof(c.directory)-1] || c.listing[sizeof(c.listing)-1] || c.lan_ip[sizeof(c.lan_ip)-1]) return false;
     const size_t n=std::strlen(c.listing); if(!n) return false;
     for(size_t i=0;i<n;++i) { const char ch=c.listing[i]; if(!((ch>='0'&&ch<='9')||(ch>='a'&&ch<='z')||(ch>='A'&&ch<='Z')||ch=='-'||ch=='_')) return false; }
+    if(!netcheck::DirectoryAllowed(c.directory)) return false;
     Url u={}; if(!ParseDirectory(c.directory,u)) return false;
     if(c.lan_ip[0]) { in_addr a={}; if(inet_pton(AF_INET,c.lan_ip,&a)!=1) return false; const uint32_t ip=ntohl(a.s_addr); if(!ip || (ip>>24)==127 || (ip>>28)>=14) return false; }
     return true;
@@ -529,5 +581,27 @@ uint32_t Start(const Config& c,ReadyCallback callback) noexcept {
     started.store(true); return e;
 }
 Status Snapshot() noexcept { AcquireSRWLockShared(&lock); Status s=status; ReleaseSRWLockShared(&lock); return s; }
+bool Live() noexcept {
+    AcquireSRWLockShared(&lock); const uint32_t sessions=status.sessions; ReleaseSRWLockShared(&lock);
+    const ULONGLONG down=last_down.load();
+    return sessions>0 && down && GetTickCount64()-down<5000;
+}
+void StopAfter(uint32_t delay_ms) noexcept {
+    struct Job { uint32_t generation; uint32_t delay; };
+    auto* job=new(std::nothrow) Job{generation.load(),delay_ms};
+    if(!job) return;
+    auto run=[](void* p)->DWORD {
+        const Job j=*static_cast<Job*>(p); delete static_cast<Job*>(p);
+        Sleep(j.delay);
+        // Only the session that was current when the player left; a new join keeps its own.
+        uint32_t expected=j.generation;
+        if(generation.compare_exchange_strong(expected,j.generation+1)) {
+            AcquireSRWLockExclusive(&lock); status.sessions=0; ReleaseSRWLockExclusive(&lock);
+            last_down.store(0);
+        }
+        return 0;
+    };
+    if(HANDLE t=CreateThread(nullptr,0,run,job,0,nullptr)) CloseHandle(t); else delete job;
+}
 }
 }

@@ -222,10 +222,8 @@ bool CopyText(const wchar_t* text,wchar_t* out,size_t capacity) {
     const size_t length=std::wcslen(text),n=length<capacity-1 ? length : capacity-1;
     std::memcpy(out,text,n*sizeof(wchar_t)); out[n]=0; return true;
 }
-bool NoticeText(uint32_t sid,wchar_t* out,size_t capacity); // defined below
 bool OverlayText(uint32_t sid,wchar_t* out,size_t capacity) {
     if(capacity<2) return false;
-    if(NoticeText(sid,out,capacity)) return true;
     // The empty grid ("No Custom Games Found", 0xdc6e123f) says why it is empty. With a
     // working directory and no servers the static overlay text applies.
     if(sid==0xdc6e123fu) {
@@ -301,7 +299,7 @@ bool XpHook(uint8_t* dc,void* key,uint8_t* value) {
 }
 // Refused joins open the stock OK dialog "campaign_generic_dialog" from Lua
 // (OpenLinkUI.notify); while the notice is fresh its title 0xd8386f08 and body 0x345b4b29
-// show our text through the overlay provider.
+// show our text, at all times (text::SetAlwaysProvider: the lobby's "Leave server?" dialog too).
 std::atomic<int> notice_kind{0}; std::atomic<bool> notice_pending{false}; std::atomic<ULONGLONG> notice_until{0};
 void Notice(const char* refusal) {
     int kind=3;
@@ -310,10 +308,16 @@ void Notice(const char* refusal) {
     else if(!std::strcmp(refusal,"a join is already in progress")) kind=2;
     notice_kind.store(kind); notice_until.store(GetTickCount64()+15000); notice_pending.store(true);
 }
+// The lobby's "Leave server?" confirmation is the front-end's quit dialog (0x266ab009, OKAY + CANCEL,
+// loaded in the lobby; O198): its title 0x1b186cbd and question 0x5fbd0a42 read ours while it is up.
 bool NoticeText(uint32_t sid,wchar_t* out,size_t capacity) {
-    if((sid!=0xd8386f08u && sid!=0x345b4b29u) || GetTickCount64()>=notice_until.load()) return false;
-    if(sid==0xd8386f08u) return CopyText(notice_kind.load()==4 ? L"Update OpenLink Launcher" : L"Can't join this server",out,capacity);
-    switch(notice_kind.load()) {
+    const bool generic=sid==0xd8386f08u || sid==0x345b4b29u, quit=sid==0x1b186cbdu || sid==0x5fbd0a42u;
+    if((!generic && !quit) || GetTickCount64()>=notice_until.load()) return false;
+    const int kind=notice_kind.load();
+    if(quit) return kind==5 && CopyText(sid==0x1b186cbdu ? L"Leave Server?" : L"You will leave this OpenLink server and go back to Custom Games.",out,capacity);
+    if(sid==0xd8386f08u) return CopyText(kind==4 ? L"Update OpenLink Launcher" : kind==5 ? L"Leave server?" : L"Can't join this server",out,capacity);
+    switch(kind) {
+    case 5: return CopyText(L"You will leave this OpenLink server and go back to Custom Games. Press Back to stay.",out,capacity);
     case 1: return CopyText(L"This OpenLink server is full or not accepting players right now. Try again in a moment or pick another server.",out,capacity);
     case 2: return CopyText(L"A join is already in progress. Wait for it to finish.",out,capacity);
     case 4: return CopyText(L"This server needs a newer OpenLink Launcher. Download the latest OpenLink Launcher to join it.",out,capacity);
@@ -356,6 +360,7 @@ uint32_t Install(uintptr_t module_image) noexcept {
     original_xp=reinterpret_cast<Getter>(detour::Install(image,0xdbd69c,kXpPrologue,sizeof(kXpPrologue),6,reinterpret_cast<const void*>(&XpHook),&xp_error));
     if(!original_xp) { char note[96]; sprintf_s(note,"details XP hook unavailable (%u)",xp_error); browser::Log(note); }
     text::SetOverlayProvider(&OverlayText);
+    text::SetAlwaysProvider(&NoticeText); // dialog text also outside the browser (the lobby's leave dialog)
     installed.store(true); browser::Log("customs browser hooks installed");
     return ERROR_SUCCESS;
 }
@@ -371,6 +376,8 @@ bool SetMode(bool on) noexcept {
 }
 bool ParseThumbRef(const char* ref,uint8_t (&asset)[16],uint8_t (&version)[16]) noexcept { return ref && ParsePair(ref,asset,version); }
 bool TakeNotice() noexcept { return notice_pending.exchange(false); }
+// The leave confirmation reuses the same dialog text (the script opens the dialog itself).
+void LeaveNotice() noexcept { notice_kind.store(5); notice_until.store(GetTickCount64()+15000); }
 void RequeueNotice() noexcept { notice_pending.store(true); }
 void Disable() noexcept { disabled.store(true); text::SetOverlayActive(false); if(mode.exchange(false)) browser::Log("customs browser OpenLink mode disabled"); }
 bool Mode() noexcept { return mode.load(); }

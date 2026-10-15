@@ -73,8 +73,8 @@ Every server needs a playlist in openlink-server.json; the program refuses to st
 - The playlist is read once when the agent starts; restart the agent after editing it.
 - The agent selects the first entry as soon as the server's lobby is ready, and the next entry each time the server is back in its lobby after a match. A selection that fails three times is skipped.
 - `GET /status` shows `host_control.rotation` with `current`, `pending`, `matches`, `selections` and `error`.
-- The server list shows what each server is playing. Every heartbeat (every 2 s) carries a `match`: a phase (`lobby`, `voting`, `starting`, `in_game`, `post_game`) from the DLL's lifecycle state and the vote, plus the entry's ID, display name and map thumbnail reference when one applies. In the lobby, a rotation server reports the next entry; a voting server reports none until the vote picks one. The directory lists the report only if it passes the playlist limits (an invalid one is dropped, the heartbeat still counts). The app shows it under the server name, with the map thumbnail, refreshed with the list every 15 s.
-- With a tunnel (for example playit) pointed at 127.0.0.1:1343 in proxy mode, set `"server_ip": "127.0.0.2"`. Otherwise the game server receives the tunnel traffic, the directory marks the host unreachable, and the OpenLink app blocks Join. With this setup, five players (four remote) played three matches that cycled a three-entry playlist (2026-10-04).
+- The server list shows what each server is playing. Every heartbeat (every 2 s) carries a `match`: a phase (`lobby`, `voting`, `starting`, `in_game`, `post_game`) from the DLL's lifecycle state and the vote, plus the entry's ID, display name and map thumbnail reference when one applies. In the lobby, a rotation server reports the next entry; a voting server reports none until the vote picks one. The directory lists the report only if it passes the playlist limits (an invalid one is dropped, the heartbeat still counts). OpenLink Launcher shows it under the server name, with the map thumbnail.
+- With a tunnel (for example playit) pointed at 127.0.0.1:1343 in proxy mode, set `"server_ip": "127.0.0.2"`. Otherwise the game server receives the tunnel traffic, the directory marks the host unreachable, and players cannot join. With this setup, five players (four remote) played three matches that cycled a three-entry playlist (2026-10-04).
 
 ## Server-owned lobby and automatic start
 
@@ -132,19 +132,18 @@ The game lists a LAN server under its PC name, read once at start-up into the se
 
 ## Playlist voting
 
-With a playlist, proxy mode (the default) and the native backend, players can vote for the next match in the OpenLink app:
+With a playlist, proxy mode (the default) and the native backend, players can vote for the next match in OpenLink Launcher, from the server's lobby:
 
 ```json
 {"playlist": "playlist.json", "vote": {"seconds": 30, "options": 4, "start_delay_seconds": 5}}
 ```
 
-- A vote opens when the lobby gets its first player, and again each time a match ends. It offers up to `options` (1-4, default 4) entries drawn at random from the playlist, leaving out the one just played, unless the lobby emptied since: players who arrive at an empty server can get any entry. Give entries a `name`: the app shows it.
-- Players vote in the app; each connected player has one vote and can change it until the vote closes after `seconds` (default 30; players have to switch from the game to the app). Most votes wins; ties and "no votes at all" are decided at random among the leading or offered entries.
+- A vote opens when the lobby gets its first player, and again each time a match ends. It offers up to `options` (1-4, default 4) entries drawn at random from the playlist, leaving out the one just played, unless the lobby emptied since: players who arrive at an empty server can get any entry. Give entries a `name`: the launcher shows it.
+- Players vote in the launcher's vote panel, which sits over the lobby's greyed-out host options (click, Alt+1-4 or View + D-pad); each connected player has one vote and can change it until the vote closes after `seconds` (default 30). Most votes wins; ties and "no votes at all" are decided at random among the leading or offered entries. The lobby's map picture follows the player's vote, then the winner.
 - The winner is selected, and the match starts `start_delay_seconds` later (default 5). `vote` replaces `auto_start` (do not set both).
 - If the lobby empties during a vote, it is cancelled; the next player gets a new one.
-- When a vote opens, the app plays a short chime (players can turn it off in Settings), shows a Windows notification and flashes its taskbar button. Windows may hold notifications back while a game runs full screen (automatic do-not-disturb); the chime still plays.
-- Vote cards show the map's thumbnail, computed from the entry's map asset and version IDs: the app loads `https://blobs-infiniteugc.svc.halowaypoint.com/ugcstorage/map/<asset>/<version>/images/thumbnail.jpg`, then `.png`, and shows no image if neither exists. Nothing to configure; servers send only the map reference and the app loads images from that host only.
-- A player who hosts the server on the same PC needs LAN broadcast: the server owns the discovery port there, so the default loopback announcement never reaches the game. The app switches to it by itself for that session when it sees a server (UDP 1343 held by `HaloInfinite.exe` or `openlink-server.exe`) on the PC.
+- Vote rows show the map's thumbnail, computed from the entry's map asset and version IDs: the launcher loads `https://blobs-infiniteugc.svc.halowaypoint.com/ugcstorage/map/<asset>/<version>/images/thumbnail.jpg`, then `.png`, and shows no image if neither exists. Nothing to configure; servers send only the map reference and the launcher loads images from that host only.
+- A player who hosts the server on the same PC needs LAN broadcast: the server owns the discovery port there, so the default loopback announcement never reaches the game. The launcher switches to it by itself for that session when it sees a server (UDP 1343 held by `HaloInfinite.exe` or `openlink-server.exe`) on the PC.
 - Votes travel as small datagrams on the game port, through the same connection as the player's game traffic, so only players who are in the server can vote. The directory is not involved. `GET /status` shows `host_control.vote` (phase, options, counts, winner).
 
 ## Internal selected-option component

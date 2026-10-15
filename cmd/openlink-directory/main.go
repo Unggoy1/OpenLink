@@ -1,5 +1,5 @@
 // openlink-directory is the community server list. Host agents register and send
-// heartbeats with their latest beacon; the OpenLink app lists servers and fetches beacons.
+// heartbeats with their latest beacon; OpenLink Launcher lists servers and fetches beacons.
 package main
 
 import (

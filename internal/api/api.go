@@ -1,5 +1,5 @@
-// Package api holds the JSON types and constants shared by the directory,
-// host agent and player app.
+// Package api holds the JSON types and constants shared by the directory and the
+// host agent; OpenLink Launcher mirrors the parts it needs in C++ (native/launcher).
 package api
 
 import (
@@ -14,8 +14,8 @@ import (
 
 const (
 	// DefaultDirectory is the community directory the tools use unless
-	// OPENLINK_DIRECTORY or a flag/config says otherwise. The OpenLink app
-	// has its own copy (browser/settings.go).
+	// OPENLINK_DIRECTORY or a flag/config says otherwise. OpenLink Launcher
+	// has its own copy (native/launcher/bridge.cpp).
 	DefaultDirectory = "https://openlink-dir.unggoy.xyz"
 	// GamePort is the UDP port a LAN client always dials on the host.
 	GamePort = 1343
@@ -32,12 +32,13 @@ const (
 	// MaxGameNameLength is the longest name in Halo's in-game server list: the
 	// LAN beacon holds 48 UTF-16 units including the terminator (O080).
 	MaxGameNameLength = 47
-	// AppProtocol is the level of the protocol between the OpenLink app and
-	// OpenLink Server (joining through the proxy, ballots and votes). The app
-	// and the server are released separately: raise it only when a server
-	// change needs new app code, never for a server-only release. OpenLink
-	// Server lists it as the level it needs (RegisterRequest.AppProtocol), and
-	// an app below that level asks the player to update instead of joining.
+	// AppProtocol is the level of the protocol between OpenLink Launcher and
+	// OpenLink Server (joining through the proxy, ballots and votes); the launcher
+	// declares it as kAppProtocol (native/launcher/relay.h, launcher_test.go checks).
+	// They are released separately: raise it only when a server change needs new
+	// launcher code, never for a server-only release. OpenLink Server lists it as the
+	// level it needs (RegisterRequest.AppProtocol), and a launcher below that level
+	// asks the player to update instead of joining. (The name predates the launcher.)
 	AppProtocol = 1
 	// MaxVersionBytes bounds the OpenLink Server version in a listing.
 	MaxVersionBytes = 64
@@ -213,9 +214,9 @@ func Getenv(name string) string {
 	return os.Getenv("HICOMM_" + name)
 }
 
-// Ports returns the game and discovery ports used by simulate mode and the
-// player app. The retail game always uses 1343/7117; OPENLINK_DEV_PORTS="g,d"
-// moves only our tools, so they can be tested next to a running server.
+// Ports returns the game and discovery ports used by simulate mode. The retail
+// game always uses 1343/7117; OPENLINK_DEV_PORTS="g,d" moves only our tools, so they
+// can be tested next to a running server.
 func Ports() (game, discovery int) {
 	game, discovery = GamePort, DiscoveryPort
 	if v := Getenv("DEV_PORTS"); v != "" {

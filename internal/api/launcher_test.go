@@ -7,9 +7,9 @@ import (
 	"testing"
 )
 
-// The OpenLink Launcher (native/launcher) joins through the OpenLink Server proxy like the
-// app, so it must declare the same protocol level; otherwise players with the launcher
-// would join servers they cannot use, or be told to update for no reason.
+// OpenLink Launcher (native/launcher) joins through the OpenLink Server proxy and declares its
+// protocol level in C++, so it must match AppProtocol; otherwise players with the launcher would
+// join servers they cannot use, or be told to update for no reason.
 func TestLauncherAppProtocol(t *testing.T) {
 	src, err := os.ReadFile("../../native/launcher/relay.h")
 	if err != nil {
@@ -20,6 +20,6 @@ func TestLauncherAppProtocol(t *testing.T) {
 		t.Fatal("kAppProtocol not found in native/launcher/relay.h")
 	}
 	if got, _ := strconv.Atoi(string(m[1])); got != AppProtocol {
-		t.Fatalf("native/launcher kAppProtocol = %d, api.AppProtocol = %d; update the launcher with the app", got, AppProtocol)
+		t.Fatalf("native/launcher kAppProtocol = %d, api.AppProtocol = %d; keep them equal", got, AppProtocol)
 	}
 }

@@ -1,5 +1,5 @@
 // Package release checks the project's GitHub releases for a newer version of
-// one program. The OpenLink app and OpenLink Server share one tag series
+// one program. OpenLink Launcher and OpenLink Server share one tag series
 // (vMAJOR.MINOR.PATCH), but a release carries only the programs that changed,
 // so each program looks for the newest release that contains its own file.
 package release
@@ -24,17 +24,10 @@ const Pages = "https://github.com/Unggoy1/OpenLink/releases/"
 // Release file names, as the release workflow uploads them.
 const (
 	ServerAsset = "OpenLink-Server-windows-amd64.zip"
+	// LauncherAsset is checked by OpenLink Launcher itself (native/launcher/update.h); it is
+	// here so the release rules can be tested together.
+	LauncherAsset = "OpenLink-Launcher-windows-amd64.zip"
 )
-
-// AppAsset is the OpenLink app's file for an OS and architecture, e.g.
-// OpenLink-windows-amd64.exe.
-func AppAsset(goos, goarch string) string {
-	name := "OpenLink-" + goos + "-" + goarch
-	if goos == "windows" {
-		name += ".exe"
-	}
-	return name
-}
 
 // Update describes a newer release, if there is one.
 type Update struct {

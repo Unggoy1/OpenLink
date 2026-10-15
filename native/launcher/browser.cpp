@@ -6,6 +6,7 @@
 #include "text_hook.h"
 #include "cbrowser.h"
 #include "overlay.h"
+#include "vote.h"
 #include <atomic>
 #include <cstdio>
 #include <cstring>
@@ -99,7 +100,45 @@ int NativeSetLobbyVote(uintptr_t L) {
     for(int i=0;i<5;++i) if(!ArgNumber(L,i+2,r[i])) r[i]=0;
     overlay::SetLobbyBlock(on,r[0],r[1],r[2],r[3],r[4]);
     return 0;
-}int NativeRefresh(uintptr_t L) { if(wake) SetEvent(wake); if(!Room(L,1)) return 0; PushBool(L,configured.load()); return 1; }
+}
+// OpenLink.OnServer() -> bool (connected to an OpenLink server through our relay).
+int NativeOnServer(uintptr_t L) { if(!Room(L,1)) return 0; PushBool(L,relay::Live()); return 1; }
+// OpenLink.RawId(template, hex) -> a game ID value with the given hash (e.g. a dialog ID). Script
+// numbers are 32-bit floats; `template` is any stringid(...) result, whose value type (ui64, O195)
+// is reused. nil if the template is a number, string or nil.
+int NativeRawId(uintptr_t L) {
+    const uint8_t* tv=Arg(L,1); const uint32_t type=Type(tv);
+    char hex[20]; if(!Room(L,1)) return 0;
+    if(!tv || type==0 || type==3 || type==4 || !ArgString(L,2,hex,sizeof(hex))) { PushNil(L); return 1; }
+    uint64_t value=0; size_t i=0;
+    for(;hex[i];++i) {
+        const char c=hex[i]; const int d=c>='0'&&c<='9' ? c-'0' : c>='a'&&c<='f' ? c-'a'+10 : c>='A'&&c<='F' ? c-'A'+10 : -1;
+        if(d<0 || i>=16) { PushNil(L); return 1; }
+        value=value<<4|uint64_t(d);
+    }
+    if(!i) { PushNil(L); return 1; }
+    PushRaw(L,type,value); return 1;
+}
+// OpenLink.LeaveNotice([on]): true (default) before the script opens the "Leave server?" dialog: the
+// generic dialog reads our text (cbrowser) and the vote panel hides at once; false when cancelled.
+int NativeLeaveNotice(uintptr_t L) {
+    const uint8_t* tv=Arg(L,1); const bool on=!tv || Type(tv)!=1 || *reinterpret_cast<const int32_t*>(tv+8)!=0;
+    if(on) cbrowser::LeaveNotice();
+    overlay::Hold(on);
+    return 0;
+}
+// OpenLink.LeaveServer(): the player left the server's lobby (the game's own LAN disconnect ran):
+// ends our relay session shortly after (so the game's leave reaches the server) and cancels the
+// post-match redirect.
+void (*leave_hook)()=nullptr;
+int NativeLeaveServer(uintptr_t) {
+    vote::Drop(); overlay::Hold(false); // no panel or lobby map from this server any more
+    relay::StopAfter(1500);
+    if(leave_hook) leave_hook();
+    Log("left the OpenLink server (relay closes in 1.5 s)");
+    return 0;
+}
+int NativeRefresh(uintptr_t L) { if(wake) SetEvent(wake); if(!Room(L,1)) return 0; PushBool(L,configured.load()); return 1; }
 int NativeStatus(uintptr_t L) {
     if(!Room(L,4)) return 0;
     PushNumber(L,float(fetches.load())); PushNumber(L,float(joins.load())); PushNumber(L,float(last_join_code.load())); PushNumber(L,float(fetch_error.load()));
@@ -200,7 +239,7 @@ bool RegisterNatives(uintptr_t module_image,uintptr_t L) noexcept {
     image=module_image;
     if(!Room(L,4)) return false;
     struct { const char* name; CFunction fn; } natives[]={{"Log",NativeLog},{"Count",NativeCount},{"Row",NativeRow},{"Join",NativeJoin},{"Refresh",NativeRefresh},{"Status",NativeStatus},{"SetBrowserMode",NativeSetBrowserMode},{"BrowserMode",NativeBrowserMode},
-        {"SetLobbyVote",NativeSetLobbyVote}};
+        {"SetLobbyVote",NativeSetLobbyVote},{"OnServer",NativeOnServer},{"LeaveNotice",NativeLeaveNotice},{"RawId",NativeRawId},{"LeaveServer",NativeLeaveServer}};
     Api<CreateTable>(0x7c7e7c)(L,0,int(sizeof(natives)/sizeof(natives[0])));
     for(const auto& n:natives) { Api<PushCClosure>(0xa3f47c)(L,n.fn,0,n.name,0); Api<SetField>(0x6f980c)(L,-2,n.name); }
     Api<SetField>(0x6f980c)(L,kGlobals,"OpenLink");
@@ -229,6 +268,7 @@ bool JoinedThumb(char (&thumb)[96]) noexcept {
     ReleaseSRWLockShared(&lock);
     return thumb[0]!=0;
 }
+void SetLeaveHook(void (*hook)()) noexcept { leave_hook=hook; }
 bool Configured() noexcept { return configured.load(); }
 bool Fetched() noexcept { AcquireSRWLockShared(&lock); const bool f=fetched; ReleaseSRWLockShared(&lock); return f; }
 uint32_t RowCount() noexcept { AcquireSRWLockShared(&lock); const uint32_t n=uint32_t(row_count); ReleaseSRWLockShared(&lock); return n; }

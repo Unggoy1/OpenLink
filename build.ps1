@@ -1,5 +1,5 @@
 # Builds the server programs into .\bin (Windows amd64). Requires Go 1.27+.
-# The player app is in browser/ (wails build).
+# OpenLink Launcher is built separately: native\launcher\build.cmd (MSVC).
 # The version comes from git (e.g. v0.1.0, or v0.1.0-3-gabc1234-dirty between tags).
 $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot

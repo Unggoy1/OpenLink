@@ -1,15 +1,15 @@
-# OpenLink Launcher (optional, experimental)
+# OpenLink Launcher
 
-The OpenLink Launcher is an alternative to the OpenLink app. Instead of a separate server
-list, it adds an **OpenLink Servers** item to Halo Infinite's **Play → Custom Game** menu: the
-game's own Customs Browser, filled with the servers from the OpenLink Directory, with map art,
-the current mode, player counts and each server's description. Pick a server and press Join.
+OpenLink Launcher is how players use OpenLink (it replaced the earlier desktop OpenLink app). It
+adds an **OpenLink Servers** item to Halo Infinite's **Play → Custom Game** menu: the game's own
+Customs Browser, filled with the servers from the OpenLink Directory, with map art, the current
+mode, player counts and each server's description. Pick a server and press Join.
 
 > [!WARNING]
 > The launcher starts Halo Infinite **without anti-cheat** and loads `openlink-launcher.dll`
 > into your game, in memory. It never changes game files or anti-cheat files, services or
 > settings, but running the game this way is at your own risk with respect to the game's terms.
-> Use the OpenLink app if you want your game left untouched.
+> Halo Infinite started from Steam afterwards runs as usual, with anti-cheat.
 
 ## Requirements
 
@@ -43,11 +43,16 @@ If Halo Infinite is already running without anti-cheat (for example from your ow
   message instead of joining.
 - When you leave a match you return to OpenLink Servers. **Back** goes to the Custom Game menu.
   When a match ends normally you stay in the server's lobby for the next one.
+- To leave a server from its lobby, press **Back**: a **Leave Server?** dialog asks first.
+  **Okay** leaves the server and goes back to the Custom Game menu; **Cancel** keeps you in the
+  lobby.
 - **Voting:** on a server with playlist voting, the lobby shows a **Vote for the next match**
-  panel in place of the greyed-out host options. Vote with **Ctrl+Alt+1** to **4**, or on a
-  controller hold **View** and press the D-pad (up, right, down, left). You can change your
-  vote until the timer ends; the panel then shows the next match for a few seconds. The
-  lobby's map picture follows your vote, then the winner.
+  panel in place of the greyed-out host options. Click a choice, or press **Alt+1** to
+  **4**, or on a controller hold **View** and press the D-pad (up, right, down, left). You can
+  change your vote until the timer ends; the panel then shows the next match for a few seconds.
+  The lobby's map picture follows your vote, then the winner.
+- On an OpenLink server the lobby's **Server** option does nothing: the server picks where the
+  match is played.
 - The game shows **OFFLINE** in the corner when it runs without anti-cheat; that is expected.
 
 ## Settings
@@ -55,15 +60,28 @@ If Halo Infinite is already running without anti-cheat (for example from your ow
 All settings are optional. Put them in `openlink-launcher.json` next to the DLL:
 
 ```json
-{ "directory": "https://openlink-dir.unggoy.xyz", "lan_ip": "", "vote_overlay": "on" }
+{ "directory": "https://openlink-dir.unggoy.xyz", "lan_ip": "", "vote_overlay": "on",
+  "vote_keys": "Alt+1, Alt+2, Alt+3, Alt+4" }
 ```
 
 - `directory`: the OpenLink Directory to list servers from. The default is the public one.
-- `lan_ip`: leave empty. Set it to this PC's LAN address only when an OpenLink Server runs on
-  the same PC as your game (the server then owns the local game port, so the launcher announces
-  servers on the LAN address instead).
-- `vote_overlay`: `"off"` hides the vote panel (and its Ctrl+Alt keys). The lobby's map
-  picture still follows the vote.
+  It must start with `https://`; `http://` works only for a directory on this PC or your local
+  network (testing). Servers that a directory on the internet lists at addresses on your own
+  network are not shown or joined.
+- `lan_ip`: leave empty. When an OpenLink Server runs on the same PC as your game (it then owns
+  the local game port), the launcher announces the server you join on this PC's LAN address by
+  itself. Set it only to force a particular LAN address.
+- `vote_overlay`: `"off"` hides the vote panel (and its vote keys). The lobby's map picture
+  still follows the vote.
+- `vote_keys`: the four vote keys, separated by commas: modifiers
+  `Ctrl`, `Alt`, `Shift`, `Win` and one key (`A`-`Z`, `0`-`9`, `Num0`-`Num9`, `F1`-`F24`, `` ` ``,
+  `Insert`, `Delete`, `Home`, `End`, `PageUp`, `PageDown`, `Pause`). A key needs Ctrl, Alt or Win
+  unless it is an F-key or Pause. The panel shows them, and says so if another program holds one.
+
+The launcher checks these settings before it starts the game and says what is wrong.
+
+When a newer OpenLink Launcher is released, the launcher says so at start and offers to open its
+download page; say no to play with the version you have. Without a connection it starts as usual.
 
 The launcher writes `openlink-launcher.log` next to the DLL: the start line (version, directory,
 LAN address if set), the listing ids you join, join results, browser messages, where the vote
@@ -99,22 +117,23 @@ Inside the game, the DLL:
 - while that mode is on, puts the directory's servers into the browser's results (the
   official search is skipped), shows server names, modes, descriptions and messages, and hides
   controls that do not apply (filters, XP notes);
-- on Join, starts an in-process relay to the server's OpenLink Server proxy (like the app) and
+- on Join, starts an in-process relay to the server's OpenLink Server proxy and
   uses the game's own LAN join for the relay's local address. The lobby stays a LAN lobby, so
   official matchmaking stays blocked;
 - after you leave an OpenLink match, opens the browser in place of the Create Match screen the
   game would otherwise show;
-- receives the server's vote ballots on the relay connection (like the app) and draws the vote
+- receives the server's vote ballots on the relay connection and draws the vote
   panel in a small always-on-top window over the game, placed from the lobby menu's own layout;
   your vote goes back to the server on the same connection;
 - feeds the voted map into the lobby header's map lookup, so the game itself shows that map's
-  picture, name and version (the game would otherwise keep showing its default map).
+  picture, name and version (the game would otherwise keep showing its default map);
+- on Back in an OpenLink lobby, shows the confirmation (the game's own two-button quit dialog with
+  OpenLink text) and leaves with the game's own LAN disconnect, then closes the relay connection.
 
 ## Limitations
 
 - One game build only (the final Steam build); Windows only.
-- Voting uses the keyboard or a controller; the mouse cannot click the vote panel yet. The
-  panel's placement has been checked on a 3440x1440 display only.
+- The vote panel's placement has been checked on a 3440x1440 display only.
 - Before anyone votes, the lobby header shows the game's default map.
 - Map art, names and descriptions come from the game's content service, as in the stock
   browser.
@@ -134,12 +153,19 @@ native\launcher\test.cmd <output-folder>
 `build.cmd` writes `openlink-launcher.exe` and `openlink-launcher.dll` (x64, static C runtime,
 `/W4 /WX`). The version comes from `git describe`, like the Go programs. `lua\browser.lua` is
 embedded at build time by `embed-lua.ps1`. `test.cmd` builds, then runs the unit tests (join
-state machine, relay, server-list and ballot parsing, string IDs, detours) and loads the DLL
-into a test process to check that it refuses to start outside the game. No game is needed for
-the tests. It also builds `tests\overlay-preview.exe`, which draws the vote panel for sample
-ballots into PNG files (`overlay-preview <folder> [-thumbs] [-lobby <screenshot> l t r b]`).
+state machine, relay, server-list and ballot parsing, address rules, vote keys, the update
+check, string IDs, detours) and loads the DLL into a test process to check that it refuses to
+start outside the game. No game is needed for the tests. It also builds
+`tests\overlay-preview.exe`, which draws the vote panel for sample ballots into PNG files
+(`overlay-preview <folder> [-thumbs] [-lobby <screenshot> l t r b]`).
 
-The launcher speaks the same protocol level to OpenLink Server as the app:
+Releases: the update check looks for the newest GitHub release (same `v` tag series as OpenLink
+Server) that contains `OpenLink-Launcher-windows-amd64.zip`; builds from an untagged
+commit (`git describe` versions such as `v0.7.6-7-g…`) never ask.
+The release workflow (`.github/workflows/release.yml`) builds that zip with `test.cmd`: the exe,
+the DLL, and `packaging/launcher` (README.txt and an example config).
+
+The launcher declares the protocol level it speaks to OpenLink Server:
 `kAppProtocol` in `relay.h` must equal `api.AppProtocol` (a Go test in `internal/api` checks).
 
 License: AGPL-3.0, like the rest of the repository.

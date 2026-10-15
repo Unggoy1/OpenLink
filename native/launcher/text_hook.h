@@ -20,5 +20,8 @@ bool SetOverlay(uint32_t sid,const char* utf8) noexcept;
 void SetOverlayActive(bool on) noexcept;
 // Computed overlay text, asked first while the overlay is active (true = handled).
 void SetOverlayProvider(bool (*provider)(uint32_t sid,wchar_t* out,size_t capacity)) noexcept;
+// Computed text asked first at all times, overlay or not (dialog text the script opens anywhere;
+// keep it cheap: it sees every lookup).
+void SetAlwaysProvider(bool (*provider)(uint32_t sid,wchar_t* out,size_t capacity)) noexcept;
 }
 }

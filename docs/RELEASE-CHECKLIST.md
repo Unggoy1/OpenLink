@@ -2,6 +2,8 @@
 
 Status as of 2026-10-08 (latest release v0.7.6: bot backfill came in v0.7.5, server hardening, the watchdog, end-match, several servers per PC and the app leaving offline servers in v0.7.6; both lightly tested). Tick items as they are done and note the date and how it was checked. "Tested" means checked with the real game unless it says otherwise. Tests are grouped by what they need, so one session can cover a whole group.
 
+**2026-10-15: the OpenLink app is retired** (source archived outside the repo). Players use **OpenLink Launcher** (`native/launcher`): an in-game OpenLink Servers browser, joins, the vote panel in the lobby (mouse, Alt+1-4, View + D-pad), Back → "Leave Server?", update check. Releases now carry OpenLink Server, OpenLink Directory and the launcher. Items below that name the app are its history; the open ones are rewritten for the launcher.
+
 ## Done
 
 Tested live (one player, one PC, unless noted):
@@ -32,14 +34,13 @@ Built and checked without the game (unit tests, demo build or a simulated server
 
 ## 1. Tests you can run alone on your PC
 
-Run a voting server with the local directory (as in R023) and join it with the OpenLink app.
+Run a voting server with the local directory (as in R023) and join it with OpenLink Launcher.
 
 ### Joining and hosting on one PC
 
-- [ ] Joining picks LAN broadcast by itself and the session bar says "Using LAN broadcast because a server runs on this PC".
-- [ ] The app's bottom bar names the server exactly as the in-game list shows it.
+- [x] Joining picks LAN broadcast by itself when a server runs on this PC: the launcher log says "relay announces the server on <LAN address> (LAN broadcast: a server runs on this PC)" (launcher-V26, 2026-10-15, O200; without it the join does nothing).
 - [ ] A name with non-ASCII characters (for example "Café ★ Night"): the in-game list shows it without them ("CAF  NIGHT").
-- [ ] The server list shows what the server is playing in each phase: lobby, voting, starting, in game with the map name and thumbnail, match over. Check a voting server and a rotation-only one (`auto_start`, no `vote`).
+- [ ] The OpenLink Servers browser shows what the server is playing in each phase: lobby, voting, starting, in game with the map name and thumbnail, match over. Check a voting server and a rotation-only one (`auto_start`, no `vote`).
 
 ### Voting
 
@@ -50,24 +51,24 @@ Run a voting server with the local directory (as in R023) and join it with the O
 - [ ] Score-limit match end; so far only the time limit has ended a match.
 - [ ] Empty lobby during "starting": the server withdraws the start when everyone leaves before the match begins.
 
-### Vote overlay (Windows)
+### Vote panel (OpenLink Launcher)
 
-- [ ] **New default position and size** (2026-10-08): the panel now opens top left (over the lobby's map preview, which can show another map than the vote's) and is sized by the monitor's height (browser/overlay_scale.go: 25% above its design size at 1440 pixels high, in proportion elsewhere, never below 80% of the display-scaling size), so it takes the same share of the screen height on 1080p, 1440p and 4K. Looks right on a 3440x1440 ultrawide, before and after the height scaling (user, 2026-10-08, R031). Still to check: a 1080p and a 4K screen.
-- [ ] **Passive** (the default): the panel shows by itself; Ctrl+Alt+1–4 vote while Halo has focus. Check whether Halo also reacts to Ctrl (crouch), Alt or the number keys.
-- [ ] Passive with a controller connected: rows show both labels, for example `Ctrl+Alt+1 · View+↑`.
-- [ ] **Interactive**: Ctrl+Alt+V opens the panel. Check whether Halo releases the mouse, any audio cut, pause or stutter, and that focus returns to Halo after voting or Esc.
-- [ ] Voting by mouse click in the interactive panel.
-- [ ] Shows only while Halo is in front; hides when you alt-tab away or OpenLink is in front.
+Tested on a 3440x1440 ultrawide (2026-10-15, launcher V8-V26): placed over the lobby's greyed-out host rows from the lobby's own layout, the lobby map picture follows the vote, mouse voting (hover + click; clicks never reach the Server row), View + D-pad, hidden during "Leave Server?" and after leaving.
+
+- [ ] Placement on a 16:9 screen (1080p, 1440p, 4K) and a 16:10 one: the panel covers the greyed rows exactly.
+- [ ] The floating fallback (top left) when a vote is open off the lobby screen, for example on the post-match screen.
+- [ ] Alt+1-4 (the new default) while Halo has focus: check whether Halo also reacts to Alt or the number keys. A custom `vote_keys` set shows on the panel.
+- [ ] A vote key another program already holds: the panel says so and View + D-pad still works.
+- [ ] Shows only while Halo is in front; hides when you alt-tab away.
 - [ ] With Discord's overlay at the same time: both visible, and Discord's hotkey still works.
 - [ ] A second monitor, and display scaling above 100% (only one screen at 100% was tested).
 - [ ] No noticeable frame-rate cost while it is shown.
-- [ ] A hotkey another app already uses: the warning appears in Settings and on the overlay.
 
 ### Host tools
 
 - [ ] A broken playlist: OpenLink Server refuses to start and `openlink-server.log` says why.
 - [ ] `openlink-server diagnostics` on your real setup: read the report and check nothing private is left.
-- [ ] The app's Copy diagnostics after a real join: the events show the join, the session phases and your votes.
+- [ ] openlink-launcher.log after a real join: it shows the join, the relay's announce mode, the vote panel placement and your votes, and nothing private.
 - [ ] Bans through proxy mode: `openlink-server ban <ip>` keeps that player out.
 - [ ] Autostart: `openlink-server autostart enable`, log off and on; the server starts and the log file shows it.
 - [ ] Long unattended run: several hours and many matches; note host CPU and memory.
@@ -100,7 +101,7 @@ For the first three, set `"lobby_leader_xuid"` to your own XUID so you get the l
 - [ ] **End match**: during a match, `openlink-server end-match` ends it (postgame, then the next vote); in the lobby it answers "no match is running".
 - [ ] **Watchdog**: suspend the game server process for over 2 minutes (Resource Monitor → right-click → Suspend process). OpenLink Server restarts it, and the log says `restarting the game server` with the reason.
 - [ ] **Diagnostics**: the `lobby` log line shows `player_mask` next to `mask`, and `peer_teams` lists the players in `player_mask`.
-- [ ] **App leaves a server that went away**: join in the app, play, then stop OpenLink Server (Ctrl+C). Within about 15 s the app leaves by itself (no session bar) and shows "… went offline and is no longer in the server list, so OpenLink left it." Then restart only the game server (watchdog or Task Manager) while OpenLink Server keeps running: the app stays joined, since the listing remains, and you can rejoin once the server is back.
+- [ ] **The launcher when a server goes away**: join with OpenLink Launcher, play, then stop OpenLink Server (Ctrl+C). The game reports the lost connection; OpenLink Servers no longer lists the server, and once it is back you can rejoin it. Then restart only the game server (watchdog or Task Manager) while OpenLink Server keeps running: the listing stays and you can rejoin once the game server is back.
 
 ### Without Steam (experimental; needs a separate Windows server PC)
 
@@ -114,7 +115,7 @@ Server copy set up as in docs/HOSTING.md "Without Steam", using the CI-built `st
 
 ## 2. Tests that need a second player
 
-**Group session plan** (for the larger lobby the user is gathering). Claude starts the directory and OpenLink Server and watches the logs; players only join with the app (memory: live test roles). Use one voting server with a curated playlist holding:
+**Group session plan** (for the larger lobby the user is gathering). Claude starts the directory and OpenLink Server and watches the logs; players only join with OpenLink Launcher (memory: live test roles). Use one voting server with a curated playlist holding:
 - a team Slayer mode;
 - a multi-round mode (3-round CTF or Oddball);
 - Infection;
@@ -127,23 +128,22 @@ Server copy set up as in docs/HOSTING.md "Without Steam", using the CI-built `st
 
 Use `team_balance` `"even"` and `bot_backfill` with `fill_to` about 8. Suggested order, so one sitting covers most of the list:
 
-1. Everyone joins through the app (at least one remote, two from one home if possible): the name in the in-game list, the counts.
+1. Everyone joins through OpenLink Launcher (at least one remote, two from one home if possible): the name in the in-game list, the counts.
 2. Votes with several voters: counts for everyone, a changed vote, a tie, a round where nobody votes; someone joins and someone leaves mid-vote.
 3. The team mode: even split, friends stay together. During it, run **Rejoin** and **Late joiner**.
 4. The multi-round mode: no vote or rebalance between rounds (section 1 item).
 5. Infection (two rounds), then the FFA modes: damage between players.
 6. Bot backfill: start the bots entry with few players, others join mid-match; bots leave from the larger team.
 7. The `teams` size-2 entry, then the Big Team Battle mode with everyone.
-8. During a match, the host runs `openlink-server end-match`. At the very end, stop OpenLink Server: every player's app should leave by itself (section 1 item).
+8. During a match, the host runs `openlink-server end-match`. At the very end, stop OpenLink Server: every player is disconnected and can rejoin from OpenLink Servers once the server is back (section 1 item).
 9. Throughout: Claude samples the game server process (scripts/measure/run_resources.ps1: CPU, RAM, threads per second) and OpenLink Server's traffic, so hosting specs come from real players. The bots-only baseline is R035: about 1 core of a Ryzen 7 5800X3D and 1.1 GB in a 4v4 match.
 
 Keep the logs in a new private/runtime/R0xx folder and note anything players saw that the log does not show.
 
-- [ ] Both players join through the app and see the server in Custom Game → Create Match → Server, with the configured name, at least one of them remote over the internet.
+- [ ] Both players join through OpenLink Launcher and see the server in the OpenLink Servers browser and in Custom Game → Create Match → Server, with the configured name, at least one of them remote over the internet.
 - [ ] Voting with several voters: counts update for everyone, a tie, nobody votes (random pick), a player changes their vote.
 - [ ] A player joins mid-vote and gets the ballot; a player leaves mid-vote.
 - [ ] Two players from the same home (one public IP) are both counted and can both vote.
-- [ ] Linux app (the CI build) on a real Linux or Proton machine: join, vote in the app panel, overlay settings hidden.
 - [ ] **Infection**: the mode's own team script (one or more infected, survivors turning into infected) still works; team balance and the FFA guard do not move players back. Play at least two rounds.
 - [ ] **Other FFA modes** with two players: FFA Slayer, a minigame and Last Spartan Standing; players damage and kill each other (only FFA King of the Hill is confirmed).
 - [ ] **Late joiner mid-match**: the player gets a valid team (balanced in a team mode, their own team in FFA), can play, and gets the ballot at the end of the match.
@@ -155,7 +155,7 @@ Keep the logs in a new private/runtime/R0xx folder and note anything players saw
 
 - [ ] A port-forwarded host (no tunnel), on a connection with a public IPv4 address. Your own router is behind carrier-grade NAT or a second router.
 - [ ] `auto_port_forward` on a router with a public address: the directory reaches the server, and the forward is gone after OpenLink Server exits.
-- [ ] Version notice: with a server on another Halo build listed, the app's notice names the side that is behind.
+- [ ] Update notice: a server that needs a newer launcher (a higher `AppProtocol`) shows "Update OpenLink Launcher" instead of joining, and a newer launcher release is offered at start.
 - [ ] **Several servers on one PC** (released in v0.7.6; HOSTING.md): two servers with different names (127.0.0.2:1344 and 127.0.0.3:1345). Each listing shows its own name and status; the log's `status` line shows `beacon_identified=true` and counts `other_server_beacons`. Note the CPU, memory and GPU each uses, idle and in a match.
 
 ## 4. Work still to do
@@ -168,11 +168,11 @@ Keep the logs in a new private/runtime/R0xx folder and note anything players saw
 - [ ] **Bot backfill** (released in v0.7.5, FN029; works alone in regular modes, R030 2026-10-08; joiner, no-navmesh map and difficulty still to test): server `bot_backfill` plus per-entry `bots`, DLL op 11 BotPolicy and a hook on the game's own bot job. Tests in sections 1 and 2. Backfill works only in modes that enable bots and register bot difficulties (A075: the server cannot switch bots on late; the authoritative lobby-variant rewrite before launch is the only route for other modes and needs the probe first). Maps without navigation are detected (A074, unconfirmed live). Entries are opt-in until the probe confirms the navmesh check.
 - [ ] **A player can rename the server** (static finding 2026-10-06, FN030, FN033): the game server applies the `EditLobbyName` network message (type 0x2e) from any player and copies it into the server name shown in the LAN server menu. Fixed in v0.7.6: the DLL puts the configured name back on every engine tick. Test in section 1.
 - [ ] **Docs pass**:
-  - [ ] README "Status and known limitations": lobby control, voting, the overlay and the Linux app now exist.
+  - [ ] README "Status and known limitations": lobby control, voting and OpenLink Launcher now exist; the app is retired.
   - [ ] A playlist.json reference for hosts (limits below).
-  - [ ] A player guide: install, join, voting, the overlay and controller voting, and that the app does not modify the game.
-  - [ ] Privacy note: the directory sees host IP addresses; the app talks to the directory, GitHub (update check) and Halo Waypoint (map thumbnails); OpenLink Server talks to the directory and GitHub (update check, once at startup), and to your router only with `auto_port_forward`. Nothing asks for Xbox credentials.
-- [ ] Smoke test of each release artifact on a clean PC: the OpenLink Server zip, the Windows app and the Linux app.
+  - [ ] A player guide: install, join, voting (panel, keys, controller), leaving a server, and that the launcher starts Halo without anti-cheat and changes it in memory only (Halo started from Steam afterwards is unaffected).
+  - [ ] Privacy note: the directory sees host IP addresses; OpenLink Launcher talks to the directory, GitHub (update check) and Halo Waypoint (map thumbnails); OpenLink Server talks to the directory and GitHub (update check, once at startup), and to your router only with `auto_port_forward`. Nothing asks for Xbox credentials.
+- [ ] Smoke test of each release artifact on a clean PC: the OpenLink Server zip and the OpenLink Launcher zip.
 - [ ] **Production directory settings on Railway**: set `OPENLINK_ADMIN_KEY` (at least 24 characters, or the admin API stays off); keep `OPENLINK_REGISTER_KEY` (or the old `HICOMM_REGISTER_KEY`) as the trusted-host key for tunnels; set `OPENLINK_REQUIRE_KEY=1` only to keep the directory private until release. Check logging.
 - [ ] **Live check of the safeguards**: a port-forwarded host appears within about a minute; a tunnel host with the key appears; a host with a closed port never appears and its log says so; an admin ban removes a listing.
 - [ ] **`openlink-server end-match`** and the **watchdog** (released in v0.7.6; HOST-CONTROL.md): DLL op 12 EndMatch writes the end-game value through its setter (142e1d548). The watchdog restarts a frozen or stuck game server and can end overlong matches (`max_match_minutes`). Tests in section 1.
@@ -195,7 +195,7 @@ Keep the logs in a new private/runtime/R0xx folder and note anything players saw
 - The host agent enforces these: it will not start with a playlist that breaks them. Run `openlink-server check-playlist playlist.json` on generated files.
 - `id`: unique and case-sensitive. Use a readable slug such as `fiesta-slayer-interference`, at most about 32 bytes, from `a-z 0-9 -`. Over 80 bytes is an error. Build it from the mode and map so a regenerated playlist keeps the same IDs.
 - `name`: at most **80 UTF-8 bytes** (not characters); more is an error, so trim it yourself: shorten the longer of mode and map with "…" (3 bytes). Players see the `id` if `name` is empty. No control characters (such as newlines). Avoid `&`, `<`, `>`: each costs 6 bytes on the wire.
-- The overlay wraps a name onto two lines (about 65 characters) and ends it with "…" if it is longer; the app panel shows the whole name.
+- The launcher's vote panel shows a name on one line, shrinking a long one to 80% before ending it with "…".
 - `map` / `mode` `asset_id` and `version_id`: full 36-character UUIDs, not all zeros. Map thumbnails come from the map IDs; there is no field for them.
 - Ballot size: 4 options in a 1200-byte message, thumbnails included; a playlist that could exceed it is rejected. The check assumes the worst case (longest entries, largest numbers). 80-byte IDs with 80-byte names come to 1197 bytes with default settings and fail with `max_players` 0 or very long vote timers; with IDs of about 32 bytes there is plenty of room.
 - With voting: at least 2 enabled entries.
@@ -204,15 +204,14 @@ Keep the logs in a new private/runtime/R0xx folder and note anything players saw
 
 ## Not needed for the alpha
 
-- Code signing (deferred 2026-10-05; do it before a wider public launch). Plan: choose the licence (AGPL-3.0 likely), ship the unsigned alpha, then apply to SignPath Foundation (free for OSI-licensed projects; publisher shows as "SignPath Foundation") for the OpenLink app and directory. The server package (loader + DLL) may not pass their "circumvent security measures" review; Azure Artifact Signing ($9.99/month, individuals in the US/Canada) is the fallback. Until then: tell testers to expect the SmartScreen warning ("More info → Run anyway"), point to `SHA256SUMS`, and report antivirus false positives to the vendor.
+- Code signing (deferred 2026-10-05; do it before a wider public launch). Plan: choose the licence (AGPL-3.0 likely), ship the unsigned alpha, then apply to SignPath Foundation (free for OSI-licensed projects; publisher shows as "SignPath Foundation") for OpenLink Directory. The server package (loader + DLL) and OpenLink Launcher (it loads a DLL into the game) may not pass their "circumvent security measures" review; Azure Artifact Signing ($9.99/month, individuals in the US/Canada) is the fallback. Until then: tell testers to expect the SmartScreen warning ("More info → Run anyway"), point to `SHA256SUMS`, and report antivirus false positives to the vendor.
 - DLL port plan for a new Halo build: no game updates are expected, only playlist updates. The DLL and OpenLink Server refuse an unknown game build.
-- Overlay on Linux (Wayland blocks global hotkeys and always-on-top windows).
 - Names longer than 80 bytes.
 - Sending `& < >` unescaped in ballots.
 - Cosmetic: hide the thumbnail box until it loads.
 - Offline preservation (a later phase).
 - Blocking in-match team changes outside a playlist entry's team count (looked into 2026-10-06, left for now; the next match's balance fixes it anyway). The server sees each request (peer `requested` byte) before the game applies it. Option 1, simple: the DLL puts a player who moves to a team outside the count back on their previous team (Change Teams still lists all 8; the pick just snaps back). Option 2, cleaner but needs research: clear the "enabled" bit of team slots beyond the count in the mode data (lobby variant and loaded game variant), so the game itself rejects those teams and the menu probably lists only valid ones; the change must reach clients.
-- Mid-match rebalance (idea, user 2026-10-06; next after the friend test passes, or after its issues are debugged). Decided: **always a vote, never an automatic move** (yes/no ballot through the app overlay, a new ballot type on the existing vote system, with a cooldown; players without the app cannot vote). Open decision: does the vote start by itself when the server sees teams differ by 2 or more (for about 30–60 s, since imbalance mostly comes from players leaving), or only when a player asks for it in the app, or either (a server config setting)? If the vote passes, move as few players as possible (most recent joiners or players who switched) and tell them through the overlay. First check with players what a server-made team change does mid-match (death/respawn, score, weapons, a carried flag).
+- Mid-match rebalance (idea, user 2026-10-06; next after the friend test passes, or after its issues are debugged). Decided: **always a vote, never an automatic move** (yes/no ballot through the launcher's vote panel, a new ballot type on the existing vote system, with a cooldown; players without the launcher cannot vote). Open decision: does the vote start by itself when the server sees teams differ by 2 or more (for about 30–60 s, since imbalance mostly comes from players leaving), or only when a player asks for it in the launcher, or either (a server config setting)? If the vote passes, move as few players as possible (most recent joiners or players who switched) and tell them through the vote panel. First check with players what a server-made team change does mid-match (death/respawn, score, weapons, a carried flag).
 
 ## Future ideas (not started)
 Roadmap update (2026-10-10): [the 16-feature priority note](../../docs/OPENLINK-FEATURE-ROADMAP.md) records the user's requested backlog and the recommendation to prioritize reliability and stock-client-compatible OpenLink improvements before optional client-extension implementation. The engine-dependent candidates need feasibility proof; this does not mark any test complete or require every candidate to ship. Existing ideas below retain their evidence and decisions.
@@ -224,9 +223,9 @@ Ideas collected 2026-10-06 so they are not lost. None is decided or researched b
 - **Moderation by Xbox user ID instead of IP**: bans that follow a player (IPs change, homes share one), friends-only servers (allow list), reserved slots, a clean in-game kick instead of dropping the connection, and later a vote-kick. Leads: the server reads each joiner's XUID (join record +0x48, FN027); network messages `join-refuse`, `player-refuse`, `player-remove`, `session-boot`.
 - **Per-entry game settings**: score limit, time limit and similar options per playlist entry without publishing a new mode. Lead: the `VariantRuntimeOverridesUpdate` network message; find what it can override and whether the server can send it.
 - **Faster pacing**: shorter post-game wait and pre-game countdown. Leads: session-state components `intermission-timer`, `ready-room-timer`, `countdown-timer`, `intro-timer` (name table at 1409cf3c0, FN028).
-- **Player-requested votes from the app and overlay**: end the match, shuffle teams, rebalance, as yes/no ballots on the existing vote channel with a cooldown. Chat commands such as `!endgame` are not possible: the server never sees chat (FN028). The end-game switch is already known to the DLL (sim+0xb4c4b0).
+- **Player-requested votes from the launcher**: end the match, shuffle teams, rebalance, as yes/no ballots on the existing vote channel with a cooldown. Chat commands such as `!endgame` are not possible: the server never sees chat (FN028). The end-game switch is already known to the DLL (sim+0xb4c4b0).
 - **In-game announcements** (parked by the user 2026-10-06): server-to-client network messages `server_output_message` (up to 192 bytes) and `NotificationDialogWindow` (20 bytes); what clients display for them is unknown (FN028).
 - **Spectator slots** for casters and small tournaments: Allow Observers is the session byte sim+0xb4bb38 and the game accepts team 31 (O083, O084); check what an observer sees and whether they count toward the player limit.
 - **Playlist entries with a player range** (no game research): offer an entry only when the lobby has at least or at most N players, for example Big Team Battle only with 12 or more.
 - **Stuck-state watchdog**: built 2026-10-08 (section 4).
-- **Match results in the directory and app** (after the main release, user 2026-10-08): recent matches and leaderboards from the scoreboard (score, kills, deaths, assists, rounds, teams) read at match end. Static research done (FN032 in the discovery kit): one engine stat store (*0x144ebd098) stays readable after the match, and byte 0x1445ca691 flips at match end; no stored winner (from rounds, then score) and no per-player medal count.
+- **Match results in the directory and launcher** (after the main release, user 2026-10-08): recent matches and leaderboards from the scoreboard (score, kills, deaths, assists, rounds, teams) read at match end. Static research done (FN032 in the discovery kit): one engine stat store (*0x144ebd098) stays readable after the match, and byte 0x1445ca691 flips at match end; no stored winner (from rounds, then score) and no per-player medal count.

@@ -211,8 +211,9 @@ std::string ErrorText(DWORD code) {
 // GET https://<host><path> (body at most 4 MB, 5 s timeouts). False on any failure.
 bool HttpsGet(const wchar_t* host,const wchar_t* path,std::string& body) {
     body.clear(); bool ok=false;
-    const std::wstring agent=L"OpenLink-Launcher/"+std::wstring(OPENLINK_VERSION,OPENLINK_VERSION+std::strlen(OPENLINK_VERSION));
-    HINTERNET session=WinHttpOpen(agent.c_str(),WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,WINHTTP_NO_PROXY_NAME,WINHTTP_NO_PROXY_BYPASS,0);
+    // One literal: building a string from two uses of the version macro would span two separate copies.
+    const wchar_t* const agent=L"OpenLink-Launcher/" OPENLINK_VERSION_W;
+    HINTERNET session=WinHttpOpen(agent,WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,WINHTTP_NO_PROXY_NAME,WINHTTP_NO_PROXY_BYPASS,0);
     if(!session) return false;
     WinHttpSetTimeouts(session,5000,5000,5000,5000);
     HINTERNET connect=WinHttpConnect(session,host,INTERNET_DEFAULT_HTTPS_PORT,0);
@@ -315,7 +316,10 @@ int wmain(int argc,wchar_t** argv) {
             return Finish(1);
         }
     }
-    if(OfferUpdate()) return Finish(0);
+    // The update check must never keep anyone from playing: any failure means no notice.
+    bool update_chosen=false;
+    try { update_chosen=OfferUpdate(); } catch(...) { update_chosen=false; }
+    if(update_chosen) return Finish(0);
     DWORD e=clientjoin::CheckNoEac(0);
     if(e) {
         std::printf("Easy Anti-Cheat is running or could not be checked (%s).\n"
